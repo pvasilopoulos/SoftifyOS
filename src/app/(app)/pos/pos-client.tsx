@@ -1,0 +1,790 @@
+"use client";
+
+import { FormEvent, useEffect, useMemo, useState } from "react";
+import Link from "next/link";
+import {
+  CreditCard,
+  Gift,
+  Plus,
+  Star,
+  Trash2,
+  Wallet,
+} from "lucide-react";
+import { PageHeader } from "@/shared/ui/page-header";
+import { Button } from "@/shared/ui/button";
+import { Badge } from "@/shared/ui/badge";
+import {
+  calcInvoiceTotals,
+  calcLineTotals,
+  formatEUR,
+} from "@/modules/sales/invoice-utils";
+import {
+  calcPayable,
+  eurToRedeemPoints,
+  tenderMethodLabel,
+  type TenderMethod,
+} from "@/modules/pos/payable";
+import { SeriesPicker } from "@/modules/documents/series-picker";
+
+type Site = { id: string; code: string; name: string; kind: string };
+type Customer = { id: string; code: string; name: string };
+type Product = {
+  id: string;
+  sku: string;
+  name: string;
+  price: number;
+  vatRate: number;
+};
+type Terminal = { id: string; code: string; name: string; provider: string };
+type Line = {
+  key: string;
+  productId: string;
+  description: string;
+  quantity: string;
+  unitPrice: string;
+  vatRate: string;
+};
+type Tender = {
+  key: string;
+  method: TenderMethod;
+  amount: string;
+  giftCardCode?: string;
+  loyaltyPoints?: string;
+};
+
+function newLine(): Line {
+  return {
+    key: `${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+    productId: "",
+    description: "",
+    quantity: "1",
+    unitPrice: "",
+    vatRate: "24",
+  };
+}
+
+export function PosClient({
+  sites,
+  customers,
+  products,
+  terminals,
+}: {
+  sites: Site[];
+  customers: Customer[];
+  products: Product[];
+  terminals: Terminal[];
+}) {
+  const defaultTill =
+    sites.find((s) => s.kind === "TILL")?.id ?? sites[0]?.id ?? "";
+  const [siteId, setSiteId] = useState(defaultTill);
+  const [seriesId, setSeriesId] = useState("");
+  const [terminalId, setTerminalId] = useState(terminals[0]?.id ?? "");
+  const [customerId, setCustomerId] = useState(customers[0]?.id ?? "");
+  const [sessionId, setSessionId] = useState<string | null>(null);
+  const [lines, setLines] = useState<Line[]>([newLine()]);
+  const [tenders, setTenders] = useState<Tender[]>([
+    { key: "cash", method: "CASH", amount: "" },
+  ]);
+  const [discount, setDiscount] = useState("0");
+  const [giftCode, setGiftCode] = useState("");
+  const [giftBalance, setGiftBalance] = useState<number | null>(null);
+  const [loyalty, setLoyalty] = useState<{
+    pointsBalance: number;
+    maxRedeemEur: number;
+  } | null>(null);
+  const [loyaltyRedeemEur, setLoyaltyRedeemEur] = useState("0");
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [message, setMessage] = useState<string | null>(null);
+  const [lastSale, setLastSale] = useState<{
+    number: string;
+    change: number;
+    invoiceId: string;
+  } | null>(null);
+
+  const totals = useMemo(
+    () =>
+      calcInvoiceTotals(
+        lines.map((l) => ({
+          quantity: Number(l.quantity) || 0,
+          unitPrice: Number(l.unitPrice) || 0,
+          vatRate: Number(l.vatRate) || 0,
+        })),
+      ),
+    [lines],
+  );
+
+  const giftApplied = useMemo(() => {
+    const t = tenders.find((x) => x.method === "GIFT_CARD");
+    return t ? Number(t.amount) || 0 : 0;
+  }, [tenders]);
+
+  const loyaltyApplied = Number(loyaltyRedeemEur) || 0;
+
+  const payable = useMemo(
+    () =>
+      calcPayable({
+        saleTotal: totals.total,
+        discount: Number(discount) || 0,
+        giftCardApplied: giftApplied,
+        loyaltyAppliedEur: loyaltyApplied,
+      }),
+    [totals.total, discount, giftApplied, loyaltyApplied],
+  );
+
+  // no auto effect — cash defaults on checkout if empty
+
+  useEffect(() => {
+    if (!customerId) return;
+    let cancelled = false;
+    (async () => {
+      const res = await fetch(
+        `/api/pos/lookup?customerId=${encodeURIComponent(customerId)}`,
+      );
+      const data = (await res.json()) as {
+        loyalty?: { pointsBalance: number; maxRedeemEur: number };
+      };
+      if (!cancelled) setLoyalty(data.loyalty ?? null);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [customerId]);
+
+  useEffect(() => {
+    if (!siteId) return;
+    let cancelled = false;
+    (async () => {
+      const res = await fetch(
+        `/api/pos/sessions?siteId=${encodeURIComponent(siteId)}`,
+      );
+      const data = (await res.json()) as { items?: Array<{ id: string }> };
+      if (!cancelled) setSessionId(data.items?.[0]?.id ?? null);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [siteId]);
+
+  async function openSession() {
+    setError(null);
+    const res = await fetch("/api/pos/sessions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ siteId, openingFloat: 50 }),
+    });
+    const data = (await res.json()) as {
+      item?: { id: string };
+      error?: string;
+    };
+    if (!res.ok && res.status !== 409) {
+      setError(data.error || "Αποτυχία ανοίγματος βάρδιας");
+      return;
+    }
+    setSessionId(data.item?.id ?? sessionId);
+    setMessage("Η βάρδια ταμείου είναι ανοιχτή");
+  }
+
+  async function lookupGift() {
+    setError(null);
+    const res = await fetch(
+      `/api/pos/lookup?giftCard=${encodeURIComponent(giftCode.trim())}`,
+    );
+    const data = (await res.json()) as {
+      giftCard?: { balance: number; code: string; status: string };
+      error?: string;
+    };
+    if (!res.ok) {
+      setGiftBalance(null);
+      setError(data.error || "Δωροκάρτα δεν βρέθηκε");
+      return;
+    }
+    setGiftBalance(data.giftCard!.balance);
+    const apply = Math.min(data.giftCard!.balance, payable.saleTotal);
+    setTenders((prev) => {
+      const without = prev.filter((t) => t.method !== "GIFT_CARD");
+      return [
+        ...without,
+        {
+          key: `gift-${Date.now()}`,
+          method: "GIFT_CARD",
+          amount: String(apply),
+          giftCardCode: data.giftCard!.code,
+        },
+      ];
+    });
+  }
+
+  function applyLoyalty() {
+    if (!loyalty) return;
+    const eur = Math.min(
+      Number(loyaltyRedeemEur) || loyalty.maxRedeemEur,
+      loyalty.maxRedeemEur,
+      payable.saleTotal,
+    );
+    setLoyaltyRedeemEur(String(eur));
+    setTenders((prev) => {
+      const without = prev.filter((t) => t.method !== "LOYALTY");
+      if (eur <= 0) return without;
+      return [
+        ...without,
+        {
+          key: `loy-${Date.now()}`,
+          method: "LOYALTY",
+          amount: String(eur),
+          loyaltyPoints: String(eurToRedeemPoints(eur)),
+        },
+      ];
+    });
+  }
+
+  function addProduct(productId: string) {
+    const p = products.find((x) => x.id === productId);
+    if (!p) return;
+    setLines((prev) => [
+      ...prev.filter((l) => l.description || l.unitPrice),
+      {
+        key: `${Date.now()}`,
+        productId: p.id,
+        description: p.name,
+        quantity: "1",
+        unitPrice: String(p.price),
+        vatRate: String(p.vatRate),
+      },
+    ]);
+  }
+
+  async function checkout(e: FormEvent) {
+    e.preventDefault();
+    setPending(true);
+    setError(null);
+    setMessage(null);
+    setLastSale(null);
+
+    const payloadTenders = tenders
+      .filter((t) => t.method === "GIFT_CARD" || t.method === "LOYALTY" || Number(t.amount) > 0 || t.method === "CASH")
+      .map((t) => {
+        let amount = Number(t.amount) || 0;
+        if (
+          t.method === "CASH" &&
+          amount <= 0 &&
+          payable.payableDue > 0
+        ) {
+          amount = payable.payableDue;
+        }
+        return {
+          method: t.method,
+          amount,
+          giftCardCode: t.giftCardCode || null,
+          loyaltyPoints: t.loyaltyPoints ? Number(t.loyaltyPoints) : null,
+          externalRef: null as string | null,
+        };
+      })
+      .filter((t) => t.amount > 0);
+
+    // Sync loyalty tender from loyaltyRedeemEur field
+    const hasLoyalty = payloadTenders.some((t) => t.method === "LOYALTY");
+    if (!hasLoyalty && loyaltyApplied > 0) {
+      payloadTenders.push({
+        method: "LOYALTY",
+        amount: loyaltyApplied,
+        giftCardCode: null,
+        loyaltyPoints: eurToRedeemPoints(loyaltyApplied),
+        externalRef: null,
+      });
+    }
+
+    const res = await fetch("/api/pos/checkout", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        siteId,
+        seriesId: seriesId || null,
+        sessionId,
+        terminalId: terminalId || null,
+        customerId,
+        discount: Number(discount) || 0,
+        lines: lines
+          .filter((l) => l.description.trim())
+          .map((l) => ({
+            productId: l.productId || null,
+            description: l.description.trim(),
+            quantity: Number(l.quantity),
+            unitPrice: Number(l.unitPrice),
+            vatRate: Number(l.vatRate),
+          })),
+        tenders: payloadTenders,
+      }),
+    });
+    const data = (await res.json()) as {
+      item?: {
+        invoiceId: string;
+        number: string;
+        change: number;
+      };
+      error?: string;
+    };
+    setPending(false);
+    if (!res.ok) {
+      setError(data.error || "Αποτυχία ολοκλήρωσης");
+      return;
+    }
+    setLastSale({
+      invoiceId: data.item!.invoiceId,
+      number: data.item!.number,
+      change: data.item!.change,
+    });
+    setMessage(`Πώληση ${data.item!.number} ολοκληρώθηκε`);
+    setLines([newLine()]);
+    setTenders([{ key: "cash", method: "CASH", amount: "" }]);
+    setDiscount("0");
+    setGiftCode("");
+    setGiftBalance(null);
+    setLoyaltyRedeemEur("0");
+    // refresh loyalty
+    if (customerId) {
+      const lr = await fetch(
+        `/api/pos/lookup?customerId=${encodeURIComponent(customerId)}`,
+      );
+      const ld = (await lr.json()) as {
+        loyalty?: { pointsBalance: number; maxRedeemEur: number };
+      };
+      setLoyalty(ld.loyalty ?? null);
+    }
+  }
+
+  const siteTerminals = terminals;
+
+  return (
+    <div className="space-y-5">
+      <PageHeader
+        title="POS Λιανικής"
+        description="Καλάθι · πολλαπλοί τρόποι πληρωμής · αυτόματο πληρωτέο"
+        actions={
+          <div className="flex flex-wrap gap-2">
+            {sessionId ? (
+              <Badge tone="emerald">Βάρδια ανοιχτή</Badge>
+            ) : (
+              <Button size="sm" variant="secondary" onClick={() => void openSession()}>
+                Άνοιγμα βάρδιας
+              </Button>
+            )}
+            <Link
+              href="/settings/series"
+              className="inline-flex h-9 items-center rounded-xl border border-slate-200 bg-white px-3 text-sm text-ink-900 hover:bg-slate-50"
+            >
+              Σειρές ΑΠΥ
+            </Link>
+          </div>
+        }
+      />
+
+      <form onSubmit={checkout} className="grid gap-5 lg:grid-cols-[1.2fr_0.8fr]">
+        <div className="space-y-4">
+          <section className="soft-panel space-y-3 p-4">
+            <div className="grid gap-3 sm:grid-cols-2">
+              <label className="block text-sm">
+                <span className="mb-1.5 block font-medium">Ταμείο *</span>
+                <select
+                  value={siteId}
+                  onChange={(e) => setSiteId(e.target.value)}
+                  className="h-11 w-full rounded-xl border border-slate-200 px-3"
+                  required
+                >
+                  {sites.map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {s.code} — {s.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <SeriesPicker
+                kind="RETAIL_RECEIPT"
+                value={seriesId}
+                onChange={setSeriesId}
+                label="Σειρά ΑΠΥ *"
+                className="block"
+              />
+              <label className="block text-sm sm:col-span-2">
+                <span className="mb-1.5 block font-medium">Πελάτης *</span>
+                <select
+                  value={customerId}
+                  onChange={(e) => {
+                    setCustomerId(e.target.value);
+                    setLoyalty(null);
+                    setLoyaltyRedeemEur("0");
+                  }}
+                  className="h-11 w-full rounded-xl border border-slate-200 px-3"
+                  required
+                >
+                  {customers.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.code} — {c.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="block text-sm sm:col-span-2">
+                <span className="mb-1.5 block font-medium">Τερματικό κάρτας</span>
+                <select
+                  value={terminalId}
+                  onChange={(e) => setTerminalId(e.target.value)}
+                  className="h-11 w-full rounded-xl border border-slate-200 px-3"
+                >
+                  <option value="">— Χωρίς / MOCK —</option>
+                  {siteTerminals.map((t) => (
+                    <option key={t.id} value={t.id}>
+                      {t.code} — {t.name} ({t.provider})
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+          </section>
+
+          <section className="soft-panel space-y-3 p-4">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <h2 className="text-sm font-semibold">Καλάθι</h2>
+              <div className="flex flex-wrap gap-2">
+                <select
+                  className="h-9 rounded-xl border border-slate-200 px-2 text-sm"
+                  defaultValue=""
+                  onChange={(e) => {
+                    if (e.target.value) {
+                      addProduct(e.target.value);
+                      e.target.value = "";
+                    }
+                  }}
+                >
+                  <option value="">+ Προϊόν καταλόγου</option>
+                  {products.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.sku} — {p.name}
+                    </option>
+                  ))}
+                </select>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="secondary"
+                  onClick={() => setLines((prev) => [...prev, newLine()])}
+                >
+                  <Plus size={14} />
+                  Γραμμή
+                </Button>
+              </div>
+            </div>
+            <ul className="space-y-2">
+              {lines.map((line) => {
+                const { lineTotal } = calcLineTotals({
+                  quantity: Number(line.quantity) || 0,
+                  unitPrice: Number(line.unitPrice) || 0,
+                  vatRate: Number(line.vatRate) || 0,
+                });
+                return (
+                  <li
+                    key={line.key}
+                    className="grid gap-2 rounded-xl border border-slate-100 bg-slate-50/50 p-2 sm:grid-cols-[1fr_4.5rem_6rem_4rem_auto]"
+                  >
+                    <input
+                      required
+                      value={line.description}
+                      onChange={(e) =>
+                        setLines((prev) =>
+                          prev.map((l) =>
+                            l.key === line.key
+                              ? { ...l, description: e.target.value }
+                              : l,
+                          ),
+                        )
+                      }
+                      placeholder="Περιγραφή"
+                      className="h-10 rounded-lg border border-slate-200 bg-white px-2 text-sm"
+                    />
+                    <input
+                      type="number"
+                      min="0.001"
+                      step="any"
+                      value={line.quantity}
+                      onChange={(e) =>
+                        setLines((prev) =>
+                          prev.map((l) =>
+                            l.key === line.key
+                              ? { ...l, quantity: e.target.value }
+                              : l,
+                          ),
+                        )
+                      }
+                      className="h-10 rounded-lg border border-slate-200 bg-white px-2 text-sm"
+                    />
+                    <input
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      value={line.unitPrice}
+                      onChange={(e) =>
+                        setLines((prev) =>
+                          prev.map((l) =>
+                            l.key === line.key
+                              ? { ...l, unitPrice: e.target.value }
+                              : l,
+                          ),
+                        )
+                      }
+                      className="h-10 rounded-lg border border-slate-200 bg-white px-2 text-sm"
+                    />
+                    <input
+                      type="number"
+                      min="0"
+                      value={line.vatRate}
+                      onChange={(e) =>
+                        setLines((prev) =>
+                          prev.map((l) =>
+                            l.key === line.key
+                              ? { ...l, vatRate: e.target.value }
+                              : l,
+                          ),
+                        )
+                      }
+                      className="h-10 rounded-lg border border-slate-200 bg-white px-2 text-sm"
+                    />
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-sm font-medium tabular-nums">
+                        {formatEUR(lineTotal)}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setLines((prev) =>
+                            prev.length <= 1
+                              ? prev
+                              : prev.filter((l) => l.key !== line.key),
+                          )
+                        }
+                        className="rounded-lg p-2 text-slate-400 hover:bg-white hover:text-rose-600"
+                      >
+                        <Trash2 size={15} />
+                      </button>
+                    </div>
+                  </li>
+                );
+              })}
+            </ul>
+          </section>
+        </div>
+
+        <div className="space-y-4">
+          <section className="soft-panel space-y-3 p-4">
+            <h2 className="text-sm font-semibold">Πληρωμή</h2>
+            <div className="rounded-xl bg-slate-50 p-3 text-sm">
+              <div className="flex justify-between text-slate-600">
+                <span>Σύνολο πώλησης</span>
+                <span className="tabular-nums">{formatEUR(payable.saleTotal)}</span>
+              </div>
+              <label className="mt-2 flex items-center justify-between gap-2">
+                <span className="text-slate-600">Έκπτωση €</span>
+                <input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={discount}
+                  onChange={(e) => setDiscount(e.target.value)}
+                  className="h-9 w-28 rounded-lg border border-slate-200 px-2 text-right text-sm"
+                />
+              </label>
+              {payable.giftCardApplied > 0 ? (
+                <div className="mt-1 flex justify-between text-slate-600">
+                  <span>Δωροκάρτα</span>
+                  <span className="tabular-nums">
+                    −{formatEUR(payable.giftCardApplied)}
+                  </span>
+                </div>
+              ) : null}
+              {payable.loyaltyAppliedEur > 0 ? (
+                <div className="mt-1 flex justify-between text-slate-600">
+                  <span>Loyalty</span>
+                  <span className="tabular-nums">
+                    −{formatEUR(payable.loyaltyAppliedEur)}
+                  </span>
+                </div>
+              ) : null}
+              <div className="mt-3 flex justify-between border-t border-slate-200 pt-3 text-base font-semibold text-ink-950">
+                <span>Πληρωτέο</span>
+                <span className="tabular-nums text-teal-800">
+                  {formatEUR(payable.payableDue)}
+                </span>
+              </div>
+            </div>
+
+            <div className="space-y-2 rounded-xl border border-slate-100 p-3">
+              <p className="flex items-center gap-1.5 text-xs font-medium text-slate-500">
+                <Gift size={13} /> Δωροκάρτα
+              </p>
+              <div className="flex gap-2">
+                <input
+                  value={giftCode}
+                  onChange={(e) => setGiftCode(e.target.value)}
+                  placeholder="κωδικός π.χ. GIFT-100"
+                  className="h-10 flex-1 rounded-lg border border-slate-200 px-2 text-sm"
+                />
+                <Button type="button" size="sm" variant="secondary" onClick={() => void lookupGift()}>
+                  Εφαρμογή
+                </Button>
+              </div>
+              {giftBalance != null ? (
+                <p className="text-xs text-emerald-700">
+                  Υπόλοιπο {formatEUR(giftBalance)}
+                </p>
+              ) : null}
+            </div>
+
+            <div className="space-y-2 rounded-xl border border-slate-100 p-3">
+              <p className="flex items-center gap-1.5 text-xs font-medium text-slate-500">
+                <Star size={13} /> Loyalty
+              </p>
+              {loyalty ? (
+                <>
+                  <p className="text-xs text-slate-600">
+                    {loyalty.pointsBalance} πόντοι · έως{" "}
+                    {formatEUR(loyalty.maxRedeemEur)}
+                  </p>
+                  <div className="flex gap-2">
+                    <input
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      max={loyalty.maxRedeemEur}
+                      value={loyaltyRedeemEur}
+                      onChange={(e) => setLoyaltyRedeemEur(e.target.value)}
+                      className="h-10 w-28 rounded-lg border border-slate-200 px-2 text-sm"
+                    />
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="secondary"
+                      onClick={applyLoyalty}
+                    >
+                      Εξαργύρωση €
+                    </Button>
+                  </div>
+                </>
+              ) : (
+                <p className="text-xs text-slate-500">
+                  Δεν υπάρχει λογαριασμός για τον πελάτη
+                </p>
+              )}
+            </div>
+
+            <div className="space-y-2">
+              <p className="flex items-center gap-1.5 text-xs font-medium text-slate-500">
+                <Wallet size={13} /> Τρόποι πληρωμής
+              </p>
+              {tenders
+                .filter((t) => t.method !== "GIFT_CARD" && t.method !== "LOYALTY")
+                .map((t) => (
+                  <div key={t.key} className="flex gap-2">
+                    <select
+                      value={t.method}
+                      onChange={(e) =>
+                        setTenders((prev) =>
+                          prev.map((x) =>
+                            x.key === t.key
+                              ? {
+                                  ...x,
+                                  method: e.target.value as TenderMethod,
+                                }
+                              : x,
+                          ),
+                        )
+                      }
+                      className="h-10 rounded-lg border border-slate-200 px-2 text-sm"
+                    >
+                      {(["CASH", "CARD", "TRANSFER", "OTHER"] as const).map(
+                        (m) => (
+                          <option key={m} value={m}>
+                            {tenderMethodLabel[m]}
+                          </option>
+                        ),
+                      )}
+                    </select>
+                    <input
+                      type="number"
+                      min="0.01"
+                      step="0.01"
+                      required={payable.payableDue > 0}
+                      value={t.amount}
+                      onChange={(e) =>
+                        setTenders((prev) =>
+                          prev.map((x) =>
+                            x.key === t.key
+                              ? { ...x, amount: e.target.value }
+                              : x,
+                          ),
+                        )
+                      }
+                      className="h-10 flex-1 rounded-lg border border-slate-200 px-2 text-sm"
+                    />
+                    {t.method === "CARD" ? (
+                      <span className="flex h-10 items-center text-slate-400">
+                        <CreditCard size={16} />
+                      </span>
+                    ) : null}
+                  </div>
+                ))}
+              <Button
+                type="button"
+                size="sm"
+                variant="ghost"
+                onClick={() =>
+                  setTenders((prev) => [
+                    ...prev,
+                    {
+                      key: `t-${Date.now()}`,
+                      method: "CARD",
+                      amount: "",
+                    },
+                  ])
+                }
+              >
+                + Τρόπος πληρωμής
+              </Button>
+            </div>
+
+            {error ? (
+              <p className="rounded-xl bg-rose-50 px-3 py-2 text-sm text-rose-700">
+                {error}
+              </p>
+            ) : null}
+            {message ? (
+              <p className="rounded-xl bg-emerald-50 px-3 py-2 text-sm text-emerald-800">
+                {message}
+                {lastSale ? (
+                  <>
+                    {" · "}
+                    <Link
+                      href={`/invoices/${lastSale.invoiceId}`}
+                      className="font-medium underline"
+                    >
+                      {lastSale.number}
+                    </Link>
+                    {lastSale.change > 0
+                      ? ` · ρέστα ${formatEUR(lastSale.change)}`
+                      : ""}
+                  </>
+                ) : null}
+              </p>
+            ) : null}
+
+            <Button
+              type="submit"
+              className="w-full"
+              disabled={pending || !seriesId || !customerId}
+            >
+              {pending ? "Ολοκλήρωση..." : `Είσπραξη ${formatEUR(payable.payableDue)}`}
+            </Button>
+          </section>
+        </div>
+      </form>
+    </div>
+  );
+}
