@@ -1,18 +1,32 @@
 import Link from "next/link";
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { ArrowLeft, FileDown, Send, Wallet } from "lucide-react";
+import { getSession } from "@/platform/auth/session";
+import { prisma } from "@/server/db";
 import { PageHeader } from "@/shared/ui/page-header";
-import { Button } from "@/shared/ui/button";
 import { Badge } from "@/shared/ui/badge";
+import { Button } from "@/shared/ui/button";
 import {
-  demoInvoices,
   formatEUR,
-  statusLabel,
-  statusTone,
-} from "@/modules/sales/demo-data";
+  invoiceStatusLabel,
+  invoiceStatusTone,
+  toNumber,
+  type InvoiceStatusKey,
+} from "@/modules/sales/invoice-utils";
 
-export function generateStaticParams() {
-  return demoInvoices.map((inv) => ({ id: inv.id }));
+export const dynamic = "force-dynamic";
+
+export async function generateMetadata({
+  params,
+}: {
+  params: Promise<{ id: string }>;
+}) {
+  const { id } = await params;
+  const invoice = await prisma.invoice.findFirst({
+    where: { id },
+    select: { number: true },
+  });
+  return { title: invoice?.number ?? "Τιμολόγιο" };
 }
 
 export default async function InvoiceDetailPage({
@@ -20,17 +34,24 @@ export default async function InvoiceDetailPage({
 }: {
   params: Promise<{ id: string }>;
 }) {
+  const session = await getSession();
+  if (!session) redirect("/login");
+
   const { id } = await params;
-  const invoice = demoInvoices.find((i) => i.id === id);
+  const invoice = await prisma.invoice.findFirst({
+    where: { id, tenantId: session.tenantId },
+    include: {
+      customer: true,
+      branch: true,
+      space: true,
+      lines: { orderBy: { position: "asc" } },
+    },
+  });
   if (!invoice) notFound();
 
-  const steps = ["Πρόχειρο", "Εκδομένο", "Πληρωμένο"] as const;
-  const stepIndex =
-    invoice.status === "draft"
-      ? 0
-      : invoice.status === "paid"
-        ? 2
-        : 1;
+  const status = invoice.status as InvoiceStatusKey;
+  const total = toNumber(invoice.total);
+  const paid = toNumber(invoice.paidAmount);
 
   return (
     <div className="space-y-6">
@@ -44,7 +65,7 @@ export default async function InvoiceDetailPage({
         </Link>
         <PageHeader
           title={invoice.number}
-          description={invoice.customer}
+          description={`${invoice.customer.name}${invoice.branch ? ` · ${invoice.branch.name}` : ""}${invoice.space ? ` · ${invoice.space.name}` : ""}`}
           actions={
             <>
               <Button variant="secondary" size="sm">
@@ -66,31 +87,22 @@ export default async function InvoiceDetailPage({
 
       <div className="soft-panel p-4 sm:p-5">
         <div className="mb-4 flex flex-wrap items-center gap-2">
-          <Badge tone={statusTone[invoice.status]}>
-            {statusLabel[invoice.status]}
-          </Badge>
+          <Badge tone={invoiceStatusTone[status]}>{invoiceStatusLabel[status]}</Badge>
           <span className="text-sm text-slate-500">
-            Έκδοση {invoice.issuedAt} · Λήξη {invoice.dueAt}
+            Έκδοση{" "}
+            {invoice.issuedAt
+              ? invoice.issuedAt.toLocaleDateString("el-GR")
+              : "—"}{" "}
+            · Λήξη{" "}
+            {invoice.dueAt ? invoice.dueAt.toLocaleDateString("el-GR") : "—"}
           </span>
         </div>
         <p className="text-3xl font-semibold tracking-tight text-ink-950 sm:text-4xl">
-          {formatEUR(invoice.amount)}
+          {formatEUR(total)}
         </p>
-
-        <ol className="mt-6 grid grid-cols-3 gap-2">
-          {steps.map((step, i) => (
-            <li
-              key={step}
-              className={`rounded-2xl px-3 py-3 text-center text-xs font-medium sm:text-sm ${
-                i <= stepIndex
-                  ? "bg-teal-50 text-teal-900"
-                  : "bg-slate-50 text-slate-400"
-              }`}
-            >
-              {step}
-            </li>
-          ))}
-        </ol>
+        <p className="mt-2 text-sm text-slate-500">
+          Εξοφλημένα {formatEUR(paid)} · Υπόλοιπο {formatEUR(total - paid)}
+        </p>
       </div>
 
       <section className="soft-panel overflow-hidden">
@@ -98,19 +110,19 @@ export default async function InvoiceDetailPage({
           <h2 className="text-sm font-semibold text-ink-950">Γραμμές</h2>
         </div>
         <ul className="divide-y divide-slate-100 text-sm">
-          {[
-            { name: "Υπηρεσία συμβουλευτικής", qty: 1, price: invoice.amount * 0.7 },
-            { name: "Άδεια SoftifyOS", qty: 1, price: invoice.amount * 0.3 },
-          ].map((line) => (
+          {invoice.lines.map((line) => (
             <li
-              key={line.name}
+              key={line.id}
               className="flex items-center justify-between gap-3 px-4 py-3"
             >
               <div>
-                <p className="font-medium text-ink-900">{line.name}</p>
-                <p className="text-xs text-slate-500">Ποσότητα {line.qty}</p>
+                <p className="font-medium text-ink-900">{line.description}</p>
+                <p className="text-xs text-slate-500">
+                  {toNumber(line.quantity)} × {formatEUR(toNumber(line.unitPrice))} ·
+                  ΦΠΑ {toNumber(line.vatRate)}%
+                </p>
               </div>
-              <p className="font-medium">{formatEUR(line.price)}</p>
+              <p className="font-medium">{formatEUR(toNumber(line.lineTotal))}</p>
             </li>
           ))}
         </ul>
