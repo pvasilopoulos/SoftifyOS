@@ -11,7 +11,10 @@ export function MobileTabBar() {
 
   return (
     <nav className="fixed inset-x-0 bottom-0 z-40 border-t border-slate-200/90 bg-white/95 pb-[env(safe-area-inset-bottom)] backdrop-blur lg:hidden">
-      <ul className="grid grid-cols-4">
+      <ul
+        className="grid"
+        style={{ gridTemplateColumns: `repeat(${Math.min(mobileTabs.length, 4)}, minmax(0, 1fr))` }}
+      >
         {mobileTabs.slice(0, 4).map((item) => {
           const active =
             item.href === "/"

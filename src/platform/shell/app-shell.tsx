@@ -10,9 +10,8 @@ import { NavProvider } from "@/platform/navigation/nav-context";
 import {
   menuTreeToNavGroups,
   type MenuNodeConfig,
-  type NavItem,
 } from "@/platform/navigation";
-import { Settings } from "lucide-react";
+import { resolveMobileTabsFromGroups } from "@/platform/navigation/menu-tree";
 import type { SessionPayload } from "@/platform/auth/session";
 
 export function AppShell({
@@ -34,17 +33,8 @@ export function AppShell({
     [menuTree, session.role],
   );
 
-  const mobileTabs = useMemo<NavItem[]>(
-    () => [
-      ...groups.flatMap((g) => g.items).filter((i) => i.mobileTab),
-      {
-        id: "more",
-        href: "/more",
-        label: "Περισσότερα",
-        icon: Settings,
-        mobileTab: true,
-      },
-    ],
+  const mobileTabs = useMemo(
+    () => resolveMobileTabsFromGroups(groups),
     [groups],
   );
 

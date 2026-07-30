@@ -20,6 +20,7 @@ const menuNodeSchema: z.ZodType<MenuNodeConfig> = z.lazy(() =>
     children: z.array(menuNodeSchema).optional(),
     roles: z.array(z.enum(["OWNER", "ADMIN", "MEMBER", "VIEWER"])).optional(),
     mobileTab: z.boolean().optional(),
+    mobileOrder: z.number().int().min(0).max(20).optional(),
   }),
 ) as z.ZodType<MenuNodeConfig>;
 

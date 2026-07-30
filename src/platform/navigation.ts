@@ -17,6 +17,7 @@ import {
   FolderTree,
   Gift,
   Star,
+  MoreHorizontal,
   type LucideIcon,
 } from "lucide-react";
 
@@ -75,6 +76,8 @@ export type MenuNodeConfig = {
   /** Roles that can see this node; empty/undefined = all */
   roles?: Array<"OWNER" | "ADMIN" | "MEMBER" | "VIEWER">;
   mobileTab?: boolean;
+  /** Order among mobile footer tabs (0-based). Lower first. */
+  mobileOrder?: number;
 };
 
 export type NavItem = {
@@ -83,6 +86,7 @@ export type NavItem = {
   label: string;
   icon: LucideIcon;
   mobileTab?: boolean;
+  mobileOrder?: number;
 };
 
 export type NavGroup = {
@@ -106,6 +110,7 @@ export const defaultMenuTree: MenuNodeConfig[] = [
         href: "/",
         icon: "LayoutDashboard",
         mobileTab: true,
+        mobileOrder: 0,
       },
     ],
   },
@@ -122,6 +127,7 @@ export const defaultMenuTree: MenuNodeConfig[] = [
         href: "/customers",
         icon: "Users",
         mobileTab: true,
+        mobileOrder: 1,
       },
       {
         id: "quotes",
@@ -150,7 +156,6 @@ export const defaultMenuTree: MenuNodeConfig[] = [
         label: "POS Λιανική",
         href: "/pos",
         icon: "Store",
-        mobileTab: true,
       },
       {
         id: "gift-cards",
@@ -188,6 +193,7 @@ export const defaultMenuTree: MenuNodeConfig[] = [
         href: "/inventory",
         icon: "Package",
         mobileTab: true,
+        mobileOrder: 2,
       },
       {
         id: "purchasing",
@@ -292,6 +298,7 @@ export function menuTreeToNavGroups(
             label: child.label,
             icon: resolveIcon(child.icon),
             mobileTab: child.mobileTab,
+            mobileOrder: child.mobileOrder,
           });
         }
         if (items.length > 0) {
@@ -309,6 +316,7 @@ export function menuTreeToNavGroups(
               label: node.label,
               icon: resolveIcon(node.icon),
               mobileTab: node.mobileTab,
+              mobileOrder: node.mobileOrder,
             },
           ],
         });
@@ -323,13 +331,18 @@ export function menuTreeToNavGroups(
 /** @deprecated use menuTreeToNavGroups(defaultMenuTree) — kept for gradual migration */
 export const navGroups: NavGroup[] = menuTreeToNavGroups(defaultMenuTree);
 
+/** @deprecated use resolveMobileTabsFromGroups — kept for gradual migration */
 export const mobileTabs: NavItem[] = [
-  ...navGroups.flatMap((g) => g.items).filter((i) => i.mobileTab),
+  ...navGroups
+    .flatMap((g) => g.items)
+    .filter((i) => i.mobileTab)
+    .sort((a, b) => (a.mobileOrder ?? 999) - (b.mobileOrder ?? 999))
+    .slice(0, 3),
   {
     id: "more",
     href: "/more",
     label: "Περισσότερα",
-    icon: Settings,
+    icon: MoreHorizontal,
     mobileTab: true,
   },
 ];

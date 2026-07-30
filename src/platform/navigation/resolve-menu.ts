@@ -6,7 +6,7 @@ import {
   type NavGroup,
   type NavItem,
 } from "@/platform/navigation";
-import { Settings } from "lucide-react";
+import { resolveMobileTabsFromGroups } from "@/platform/navigation/menu-tree";
 
 function parseMenuJson(raw: unknown): MenuNodeConfig[] | null {
   if (!raw) return null;
@@ -28,15 +28,6 @@ export async function getNavForSession(input: {
 }): Promise<{ groups: NavGroup[]; mobileTabs: NavItem[]; menuTree: MenuNodeConfig[] }> {
   const menuTree = await getTenantMenuTree(input.tenantId);
   const groups = menuTreeToNavGroups(menuTree, input.role);
-  const mobileTabs: NavItem[] = [
-    ...groups.flatMap((g) => g.items).filter((i) => i.mobileTab),
-    {
-      id: "more",
-      href: "/more",
-      label: "Περισσότερα",
-      icon: Settings,
-      mobileTab: true,
-    },
-  ];
+  const mobileTabs: NavItem[] = resolveMobileTabsFromGroups(groups);
   return { groups, mobileTabs, menuTree };
 }

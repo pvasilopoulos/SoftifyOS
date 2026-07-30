@@ -9,7 +9,7 @@ const links = [
     href: "/settings/menu",
     title: "Μενού πλοήγησης",
     description:
-      "Μετονομασία, φακέλοι, σειρά και ορατότητα στοιχείων στο sidebar.",
+      "Drag & drop δομή, διαθέσιμες επιλογές και footer μενού για mobile.",
     badge: "Παραμετρικό",
   },
   {
