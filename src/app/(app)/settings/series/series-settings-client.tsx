@@ -2,10 +2,11 @@
 
 import { FormEvent, useMemo, useState, useTransition } from "react";
 import Link from "next/link";
-import { ArrowLeft, Pencil, Plus, X } from "lucide-react";
+import { ArrowLeft, Building2, Pencil, Plus, X } from "lucide-react";
 import { PageHeader } from "@/shared/ui/page-header";
 import { Badge } from "@/shared/ui/badge";
 import { Button } from "@/shared/ui/button";
+import { cn } from "@/shared/lib/cn";
 import {
   customerEffectLabel,
   documentKindLabel,
@@ -80,6 +81,10 @@ export function SeriesSettingsClient({
   initialSites: Site[];
   initialSeries: Series[];
 }) {
+  const [tab, setTab] = useState<"series" | "org">("series");
+  const [kindFilter, setKindFilter] = useState<"all" | keyof typeof documentKindLabel>(
+    "all",
+  );
   const [sites, setSites] = useState(initialSites);
   const [series, setSeries] = useState(initialSeries);
   const [error, setError] = useState<string | null>(null);
@@ -89,7 +94,7 @@ export function SeriesSettingsClient({
   const [pending, setPending] = useState(false);
   const [, startTransition] = useTransition();
 
-  const formOpen = creating || editing !== null;
+  const drawerOpen = creating || editing !== null;
 
   async function reload() {
     const [sRes, serRes] = await Promise.all([
@@ -108,20 +113,35 @@ export function SeriesSettingsClient({
     });
   }
 
-  const grouped = useMemo(() => {
-    const map = new Map<string, Series[]>();
-    for (const k of kinds) map.set(k, []);
-    for (const s of series) {
-      const list = map.get(s.kind) ?? [];
-      list.push(s);
-      map.set(s.kind, list);
-    }
+  const visibleSeries = useMemo(() => {
+    if (kindFilter === "all") return series;
+    return series.filter((s) => s.kind === kindFilter);
+  }, [series, kindFilter]);
+
+  const counts = useMemo(() => {
+    const map: Record<string, number> = { all: series.length };
+    for (const k of kinds) map[k] = 0;
+    for (const s of series) map[s.kind] = (map[s.kind] ?? 0) + 1;
     return map;
   }, [series]);
 
-  function closeForm() {
+  function closeDrawer() {
     setCreating(false);
     setEditing(null);
+  }
+
+  function openCreate() {
+    setEditing(null);
+    setCreating(true);
+    setError(null);
+    setMessage(null);
+  }
+
+  function openEdit(s: Series) {
+    setCreating(false);
+    setEditing(s);
+    setError(null);
+    setMessage(null);
   }
 
   async function onCreateSite(e: FormEvent<HTMLFormElement>) {
@@ -142,11 +162,11 @@ export function SeriesSettingsClient({
     const data = (await res.json()) as { error?: string };
     setPending(false);
     if (!res.ok) {
-      setError(data.error || "Αποτυχία site");
+      setError(data.error || "Αποτυχία δημιουργίας");
       return;
     }
     (e.target as HTMLFormElement).reset();
-    setMessage("Το site αποθηκεύτηκε");
+    setMessage("Το υποκατάστημα/ταμείο αποθηκεύτηκε");
     await reload();
   }
 
@@ -173,13 +193,15 @@ export function SeriesSettingsClient({
       setError(data.error || "Αποτυχία αποθήκευσης σειράς");
       return;
     }
-    closeForm();
-    setMessage(editing ? "Η σειρά ενημερώθηκε" : "Η σειρά αποθηκεύτηκε");
+    closeDrawer();
+    setMessage(editing ? "Η σειρά ενημερώθηκε" : "Η σειρά δημιουργήθηκε");
     await reload();
   }
 
+  const branches = sites.filter((s) => s.kind === "BRANCH");
+
   return (
-    <div className="space-y-6">
+    <div className="space-y-5">
       <Link
         href="/settings"
         className="inline-flex items-center gap-1.5 text-sm text-slate-500 hover:text-ink-900"
@@ -187,22 +209,34 @@ export function SeriesSettingsClient({
         <ArrowLeft size={14} />
         Ρυθμίσεις
       </Link>
+
       <PageHeader
         title="Σειρές & Τύποι"
-        description="Αρίθμηση, υποκατάστημα/ταμείο, κινήσεις, myDATA, λογιστικά άρθρα."
+        description="Αρίθμηση παραστατικών και κανόνες κινήσεων ανά σειρά."
         actions={
-          <Button
-            size="sm"
-            onClick={() => {
-              setEditing(null);
-              setCreating(true);
-            }}
-          >
-            <Plus size={15} />
-            Νέα σειρά
-          </Button>
+          tab === "series" ? (
+            <Button size="sm" onClick={openCreate}>
+              <Plus size={15} />
+              Νέα σειρά
+            </Button>
+          ) : null
         }
       />
+
+      <div className="flex gap-1 rounded-2xl bg-slate-200/60 p-1 w-fit">
+        <TabButton
+          active={tab === "series"}
+          onClick={() => setTab("series")}
+          label="Σειρές"
+          count={series.length}
+        />
+        <TabButton
+          active={tab === "org"}
+          onClick={() => setTab("org")}
+          label="Οργάνωση"
+          count={sites.length}
+        />
+      </div>
 
       {message ? (
         <p className="rounded-xl bg-emerald-50 px-3 py-2 text-sm text-emerald-800">
@@ -215,91 +249,43 @@ export function SeriesSettingsClient({
         </p>
       ) : null}
 
-      <section className="soft-panel space-y-4 p-5">
-        <h2 className="text-sm font-semibold text-ink-950">
-          Υποκαταστήματα & ταμεία εταιρείας
-        </h2>
-        <ul className="divide-y divide-slate-100 text-sm">
-          {sites.map((s) => (
-            <li key={s.id} className="flex items-center justify-between py-2">
-              <div>
-                <p className="font-medium text-ink-900">
-                  {s.code} — {s.name}
-                </p>
-                <p className="text-xs text-slate-500">
-                  {s.kind === "BRANCH" ? "Υποκατάστημα" : "Ταμείο"}
-                </p>
-              </div>
-              <Badge tone={s.kind === "TILL" ? "amber" : "teal"}>{s.kind}</Badge>
-            </li>
-          ))}
-        </ul>
-        <form
-          onSubmit={onCreateSite}
-          className="grid gap-3 border-t border-slate-100 pt-4 sm:grid-cols-4"
-        >
-          <input
-            name="code"
-            required
-            placeholder="Κωδικός"
-            className="h-10 rounded-xl border border-slate-200 px-3 text-sm"
-          />
-          <input
-            name="name"
-            required
-            placeholder="Όνομα"
-            className="h-10 rounded-xl border border-slate-200 px-3 text-sm"
-          />
-          <select
-            name="kind"
-            className="h-10 rounded-xl border border-slate-200 px-3 text-sm"
-            defaultValue="BRANCH"
-          >
-            <option value="BRANCH">Υποκατάστημα</option>
-            <option value="TILL">Ταμείο</option>
-          </select>
-          <Button type="submit" disabled={pending} size="sm">
-            Προσθήκη site
-          </Button>
-        </form>
-      </section>
+      {tab === "series" ? (
+        <div className="space-y-4">
+          <div className="flex flex-wrap gap-2">
+            <FilterChip
+              active={kindFilter === "all"}
+              onClick={() => setKindFilter("all")}
+              label="Όλες"
+              count={counts.all ?? 0}
+            />
+            {kinds.map((k) => (
+              <FilterChip
+                key={k}
+                active={kindFilter === k}
+                onClick={() => setKindFilter(k)}
+                label={documentKindLabel[k]}
+                count={counts[k] ?? 0}
+              />
+            ))}
+          </div>
 
-      {formOpen ? (
-        <SeriesForm
-          key={editing?.id ?? "new"}
-          title={editing ? `Επεξεργασία · ${editing.code}` : "Νέα σειρά"}
-          sites={sites}
-          initial={editing}
-          pending={pending}
-          onSubmit={onSaveSeries}
-          onClose={closeForm}
-        />
-      ) : null}
-
-      {kinds.map((kind) => {
-        const rows = grouped.get(kind) ?? [];
-        return (
-          <section key={kind} className="soft-panel overflow-hidden">
-            <div className="border-b border-slate-100 px-4 py-3">
-              <h2 className="text-sm font-semibold text-ink-950">
-                {documentKindLabel[kind]}
-              </h2>
-            </div>
+          <section className="soft-panel overflow-hidden">
             <ul className="divide-y divide-slate-100">
-              {rows.map((s) => (
-                <li key={s.id} className="space-y-2 px-4 py-3 text-sm">
-                  <div className="flex flex-wrap items-start justify-between gap-2">
-                    <div className="min-w-0 flex-1">
+              {visibleSeries.map((s) => (
+                <li
+                  key={s.id}
+                  className={cn(
+                    "flex flex-col gap-3 px-4 py-3.5 sm:flex-row sm:items-center sm:justify-between",
+                    editing?.id === s.id && "bg-teal-50/50",
+                  )}
+                >
+                  <div className="min-w-0 flex-1 space-y-1">
+                    <div className="flex flex-wrap items-center gap-2">
                       <p className="font-semibold text-ink-950">
-                        {s.code} — {s.name}
+                        <span className="font-mono text-teal-800">{s.code}</span>
+                        <span className="mx-1.5 text-slate-300">·</span>
+                        {s.name}
                       </p>
-                      <p className="text-xs text-slate-500">
-                        Επόμενο:{" "}
-                        <span className="font-mono">{s.previewNumber}</span>
-                        {s.site ? ` · ${s.site.code}` : ""}
-                      </p>
-                    </div>
-                    <div className="flex flex-wrap items-center gap-1.5">
                       {s.isDefault ? <Badge tone="teal">Default</Badge> : null}
                       {s.allowPartial ? (
                         <Badge tone="amber">Μερική</Badge>
@@ -312,45 +298,216 @@ export function SeriesSettingsClient({
                       {!s.isActive ? (
                         <Badge tone="slate">Ανενεργή</Badge>
                       ) : null}
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant="secondary"
-                        aria-label={`Επεξεργασία ${s.code}`}
-                        onClick={() => {
-                          setCreating(false);
-                          setEditing(s);
-                          setMessage(null);
-                          setError(null);
-                          window.scrollTo({ top: 0, behavior: "smooth" });
-                        }}
-                      >
-                        <Pencil size={14} />
-                        Edit
-                      </Button>
                     </div>
+                    <p className="text-xs text-slate-500">
+                      {documentKindLabel[s.kind]}
+                      <span className="mx-1.5">·</span>
+                      Επόμενο{" "}
+                      <span className="font-mono text-ink-800">
+                        {s.previewNumber}
+                      </span>
+                      {s.site ? (
+                        <>
+                          <span className="mx-1.5">·</span>
+                          {s.site.code}
+                        </>
+                      ) : null}
+                    </p>
+                    <p className="text-xs text-slate-500">
+                      Πελάτης {customerEffectLabel[s.affectsCustomer]}
+                      <span className="mx-1.5">·</span>
+                      Αποθήκη {inventoryEffectLabel[s.affectsInventory]}
+                      {s.glDebitAccount ? (
+                        <>
+                          <span className="mx-1.5">·</span>
+                          Λογ. {s.glDebitAccount}
+                          {s.glCreditAccount ? ` / ${s.glCreditAccount}` : ""}
+                        </>
+                      ) : null}
+                    </p>
                   </div>
-                  <p className="text-xs text-slate-500">
-                    Πελάτης: {customerEffectLabel[s.affectsCustomer]} · Αποθήκη:{" "}
-                    {inventoryEffectLabel[s.affectsInventory]}
-                    {s.glDebitAccount
-                      ? ` · Λογ. ${s.glDebitAccount}/${s.glCreditAccount ?? "—"}/${s.glVatAccount ?? "—"}`
-                      : ""}
-                  </p>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="secondary"
+                    className="shrink-0 self-start sm:self-center"
+                    onClick={() => openEdit(s)}
+                  >
+                    <Pencil size={14} />
+                    Επεξεργασία
+                  </Button>
                 </li>
               ))}
-              {rows.length === 0 ? (
-                <li className="px-4 py-6 text-sm text-slate-500">Καμία σειρά</li>
+              {visibleSeries.length === 0 ? (
+                <li className="px-4 py-12 text-center text-sm text-slate-500">
+                  Δεν υπάρχουν σειρές σε αυτή την κατηγορία.
+                </li>
               ) : null}
             </ul>
           </section>
-        );
-      })}
+        </div>
+      ) : (
+        <div className="space-y-4">
+          <p className="text-sm text-slate-600">
+            Υποκαταστήματα και ταμεία της εταιρείας — για να δεσμεύετε σειρές
+            ανά τοποθεσία.
+          </p>
+          <section className="soft-panel overflow-hidden">
+            <ul className="divide-y divide-slate-100">
+              {sites.map((s) => (
+                <li
+                  key={s.id}
+                  className="flex items-center justify-between gap-3 px-4 py-3"
+                >
+                  <div className="flex items-start gap-3">
+                    <div className="mt-0.5 flex h-9 w-9 items-center justify-center rounded-xl bg-slate-100 text-slate-500">
+                      <Building2 size={16} />
+                    </div>
+                    <div>
+                      <p className="font-medium text-ink-900">
+                        {s.code} — {s.name}
+                      </p>
+                      <p className="text-xs text-slate-500">
+                        {s.kind === "BRANCH" ? "Υποκατάστημα" : "Ταμείο"}
+                        {s.parentId
+                          ? ` · κάτω από ${sites.find((p) => p.id === s.parentId)?.code ?? "—"}`
+                          : ""}
+                      </p>
+                    </div>
+                  </div>
+                  <Badge tone={s.kind === "TILL" ? "amber" : "teal"}>
+                    {s.kind === "BRANCH" ? "Υποκατάστημα" : "Ταμείο"}
+                  </Badge>
+                </li>
+              ))}
+              {sites.length === 0 ? (
+                <li className="px-4 py-8 text-center text-sm text-slate-500">
+                  Δεν έχουν οριστεί τοποθεσίες
+                </li>
+              ) : null}
+            </ul>
+          </section>
+
+          <form
+            onSubmit={onCreateSite}
+            className="soft-panel grid gap-3 p-4 sm:grid-cols-2 lg:grid-cols-5"
+          >
+            <p className="sm:col-span-2 lg:col-span-5 text-sm font-semibold text-ink-950">
+              Νέα τοποθεσία
+            </p>
+            <input
+              name="code"
+              required
+              placeholder="Κωδικός *"
+              className="h-11 rounded-xl border border-slate-200 px-3 text-sm"
+            />
+            <input
+              name="name"
+              required
+              placeholder="Όνομα *"
+              className="h-11 rounded-xl border border-slate-200 px-3 text-sm"
+            />
+            <select
+              name="kind"
+              className="h-11 rounded-xl border border-slate-200 px-3 text-sm"
+              defaultValue="BRANCH"
+            >
+              <option value="BRANCH">Υποκατάστημα</option>
+              <option value="TILL">Ταμείο</option>
+            </select>
+            <select
+              name="parentId"
+              className="h-11 rounded-xl border border-slate-200 px-3 text-sm"
+              defaultValue=""
+            >
+              <option value="">Χωρίς parent</option>
+              {branches.map((b) => (
+                <option key={b.id} value={b.id}>
+                  {b.code} — {b.name}
+                </option>
+              ))}
+            </select>
+            <Button type="submit" disabled={pending} className="h-11">
+              Προσθήκη
+            </Button>
+          </form>
+        </div>
+      )}
+
+      {drawerOpen ? (
+        <SeriesDrawer
+          key={editing?.id ?? "new"}
+          title={editing ? `Επεξεργασία ${editing.code}` : "Νέα σειρά"}
+          sites={sites}
+          initial={editing}
+          pending={pending}
+          onSubmit={onSaveSeries}
+          onClose={closeDrawer}
+        />
+      ) : null}
     </div>
   );
 }
 
-function SeriesForm({
+function TabButton({
+  active,
+  onClick,
+  label,
+  count,
+}: {
+  active: boolean;
+  onClick: () => void;
+  label: string;
+  count: number;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={cn(
+        "rounded-xl px-4 py-2 text-sm font-medium transition",
+        active
+          ? "bg-white text-ink-950 shadow-sm"
+          : "text-slate-600 hover:text-ink-900",
+      )}
+    >
+      {label}
+      <span className="ml-1.5 tabular-nums text-slate-400">{count}</span>
+    </button>
+  );
+}
+
+function FilterChip({
+  active,
+  onClick,
+  label,
+  count,
+}: {
+  active: boolean;
+  onClick: () => void;
+  label: string;
+  count: number;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={cn(
+        "rounded-full border px-3 py-1.5 text-xs font-medium transition",
+        active
+          ? "border-teal-600 bg-teal-600 text-white"
+          : "border-slate-200 bg-white text-slate-600 hover:border-teal-200 hover:text-teal-800",
+      )}
+    >
+      {label}
+      <span className={cn("ml-1 tabular-nums", active ? "text-teal-100" : "text-slate-400")}>
+        {count}
+      </span>
+    </button>
+  );
+}
+
+function SeriesDrawer({
   title,
   sites,
   initial,
@@ -366,224 +523,299 @@ function SeriesForm({
   onClose: () => void;
 }) {
   return (
-    <form
-      onSubmit={onSubmit}
-      className="soft-panel space-y-4 border border-teal-200 p-5"
-    >
-      <div className="flex items-start justify-between gap-3">
-        <h2 className="text-sm font-semibold text-ink-950">{title}</h2>
-        <button
-          type="button"
-          onClick={onClose}
-          className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-ink-900"
-          aria-label="Κλείσιμο"
+    <div className="fixed inset-0 z-50 flex justify-end bg-ink-950/40">
+      <button
+        type="button"
+        className="absolute inset-0 cursor-default"
+        aria-label="Κλείσιμο"
+        onClick={onClose}
+      />
+      <aside
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="series-drawer-title"
+        className="relative flex h-full w-full max-w-xl flex-col bg-white shadow-2xl animate-fade-in"
+      >
+        <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4">
+          <h2 id="series-drawer-title" className="text-lg font-semibold text-ink-950">
+            {title}
+          </h2>
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-ink-900"
+            aria-label="Κλείσιμο"
+          >
+            <X size={18} />
+          </button>
+        </div>
+
+        <form
+          onSubmit={onSubmit}
+          className="flex min-h-0 flex-1 flex-col"
         >
-          <X size={16} />
-        </button>
-      </div>
-      <div className="grid gap-3 sm:grid-cols-2">
-        <label className="block text-sm">
-          <span className="mb-1.5 block font-medium">Κωδικός *</span>
-          <input
-            name="code"
-            required
-            defaultValue={initial?.code ?? ""}
-            className="h-11 w-full rounded-xl border border-slate-200 px-3"
-          />
-        </label>
-        <label className="block text-sm">
-          <span className="mb-1.5 block font-medium">Όνομα *</span>
-          <input
-            name="name"
-            required
-            defaultValue={initial?.name ?? ""}
-            className="h-11 w-full rounded-xl border border-slate-200 px-3"
-          />
-        </label>
-        <label className="block text-sm">
-          <span className="mb-1.5 block font-medium">Τύπος</span>
-          <select
-            name="kind"
-            className="h-11 w-full rounded-xl border border-slate-200 px-3"
-            defaultValue={initial?.kind ?? "SALES_INVOICE"}
-          >
-            {kinds.map((k) => (
-              <option key={k} value={k}>
-                {documentKindLabel[k]}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="block text-sm">
-          <span className="mb-1.5 block font-medium">Πρόθεμα *</span>
-          <input
-            name="prefix"
-            required
-            placeholder="ΤΙΜ-{YYYY}-"
-            defaultValue={initial?.prefix ?? ""}
-            className="h-11 w-full rounded-xl border border-slate-200 px-3"
-          />
-        </label>
-        <label className="block text-sm">
-          <span className="mb-1.5 block font-medium">Επόμενος αριθμός</span>
-          <input
-            name="nextNumber"
-            type="number"
-            min={1}
-            defaultValue={initial?.nextNumber ?? 1}
-            className="h-11 w-full rounded-xl border border-slate-200 px-3"
-          />
-        </label>
-        <label className="block text-sm">
-          <span className="mb-1.5 block font-medium">Ψηφία (pad)</span>
-          <input
-            name="padLength"
-            type="number"
-            min={3}
-            max={10}
-            defaultValue={initial?.padLength ?? 5}
-            className="h-11 w-full rounded-xl border border-slate-200 px-3"
-          />
-        </label>
-        <label className="block text-sm">
-          <span className="mb-1.5 block font-medium">Reset αρίθμησης</span>
-          <select
-            name="resetPolicy"
-            className="h-11 w-full rounded-xl border border-slate-200 px-3"
-            defaultValue={initial?.resetPolicy ?? "YEARLY"}
-          >
-            <option value="YEARLY">Ανά έτος</option>
-            <option value="NEVER">Ποτέ</option>
-          </select>
-        </label>
-        <label className="block text-sm">
-          <span className="mb-1.5 block font-medium">Site</span>
-          <select
-            name="siteId"
-            className="h-11 w-full rounded-xl border border-slate-200 px-3"
-            defaultValue={initial?.siteId ?? ""}
-          >
-            <option value="">— Όλα / χωρίς —</option>
-            {sites.map((s) => (
-              <option key={s.id} value={s.id}>
-                {s.code} — {s.name}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="block text-sm">
-          <span className="mb-1.5 block font-medium">Κίνηση πελάτη</span>
-          <select
-            name="affectsCustomer"
-            className="h-11 w-full rounded-xl border border-slate-200 px-3"
-            defaultValue={initial?.affectsCustomer ?? "DEBIT"}
-          >
-            {Object.entries(customerEffectLabel).map(([k, v]) => (
-              <option key={k} value={k}>
-                {v}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="block text-sm">
-          <span className="mb-1.5 block font-medium">Κίνηση αποθήκης</span>
-          <select
-            name="affectsInventory"
-            className="h-11 w-full rounded-xl border border-slate-200 px-3"
-            defaultValue={initial?.affectsInventory ?? "OUT"}
-          >
-            {Object.entries(inventoryEffectLabel).map(([k, v]) => (
-              <option key={k} value={k}>
-                {v}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="block text-sm">
-          <span className="mb-1.5 block font-medium">myDATA τύπος</span>
-          <select
-            name="myDataInvoiceType"
-            className="h-11 w-full rounded-xl border border-slate-200 px-3"
-            defaultValue={initial?.myDataInvoiceType ?? ""}
-          >
-            <option value="">—</option>
-            {MYDATA_INVOICE_TYPES.map((t) => (
-              <option key={t.code} value={t.code}>
-                {t.code} · {t.label}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="block text-sm">
-          <span className="mb-1.5 block font-medium">Λογ. χρέωση</span>
-          <input
-            name="glDebitAccount"
-            placeholder="30.00.00"
-            defaultValue={initial?.glDebitAccount ?? ""}
-            className="h-11 w-full rounded-xl border border-slate-200 px-3"
-          />
-        </label>
-        <label className="block text-sm">
-          <span className="mb-1.5 block font-medium">Λογ. πίστωση</span>
-          <input
-            name="glCreditAccount"
-            placeholder="70.00.00"
-            defaultValue={initial?.glCreditAccount ?? ""}
-            className="h-11 w-full rounded-xl border border-slate-200 px-3"
-          />
-        </label>
-        <label className="block text-sm">
-          <span className="mb-1.5 block font-medium">Λογ. ΦΠΑ</span>
-          <input
-            name="glVatAccount"
-            placeholder="54.00.00"
-            defaultValue={initial?.glVatAccount ?? ""}
-            className="h-11 w-full rounded-xl border border-slate-200 px-3"
-          />
-        </label>
-      </div>
-      <div className="flex flex-wrap gap-4 text-sm">
-        <label className="inline-flex items-center gap-2">
-          <input
-            type="checkbox"
-            name="allowPartial"
-            defaultChecked={initial?.allowPartial ?? false}
-          />{" "}
-          Μερική εκτέλεση/τιμολόγηση
-        </label>
-        <label className="inline-flex items-center gap-2">
-          <input
-            type="checkbox"
-            name="myDataEnabled"
-            defaultChecked={initial?.myDataEnabled ?? true}
-          />{" "}
-          myDATA
-        </label>
-        <label className="inline-flex items-center gap-2">
-          <input
-            type="checkbox"
-            name="isDefault"
-            defaultChecked={initial?.isDefault ?? false}
-          />{" "}
-          Default τύπου
-        </label>
-        <label className="inline-flex items-center gap-2">
-          <input
-            type="checkbox"
-            name="isActive"
-            defaultChecked={initial?.isActive ?? true}
-          />{" "}
-          Ενεργή
-        </label>
-      </div>
-      <div className="flex gap-2">
-        <Button type="submit" disabled={pending}>
-          {pending ? "Αποθήκευση..." : "Αποθήκευση"}
-        </Button>
-        <Button type="button" variant="secondary" onClick={onClose}>
-          Ακύρωση
-        </Button>
-      </div>
-    </form>
+          <div className="flex-1 space-y-5 overflow-y-auto px-5 py-4">
+            <Section title="Βασικά">
+              <div className="grid gap-3 sm:grid-cols-2">
+                <Field
+                  name="code"
+                  label="Κωδικός *"
+                  required
+                  defaultValue={initial?.code}
+                />
+                <Field
+                  name="name"
+                  label="Όνομα *"
+                  required
+                  defaultValue={initial?.name}
+                />
+                <label className="block text-sm sm:col-span-2">
+                  <span className="mb-1.5 block font-medium">Τύπος</span>
+                  <select
+                    name="kind"
+                    className="h-11 w-full rounded-xl border border-slate-200 px-3"
+                    defaultValue={initial?.kind ?? "SALES_INVOICE"}
+                  >
+                    {kinds.map((k) => (
+                      <option key={k} value={k}>
+                        {documentKindLabel[k]}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              </div>
+            </Section>
+
+            <Section title="Αρίθμηση">
+              <div className="grid gap-3 sm:grid-cols-2">
+                <Field
+                  name="prefix"
+                  label="Πρόθεμα *"
+                  required
+                  placeholder="ΤΙΜ-{YYYY}-"
+                  defaultValue={initial?.prefix}
+                />
+                <Field
+                  name="nextNumber"
+                  label="Επόμενος αριθμός"
+                  type="number"
+                  defaultValue={String(initial?.nextNumber ?? 1)}
+                />
+                <Field
+                  name="padLength"
+                  label="Ψηφία"
+                  type="number"
+                  defaultValue={String(initial?.padLength ?? 5)}
+                />
+                <label className="block text-sm">
+                  <span className="mb-1.5 block font-medium">Reset</span>
+                  <select
+                    name="resetPolicy"
+                    className="h-11 w-full rounded-xl border border-slate-200 px-3"
+                    defaultValue={initial?.resetPolicy ?? "YEARLY"}
+                  >
+                    <option value="YEARLY">Ανά έτος</option>
+                    <option value="NEVER">Ποτέ</option>
+                  </select>
+                </label>
+              </div>
+            </Section>
+
+            <Section title="Οργάνωση & κινήσεις">
+              <div className="grid gap-3 sm:grid-cols-2">
+                <label className="block text-sm sm:col-span-2">
+                  <span className="mb-1.5 block font-medium">
+                    Υποκατάστημα / ταμείο
+                  </span>
+                  <select
+                    name="siteId"
+                    className="h-11 w-full rounded-xl border border-slate-200 px-3"
+                    defaultValue={initial?.siteId ?? ""}
+                  >
+                    <option value="">— Χωρίς δέσμευση —</option>
+                    {sites.map((s) => (
+                      <option key={s.id} value={s.id}>
+                        {s.code} — {s.name} (
+                        {s.kind === "BRANCH" ? "υποκ." : "ταμείο"})
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="block text-sm">
+                  <span className="mb-1.5 block font-medium">Κίνηση πελάτη</span>
+                  <select
+                    name="affectsCustomer"
+                    className="h-11 w-full rounded-xl border border-slate-200 px-3"
+                    defaultValue={initial?.affectsCustomer ?? "DEBIT"}
+                  >
+                    {Object.entries(customerEffectLabel).map(([k, v]) => (
+                      <option key={k} value={k}>
+                        {v}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="block text-sm">
+                  <span className="mb-1.5 block font-medium">Κίνηση αποθήκης</span>
+                  <select
+                    name="affectsInventory"
+                    className="h-11 w-full rounded-xl border border-slate-200 px-3"
+                    defaultValue={initial?.affectsInventory ?? "OUT"}
+                  >
+                    {Object.entries(inventoryEffectLabel).map(([k, v]) => (
+                      <option key={k} value={k}>
+                        {v}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              </div>
+            </Section>
+
+            <Section title="myDATA & λογιστικά">
+              <div className="grid gap-3 sm:grid-cols-2">
+                <label className="block text-sm sm:col-span-2">
+                  <span className="mb-1.5 block font-medium">Τύπος myDATA</span>
+                  <select
+                    name="myDataInvoiceType"
+                    className="h-11 w-full rounded-xl border border-slate-200 px-3"
+                    defaultValue={initial?.myDataInvoiceType ?? ""}
+                  >
+                    <option value="">—</option>
+                    {MYDATA_INVOICE_TYPES.map((t) => (
+                      <option key={t.code} value={t.code}>
+                        {t.code} · {t.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <Field
+                  name="glDebitAccount"
+                  label="Λογαριασμός χρέωσης"
+                  placeholder="30.00.00"
+                  defaultValue={initial?.glDebitAccount ?? ""}
+                />
+                <Field
+                  name="glCreditAccount"
+                  label="Λογαριασμός πίστωσης"
+                  placeholder="70.00.00"
+                  defaultValue={initial?.glCreditAccount ?? ""}
+                />
+                <Field
+                  name="glVatAccount"
+                  label="Λογαριασμός ΦΠΑ"
+                  placeholder="54.00.00"
+                  defaultValue={initial?.glVatAccount ?? ""}
+                />
+              </div>
+            </Section>
+
+            <Section title="Επιλογές">
+              <div className="flex flex-col gap-2.5 text-sm">
+                <Check
+                  name="allowPartial"
+                  label="Επιτρέπει μερική εκτέλεση / τιμολόγηση"
+                  defaultChecked={initial?.allowPartial ?? false}
+                />
+                <Check
+                  name="myDataEnabled"
+                  label="Ενεργό myDATA"
+                  defaultChecked={initial?.myDataEnabled ?? true}
+                />
+                <Check
+                  name="isDefault"
+                  label="Προεπιλογή για τον τύπο"
+                  defaultChecked={initial?.isDefault ?? false}
+                />
+                <Check
+                  name="isActive"
+                  label="Ενεργή σειρά"
+                  defaultChecked={initial?.isActive ?? true}
+                />
+              </div>
+            </Section>
+          </div>
+
+          <div className="flex gap-2 border-t border-slate-100 px-5 py-4">
+            <Button type="submit" disabled={pending} className="flex-1">
+              {pending ? "Αποθήκευση..." : "Αποθήκευση"}
+            </Button>
+            <Button type="button" variant="secondary" onClick={onClose}>
+              Ακύρωση
+            </Button>
+          </div>
+        </form>
+      </aside>
+    </div>
+  );
+}
+
+function Section({
+  title,
+  children,
+}: {
+  title: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <section className="space-y-3">
+      <h3 className="text-xs font-semibold uppercase tracking-wide text-slate-400">
+        {title}
+      </h3>
+      {children}
+    </section>
+  );
+}
+
+function Field({
+  name,
+  label,
+  required,
+  placeholder,
+  defaultValue,
+  type = "text",
+}: {
+  name: string;
+  label: string;
+  required?: boolean;
+  placeholder?: string;
+  defaultValue?: string | null;
+  type?: string;
+}) {
+  return (
+    <label className="block text-sm">
+      <span className="mb-1.5 block font-medium">{label}</span>
+      <input
+        name={name}
+        required={required}
+        type={type}
+        min={type === "number" ? 1 : undefined}
+        placeholder={placeholder}
+        defaultValue={defaultValue ?? ""}
+        className="h-11 w-full rounded-xl border border-slate-200 px-3 outline-none ring-teal-500/30 focus:ring-2"
+      />
+    </label>
+  );
+}
+
+function Check({
+  name,
+  label,
+  defaultChecked,
+}: {
+  name: string;
+  label: string;
+  defaultChecked?: boolean;
+}) {
+  return (
+    <label className="inline-flex items-center gap-2.5">
+      <input
+        type="checkbox"
+        name={name}
+        defaultChecked={defaultChecked}
+        className="size-4 rounded border-slate-300 text-teal-600 focus:ring-teal-500"
+      />
+      {label}
+    </label>
   );
 }
