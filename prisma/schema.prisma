@@ -203,6 +203,8 @@ model Product {
   id        String        @id @default(cuid())
   tenantId  String
   sku       String
+  /// Barcode / EAN / QR payload for POS scan (optional)
+  barcode   String?
   name      String
   unit      String        @default("τεμ")
   vatRate   Decimal       @default(24) @db.Decimal(5, 2)
@@ -217,6 +219,7 @@ model Product {
   invoiceLines InvoiceLine[]
 
   @@unique([tenantId, sku])
+  @@unique([tenantId, barcode])
   @@index([tenantId, name])
   @@index([tenantId, createdAt(sort: Desc), id(sort: Desc)])
   @@index([tenantId, status, createdAt(sort: Desc)])

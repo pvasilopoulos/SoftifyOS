@@ -29,6 +29,7 @@ import {
   type TenderMethod,
 } from "@/modules/pos/payable";
 import { SeriesPicker } from "@/modules/documents/series-picker";
+import { PosBarcodeScan } from "@/modules/pos/barcode-scan";
 
 const PAYMENT_GRID_METHODS = [
   "CASH",
@@ -51,6 +52,7 @@ type Customer = { id: string; code: string; name: string };
 type Product = {
   id: string;
   sku: string;
+  barcode: string | null;
   name: string;
   price: number;
   vatRate: number;
@@ -300,17 +302,50 @@ export function PosClient({
   function addProduct(productId: string) {
     const p = products.find((x) => x.id === productId);
     if (!p) return;
-    setLines((prev) => [
-      ...prev.filter((l) => l.description || l.unitPrice),
-      {
+    setLines((prev) => {
+      const existing = prev.find((l) => l.productId === p.id);
+      if (existing) {
+        return prev.map((l) =>
+          l.key === existing.key
+            ? {
+                ...l,
+                quantity: String((Number(l.quantity) || 0) + 1),
+              }
+            : l,
+        );
+      }
+      const blankOnly =
+        prev.length === 1 &&
+        !prev[0]?.description &&
+        !prev[0]?.unitPrice &&
+        !prev[0]?.productId;
+      const nextLine: Line = {
         key: `${Date.now()}`,
         productId: p.id,
         description: p.name,
         quantity: "1",
         unitPrice: String(p.price),
         vatRate: String(p.vatRate),
-      },
-    ]);
+      };
+      if (blankOnly) return [nextLine];
+      return [...prev, nextLine];
+    });
+    setMessage(null);
+    setError(null);
+  }
+
+  function addProductByCode(code: string) {
+    const needle = code.trim().toLowerCase();
+    const p = products.find(
+      (x) =>
+        x.barcode?.toLowerCase() === needle ||
+        x.sku.toLowerCase() === needle,
+    );
+    if (!p) {
+      return { ok: false as const, error: `Δεν βρέθηκε: ${code}` };
+    }
+    addProduct(p.id);
+    return { ok: true as const };
   }
 
   async function checkout(e: FormEvent) {
@@ -534,6 +569,14 @@ export function PosClient({
                 </Button>
               </div>
             </div>
+            <PosBarcodeScan onScan={addProductByCode} />
+            <div className="hidden gap-2 px-2 text-[11px] font-semibold uppercase tracking-wide text-slate-400 sm:grid sm:grid-cols-[1fr_4.5rem_6rem_4rem_auto]">
+              <span>Περιγραφή</span>
+              <span>Ποσ.</span>
+              <span>Τιμή</span>
+              <span>ΦΠΑ %</span>
+              <span className="text-right">Σύνολο</span>
+            </div>
             <ul className="space-y-2">
               {lines.map((line) => {
                 const { lineTotal } = calcLineTotals({
@@ -544,74 +587,102 @@ export function PosClient({
                 return (
                   <li
                     key={line.key}
-                    className="grid gap-2 rounded-xl border border-slate-100 bg-slate-50/50 p-2 sm:grid-cols-[1fr_4.5rem_6rem_4rem_auto]"
+                    className="grid gap-2 rounded-xl border border-slate-100 bg-slate-50/50 p-2 sm:grid-cols-[1fr_4.5rem_6rem_4rem_auto] sm:items-end"
                   >
-                    <input
-                      required
-                      value={line.description}
-                      onChange={(e) =>
-                        setLines((prev) =>
-                          prev.map((l) =>
-                            l.key === line.key
-                              ? { ...l, description: e.target.value }
-                              : l,
-                          ),
-                        )
-                      }
-                      placeholder="Περιγραφή"
-                      className="h-10 rounded-lg border border-slate-200 bg-white px-2 text-sm"
-                    />
-                    <input
-                      type="number"
-                      min="0.001"
-                      step="any"
-                      value={line.quantity}
-                      onChange={(e) =>
-                        setLines((prev) =>
-                          prev.map((l) =>
-                            l.key === line.key
-                              ? { ...l, quantity: e.target.value }
-                              : l,
-                          ),
-                        )
-                      }
-                      className="h-10 rounded-lg border border-slate-200 bg-white px-2 text-sm"
-                    />
-                    <input
-                      type="number"
-                      min="0"
-                      step="0.01"
-                      value={line.unitPrice}
-                      onChange={(e) =>
-                        setLines((prev) =>
-                          prev.map((l) =>
-                            l.key === line.key
-                              ? { ...l, unitPrice: e.target.value }
-                              : l,
-                          ),
-                        )
-                      }
-                      className="h-10 rounded-lg border border-slate-200 bg-white px-2 text-sm"
-                    />
-                    <input
-                      type="number"
-                      min="0"
-                      value={line.vatRate}
-                      onChange={(e) =>
-                        setLines((prev) =>
-                          prev.map((l) =>
-                            l.key === line.key
-                              ? { ...l, vatRate: e.target.value }
-                              : l,
-                          ),
-                        )
-                      }
-                      className="h-10 rounded-lg border border-slate-200 bg-white px-2 text-sm"
-                    />
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="text-sm font-medium tabular-nums">
-                        {formatEUR(lineTotal)}
+                    <label className="block min-w-0">
+                      <span className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-slate-400 sm:hidden">
+                        Περιγραφή
                       </span>
+                      <input
+                        required
+                        value={line.description}
+                        onChange={(e) =>
+                          setLines((prev) =>
+                            prev.map((l) =>
+                              l.key === line.key
+                                ? { ...l, description: e.target.value }
+                                : l,
+                            ),
+                          )
+                        }
+                        placeholder="Περιγραφή"
+                        className="h-10 w-full rounded-lg border border-slate-200 bg-white px-2 text-sm"
+                      />
+                    </label>
+                    <label className="block">
+                      <span className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-slate-400 sm:hidden">
+                        Ποσότητα
+                      </span>
+                      <input
+                        type="number"
+                        min="0.001"
+                        step="any"
+                        value={line.quantity}
+                        onChange={(e) =>
+                          setLines((prev) =>
+                            prev.map((l) =>
+                              l.key === line.key
+                                ? { ...l, quantity: e.target.value }
+                                : l,
+                            ),
+                          )
+                        }
+                        aria-label="Ποσότητα"
+                        className="h-10 w-full rounded-lg border border-slate-200 bg-white px-2 text-sm"
+                      />
+                    </label>
+                    <label className="block">
+                      <span className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-slate-400 sm:hidden">
+                        Τιμή €
+                      </span>
+                      <input
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        value={line.unitPrice}
+                        onChange={(e) =>
+                          setLines((prev) =>
+                            prev.map((l) =>
+                              l.key === line.key
+                                ? { ...l, unitPrice: e.target.value }
+                                : l,
+                            ),
+                          )
+                        }
+                        aria-label="Τιμή"
+                        className="h-10 w-full rounded-lg border border-slate-200 bg-white px-2 text-sm"
+                      />
+                    </label>
+                    <label className="block">
+                      <span className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-slate-400 sm:hidden">
+                        ΦΠΑ %
+                      </span>
+                      <input
+                        type="number"
+                        min="0"
+                        value={line.vatRate}
+                        onChange={(e) =>
+                          setLines((prev) =>
+                            prev.map((l) =>
+                              l.key === line.key
+                                ? { ...l, vatRate: e.target.value }
+                                : l,
+                            ),
+                          )
+                        }
+                        aria-label="ΦΠΑ %"
+                        className="h-10 w-full rounded-lg border border-slate-200 bg-white px-2 text-sm"
+                      />
+                    </label>
+                    <div className="flex items-end justify-between gap-2 sm:pb-0">
+                      <div>
+                        <span className="mb-1 block text-[11px] font-semibold uppercase tracking-wide text-slate-400 sm:hidden">
+                          Σύνολο
+                        </span>
+                        <span className="block text-sm font-medium tabular-nums">
+                          {formatEUR(lineTotal)}
+                        </span>
+                      </div>
                       <button
                         type="button"
                         onClick={() =>
@@ -622,6 +693,7 @@ export function PosClient({
                           )
                         }
                         className="rounded-lg p-2 text-slate-400 hover:bg-white hover:text-rose-600"
+                        aria-label="Διαγραφή γραμμής"
                       >
                         <Trash2 size={15} />
                       </button>

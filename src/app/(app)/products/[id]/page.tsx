@@ -60,10 +60,11 @@ export default async function ProductDetailPage({
         />
       </div>
 
-      <div className="soft-panel grid gap-4 p-5 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="soft-panel grid gap-4 p-5 sm:grid-cols-2 lg:grid-cols-5">
         <Stat label="Τιμή" value={formatEUR(toNumber(product.price))} />
         <Stat label="ΦΠΑ" value={`${toNumber(product.vatRate)}%`} />
         <Stat label="Μονάδα" value={product.unit} />
+        <Stat label="Barcode" value={product.barcode || "—"} />
         <Stat
           label="Ενημέρωση"
           value={product.updatedAt.toLocaleDateString("el-GR")}
