@@ -9,6 +9,7 @@ import {
   Settings,
   FileText,
   Truck,
+  ScrollText,
   type LucideIcon,
 } from "lucide-react";
 
@@ -72,6 +73,7 @@ export const navGroups: NavGroup[] = [
       { href: "/crm", label: "CRM", icon: Users },
       { href: "/hr", label: "HR", icon: UserRound },
       { href: "/reports", label: "Αναφορές", icon: BarChart3 },
+      { href: "/audit", label: "Audit log", icon: ScrollText },
       { href: "/settings", label: "Ρυθμίσεις", icon: Settings },
     ],
   },

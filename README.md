@@ -55,8 +55,19 @@ Baseline rules live in [`docs/adr/0002-performance-stability.md`](docs/adr/0002-
 - Health check: `GET /api/health`
 - Gate: `npm run check` (lint + typecheck + build)
 
+## Scale proof (1M+)
+
+```bash
+npm run db:seed:scale   # inserts 1,000,000 audit_events
+npm run db:bench        # keyset vs OFFSET timing
+```
+
+- API: `GET /api/audit-events?limit=50&cursor=...`
+- UI: `/audit`
+- ADR: [`docs/adr/0004-scale-proof.md`](docs/adr/0004-scale-proof.md)
+
 ## Roadmap after Template v2
 
-1. Tenant model + auth + RLS
-2. Cursor list APIs + 1M-row seed/benchmark
+1. ~~Tenant model + auth + RLS~~ ✅ Phase 0
+2. ~~Cursor list APIs + 1M-row seed/benchmark~~ ✅ Scale proof
 3. Phase 1 ERP modules (Master Data → Sales → Inventory → Purchasing → Finance light)
