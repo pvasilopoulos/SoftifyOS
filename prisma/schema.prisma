@@ -49,8 +49,10 @@ model Tenant {
   posSessions      PosSession[]
   posTerminals     PosTerminal[]
   giftCards        GiftCard[]
+  giftCardLedgers  GiftCardLedger[]
   loyaltyAccounts  LoyaltyAccount[]
   loyaltyLedgers   LoyaltyLedger[]
+  loyaltyProgram   LoyaltyProgram?
   tenantSettings   TenantSettings?
   appRoles         AppRole[]
   userGroups       UserGroup[]
@@ -538,6 +540,14 @@ enum GiftCardStatus {
   EXPIRED
 }
 
+enum GiftCardLedgerKind {
+  ISSUE
+  REDEEM
+  ADJUST
+  VOID
+  EXPIRE
+}
+
 enum LoyaltyLedgerKind {
   EARN
   REDEEM
@@ -607,10 +617,50 @@ model GiftCard {
   tenant   Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   customer Customer?        @relation(fields: [customerId], references: [id], onDelete: SetNull)
   payments InvoicePayment[]
+  ledger   GiftCardLedger[]
 
   @@unique([tenantId, code])
   @@index([tenantId, status])
+  @@index([tenantId, createdAt(sort: Desc)])
   @@map("gift_cards")
+}
+
+model GiftCardLedger {
+  id              String             @id @default(cuid())
+  tenantId        String
+  giftCardId      String
+  kind            GiftCardLedgerKind
+  /// Signed amount in EUR (+ issue/credit, − redeem/void)
+  amount          Decimal            @db.Decimal(14, 2)
+  balanceAfter    Decimal            @db.Decimal(14, 2)
+  invoiceId       String?
+  note            String?
+  createdByUserId String?
+  createdAt       DateTime           @default(now())
+
+  tenant   Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  giftCard GiftCard @relation(fields: [giftCardId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, giftCardId, createdAt(sort: Desc)])
+  @@map("gift_card_ledgers")
+}
+
+/// Tenant loyalty earn/redeem policy
+model LoyaltyProgram {
+  id                  String   @id @default(cuid())
+  tenantId            String   @unique
+  name                String   @default("Standard")
+  /// Points earned per 1 € sale
+  earnPointsPerEur    Int      @default(1)
+  /// Points required to redeem 1 €
+  redeemPointsPerEur  Int      @default(100)
+  isActive            Boolean  @default(true)
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@map("loyalty_programs")
 }
 
 model LoyaltyAccount {

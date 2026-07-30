@@ -32,29 +32,56 @@ async function main() {
     },
   });
 
-  await prisma.giftCard.upsert({
-    where: { tenantId_code: { tenantId: tenant.id, code: "GIFT-100" } },
-    update: { balance: 100, status: "ACTIVE", initialBalance: 100 },
+  await prisma.loyaltyProgram.upsert({
+    where: { tenantId: tenant.id },
+    update: {},
     create: {
       tenantId: tenant.id,
-      code: "GIFT-100",
-      initialBalance: 100,
-      balance: 100,
-      notes: "Demo δωροκάρτα 100€",
+      name: "Standard",
+      earnPointsPerEur: 1,
+      redeemPointsPerEur: 100,
+      isActive: true,
     },
   });
 
-  await prisma.giftCard.upsert({
-    where: { tenantId_code: { tenantId: tenant.id, code: "GIFT-25" } },
-    update: { balance: 25, status: "ACTIVE", initialBalance: 25 },
-    create: {
-      tenantId: tenant.id,
-      code: "GIFT-25",
-      initialBalance: 25,
-      balance: 25,
-      notes: "Demo δωροκάρτα 25€",
-    },
-  });
+  for (const demo of [
+    { code: "GIFT-100", balance: 100, notes: "Demo δωροκάρτα 100€" },
+    { code: "GIFT-25", balance: 25, notes: "Demo δωροκάρτα 25€" },
+  ] as const) {
+    const existing = await prisma.giftCard.findUnique({
+      where: { tenantId_code: { tenantId: tenant.id, code: demo.code } },
+    });
+    if (existing) {
+      await prisma.giftCard.update({
+        where: { id: existing.id },
+        data: {
+          balance: demo.balance,
+          initialBalance: demo.balance,
+          status: "ACTIVE",
+          notes: demo.notes,
+        },
+      });
+    } else {
+      await prisma.giftCard.create({
+        data: {
+          tenantId: tenant.id,
+          code: demo.code,
+          initialBalance: demo.balance,
+          balance: demo.balance,
+          notes: demo.notes,
+          ledger: {
+            create: {
+              tenantId: tenant.id,
+              kind: "ISSUE",
+              amount: demo.balance,
+              balanceAfter: demo.balance,
+              note: "Seed issue",
+            },
+          },
+        },
+      });
+    }
+  }
 
   const customer = await prisma.customer.findFirst({
     where: { tenantId: tenant.id },
@@ -74,6 +101,14 @@ async function main() {
         customerId: customer.id,
         pointsBalance: 1500,
         tier: "GOLD",
+        ledger: {
+          create: {
+            tenantId: tenant.id,
+            kind: "ADJUST",
+            points: 1500,
+            note: "Seed opening balance",
+          },
+        },
       },
     });
   }
