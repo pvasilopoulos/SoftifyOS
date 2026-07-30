@@ -14,6 +14,7 @@ import {
 } from "@/modules/sales/invoice-utils";
 import { invoiceKindLabel } from "@/modules/documents/series";
 import { InvoiceActions } from "../invoice-actions";
+import { CreditFromInvoice } from "./credit-from-invoice";
 
 export const dynamic = "force-dynamic";
 
@@ -47,6 +48,17 @@ export default async function InvoiceDetailPage({
       space: true,
       series: true,
       site: true,
+      relatedInvoice: { select: { id: true, number: true, kind: true } },
+      creditNotes: {
+        orderBy: { createdAt: "desc" },
+        select: {
+          id: true,
+          number: true,
+          status: true,
+          total: true,
+          createdAt: true,
+        },
+      },
       payments: { orderBy: { paidAt: "desc" } },
       lines: {
         orderBy: { position: "asc" },
@@ -59,6 +71,10 @@ export default async function InvoiceDetailPage({
   const status = invoice.status as InvoiceStatusKey;
   const total = toNumber(invoice.total);
   const paid = toNumber(invoice.paidAmount);
+  const canCredit =
+    (invoice.kind === "SALES_INVOICE" || invoice.kind === "RETAIL_RECEIPT") &&
+    status !== "DRAFT" &&
+    status !== "CANCELLED";
 
   return (
     <div className="space-y-6">
@@ -68,19 +84,23 @@ export default async function InvoiceDetailPage({
           className="mb-3 inline-flex items-center gap-1.5 text-sm text-slate-500 hover:text-ink-900"
         >
           <ArrowLeft size={14} />
-          Πίσω στα τιμολόγια
+          Πίσω στα παραστατικά
         </Link>
         <PageHeader
           title={invoice.number}
           description={`${invoice.customer.name}${invoice.branch ? ` · ${invoice.branch.name}` : ""}${invoice.space ? ` · ${invoice.space.name}` : ""}${invoice.series ? ` · σειρά ${invoice.series.code}` : ""}`}
           actions={
-            <InvoiceActions
-              invoiceId={invoice.id}
-              status={invoice.status}
-              total={total}
-              paidAmount={paid}
-              size="md"
-            />
+            <div className="flex flex-col items-stretch gap-2 sm:items-end">
+              <InvoiceActions
+                invoiceId={invoice.id}
+                status={invoice.status}
+                total={total}
+                paidAmount={paid}
+                size="md"
+                showCollect={invoice.kind !== "SALES_CREDIT"}
+              />
+              <CreditFromInvoice invoiceId={invoice.id} canCredit={canCredit} />
+            </div>
           }
         />
       </div>
@@ -119,8 +139,21 @@ export default async function InvoiceDetailPage({
           {formatEUR(total)}
         </p>
         <p className="mt-2 text-sm text-slate-500">
-          Εξοφλημένα {formatEUR(paid)} · Υπόλοιπο {formatEUR(total - paid)}
+          {invoice.kind === "SALES_CREDIT"
+            ? `Πίστωση ${formatEUR(total)}`
+            : `Εξοφλημένα ${formatEUR(paid)} · Υπόλοιπο ${formatEUR(total - paid)}`}
         </p>
+        {invoice.relatedInvoice ? (
+          <p className="mt-3 text-sm text-slate-600">
+            Συνδεδεμένο παραστατικό{" "}
+            <Link
+              href={`/invoices/${invoice.relatedInvoice.id}`}
+              className="font-medium text-teal-800 hover:underline"
+            >
+              {invoice.relatedInvoice.number}
+            </Link>
+          </p>
+        ) : null}
         {invoice.series ? (
           <p className="mt-2 text-xs text-slate-500">
             Κινήσεις: πελάτης {invoice.series.affectsCustomer} · αποθήκη{" "}
@@ -128,6 +161,11 @@ export default async function InvoiceDetailPage({
             {invoice.series.glDebitAccount
               ? ` · λογ. ${invoice.series.glDebitAccount}/${invoice.series.glCreditAccount ?? "—"}`
               : ""}
+          </p>
+        ) : null}
+        {invoice.notes ? (
+          <p className="mt-3 whitespace-pre-wrap text-sm text-slate-600">
+            {invoice.notes}
           </p>
         ) : null}
       </div>
@@ -155,6 +193,36 @@ export default async function InvoiceDetailPage({
           ))}
         </ul>
       </section>
+
+      {invoice.creditNotes.length > 0 ? (
+        <section className="soft-panel overflow-hidden">
+          <div className="border-b border-slate-100 px-4 py-3">
+            <h2 className="text-sm font-semibold text-ink-950">Πιστωτικά</h2>
+          </div>
+          <ul className="divide-y divide-slate-100 text-sm">
+            {invoice.creditNotes.map((c) => (
+              <li key={c.id}>
+                <Link
+                  href={`/invoices/${c.id}`}
+                  className="flex items-center justify-between gap-3 px-4 py-3 hover:bg-slate-50"
+                >
+                  <div>
+                    <p className="font-medium text-ink-900">{c.number}</p>
+                    <p className="text-xs text-slate-500">
+                      {invoiceStatusLabel[c.status as InvoiceStatusKey] ?? c.status}
+                      {" · "}
+                      {c.createdAt.toLocaleDateString("el-GR")}
+                    </p>
+                  </div>
+                  <p className="font-medium text-amber-800">
+                    {formatEUR(toNumber(c.total))}
+                  </p>
+                </Link>
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
 
       {invoice.payments.length > 0 ? (
         <section className="soft-panel overflow-hidden">

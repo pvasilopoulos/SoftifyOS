@@ -225,37 +225,40 @@ enum InvoiceKind {
 
 /// Τιμολόγιο / πιστωτικό / ΑΠΥ — συνδέεται με πελάτη και προαιρετικά υποκατάστημα/χώρο
 model Invoice {
-  id          String        @id @default(cuid())
-  tenantId    String
-  customerId  String
-  branchId    String?
-  spaceId     String?
-  orderId     String?
-  seriesId    String?
-  siteId      String?
-  kind        InvoiceKind   @default(SALES_INVOICE)
-  number      String
-  status      InvoiceStatus @default(DRAFT)
-  issuedAt    DateTime?
-  dueAt       DateTime?
-  currency    String        @default("EUR")
-  subtotal    Decimal       @db.Decimal(14, 2)
-  vatAmount   Decimal       @db.Decimal(14, 2)
-  total       Decimal       @db.Decimal(14, 2)
-  paidAmount  Decimal       @default(0) @db.Decimal(14, 2)
-  notes       String?
-  createdAt   DateTime      @default(now())
-  updatedAt   DateTime      @updatedAt
+  id                String        @id @default(cuid())
+  tenantId          String
+  customerId        String
+  branchId          String?
+  spaceId           String?
+  orderId           String?
+  seriesId          String?
+  siteId            String?
+  relatedInvoiceId  String?
+  kind              InvoiceKind   @default(SALES_INVOICE)
+  number            String
+  status            InvoiceStatus @default(DRAFT)
+  issuedAt          DateTime?
+  dueAt             DateTime?
+  currency          String        @default("EUR")
+  subtotal          Decimal       @db.Decimal(14, 2)
+  vatAmount         Decimal       @db.Decimal(14, 2)
+  total             Decimal       @db.Decimal(14, 2)
+  paidAmount        Decimal       @default(0) @db.Decimal(14, 2)
+  notes             String?
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
 
-  tenant   Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  customer Customer         @relation(fields: [customerId], references: [id], onDelete: Restrict)
-  branch   Branch?          @relation(fields: [branchId], references: [id], onDelete: SetNull)
-  space    Space?           @relation(fields: [spaceId], references: [id], onDelete: SetNull)
-  order    Order?           @relation(fields: [orderId], references: [id], onDelete: SetNull)
-  series   DocumentSeries?  @relation(fields: [seriesId], references: [id], onDelete: SetNull)
-  site     Site?            @relation(fields: [siteId], references: [id], onDelete: SetNull)
-  lines    InvoiceLine[]
-  payments InvoicePayment[]
+  tenant          Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  customer        Customer         @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  branch          Branch?          @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  space           Space?           @relation(fields: [spaceId], references: [id], onDelete: SetNull)
+  order           Order?           @relation(fields: [orderId], references: [id], onDelete: SetNull)
+  series          DocumentSeries?  @relation(fields: [seriesId], references: [id], onDelete: SetNull)
+  site            Site?            @relation(fields: [siteId], references: [id], onDelete: SetNull)
+  relatedInvoice  Invoice?         @relation("InvoiceCredits", fields: [relatedInvoiceId], references: [id], onDelete: SetNull)
+  creditNotes     Invoice[]        @relation("InvoiceCredits")
+  lines           InvoiceLine[]
+  payments        InvoicePayment[]
 
   @@unique([tenantId, number])
   @@index([tenantId, status, issuedAt(sort: Desc)])
@@ -265,6 +268,7 @@ model Invoice {
   @@index([tenantId, orderId])
   @@index([tenantId, seriesId])
   @@index([tenantId, kind, createdAt(sort: Desc)])
+  @@index([tenantId, relatedInvoiceId])
   @@map("invoices")
 }
 

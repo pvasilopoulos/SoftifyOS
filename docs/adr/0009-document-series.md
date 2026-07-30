@@ -38,3 +38,5 @@ Create forms (τιμολόγιο / παραγγελία / έκδοση από π
 **Σειρά** picker; API accepts optional `seriesId` and falls back to default.
 `Invoice.kind` distinguishes `SALES_INVOICE` / `SALES_CREDIT` / `RETAIL_RECEIPT`
 while sharing the same workspace and numbering engine.
+`Invoice.relatedInvoiceId` links a credit note to its source invoice;
+`POST /api/invoices/:id/credit` copies lines and allocates from a credit series.

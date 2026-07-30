@@ -310,6 +310,37 @@ export async function POST(request: Request) {
       );
     }
 
+    let relatedInvoiceId: string | null = body.relatedInvoiceId || null;
+    let notes = body.notes || null;
+    if (relatedInvoiceId) {
+      if (docKind !== "SALES_CREDIT") {
+        return NextResponse.json(
+          { error: "Σύνδεση με τιμολόγιο επιτρέπεται μόνο σε πιστωτικά" },
+          { status: 400 },
+        );
+      }
+      const related = await prisma.invoice.findFirst({
+        where: {
+          id: relatedInvoiceId,
+          tenantId: session.tenantId,
+          customerId: customer.id,
+          kind: { in: ["SALES_INVOICE", "RETAIL_RECEIPT"] },
+          status: { not: "CANCELLED" },
+        },
+        select: { id: true, number: true },
+      });
+      if (!related) {
+        return NextResponse.json(
+          { error: "Το συνδεδεμένο τιμολόγιο δεν βρέθηκε ή δεν είναι έγκυρο" },
+          { status: 400 },
+        );
+      }
+      relatedInvoiceId = related.id;
+      if (!notes?.trim()) {
+        notes = `Πιστωτικό για ${related.number}`;
+      }
+    }
+
     const invoice = await prisma.$transaction(async (tx) => {
       let number = body.number?.trim() || "";
       let seriesId: string | null = series?.id ?? null;
@@ -337,6 +368,7 @@ export async function POST(request: Request) {
           spaceId,
           seriesId,
           siteId,
+          relatedInvoiceId,
           kind: docKind,
           number,
           status,
@@ -347,7 +379,7 @@ export async function POST(request: Request) {
           vatAmount: totals.vatAmount,
           total: totals.total,
           paidAmount: 0,
-          notes: body.notes || null,
+          notes,
           lines: {
             create: body.lines.map((line, idx) => ({
               tenantId: session.tenantId,
