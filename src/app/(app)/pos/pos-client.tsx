@@ -21,10 +21,13 @@ import {
   calcInvoiceTotals,
   calcLineTotals,
   formatEUR,
+  roundMoney,
 } from "@/modules/sales/invoice-utils";
 import {
   calcPayable,
   eurToRedeemPoints,
+  remainingCoverDue,
+  validateTenders,
 } from "@/modules/pos/payable";
 import { SeriesPicker } from "@/modules/documents/series-picker";
 import { PosBarcodeScan } from "@/modules/pos/barcode-scan";
@@ -126,6 +129,7 @@ export function PosClient({
     maxRedeemEur: number;
   } | null>(null);
   const [loyaltyRedeemEur, setLoyaltyRedeemEur] = useState("0");
+  const [showAddMethod, setShowAddMethod] = useState(false);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
@@ -181,7 +185,66 @@ export function PosClient({
     [totals.total, discount, giftApplied, loyaltyApplied],
   );
 
-  // no auto effect — cash defaults on checkout if empty
+  const isSpecialKind = (method: string) => {
+    const kind = methodByCode.get(method)?.kind;
+    return kind === "GIFT_CARD" || kind === "LOYALTY";
+  };
+
+  const coverMethodOptions = useMemo(
+    () =>
+      paymentMethods.filter(
+        (m) => m.kind !== "LOYALTY" && m.kind !== "GIFT_CARD",
+      ),
+    [paymentMethods],
+  );
+
+  const coverLines = useMemo(
+    () =>
+      tenders
+        .filter((t) => !isSpecialKind(t.method))
+        .map((t) => {
+          const pm = methodByCode.get(t.method);
+          return {
+            method: t.method,
+            kind: pm?.kind,
+            amount: Number(t.amount) || 0,
+            allowsChange: pm?.allowsChange,
+          };
+        }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- isSpecialKind uses methodByCode
+    [tenders, methodByCode],
+  );
+
+  const remainingDue = useMemo(
+    () => remainingCoverDue(payable.payableDue, coverLines),
+    [payable.payableDue, coverLines],
+  );
+
+  const tenderCheck = useMemo(
+    () => validateTenders(payable.payableDue, coverLines),
+    [payable.payableDue, coverLines],
+  );
+
+  const changePreview =
+    tenderCheck.ok && tenderCheck.change > 0 ? tenderCheck.change : 0;
+
+  // Keep a single cash-like cover tender aligned when gift/loyalty changes
+  useEffect(() => {
+    setTenders((prev) => {
+      const covers = prev.filter((t) => !isSpecialKind(t.method));
+      if (covers.length !== 1) return prev;
+      const only = covers[0]!;
+      const pm = methodByCode.get(only.method);
+      if (!(pm?.kind === "CASH" || pm?.allowsChange)) return prev;
+      const nextAmount =
+        payable.payableDue > 0 ? String(payable.payableDue) : "";
+      if (only.amount === nextAmount) return prev;
+      return prev.map((t) =>
+        t.key === only.key ? { ...t, amount: nextAmount } : t,
+      );
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [giftApplied, loyaltyApplied, payable.payableDue]);
 
   useEffect(() => {
     if (!customerId) return;
@@ -273,39 +336,49 @@ export function PosClient({
     setShowGiftEntry(true);
   }
 
-  function pickPaymentMethod(pm: PaymentMethodOption) {
+  function addCoverTender(
+    pm: PaymentMethodOption,
+    mode: "replace" | "append",
+  ) {
     setError(null);
-    if (pm.kind === "GIFT_CARD") {
-      setShowGiftEntry(true);
-      return;
-    }
     setShowGiftEntry(false);
-    const amount =
-      payable.payableDue > 0 ? String(payable.payableDue) : "";
+    setShowAddMethod(false);
     setTenders((prev) => {
-      const special = prev.filter((t) => {
-        const kind = methodByCode.get(t.method)?.kind;
-        return kind === "GIFT_CARD" || kind === "LOYALTY";
-      });
-      const covers = prev.filter((t) => {
-        const kind = methodByCode.get(t.method)?.kind;
-        return kind !== "GIFT_CARD" && kind !== "LOYALTY";
-      });
-      if (covers.length <= 1) {
+      const special = prev.filter((t) => isSpecialKind(t.method));
+      const covers = prev.filter((t) => !isSpecialKind(t.method));
+
+      if (mode === "replace") {
+        const amount =
+          payable.payableDue > 0 ? String(payable.payableDue) : "";
         return [
           ...special,
           {
             key: covers[0]?.key ?? `t-${Date.now()}`,
             method: pm.code,
-            amount: amount || covers[0]?.amount || "",
+            amount,
           },
         ];
       }
+
+      // Additional method: only the still-uncovered remainder
+      const paid = covers.reduce((s, t) => s + (Number(t.amount) || 0), 0);
+      const remaining = roundMoney(Math.max(0, payable.payableDue - paid));
+      const amount = remaining > 0 ? String(remaining) : "";
       return [
         ...prev,
         { key: `t-${Date.now()}`, method: pm.code, amount },
       ];
     });
+  }
+
+  function pickPaymentMethod(pm: PaymentMethodOption) {
+    setError(null);
+    if (pm.kind === "GIFT_CARD") {
+      setShowGiftEntry(true);
+      setShowAddMethod(false);
+      return;
+    }
+    addCoverTender(pm, "replace");
   }
 
   function applyLoyalty() {
@@ -779,9 +852,15 @@ export function PosClient({
                   className="h-9 w-28 rounded-lg border border-slate-200 px-2 text-right text-sm"
                 />
               </label>
+              <div className="mt-2 flex justify-between border-t border-slate-200/80 pt-2 font-medium text-ink-900">
+                <span>Προς πληρωμή</span>
+                <span className="tabular-nums">
+                  {formatEUR(payable.afterDiscount)}
+                </span>
+              </div>
               {payable.giftCardApplied > 0 ? (
-                <div className="mt-1 flex justify-between text-slate-600">
-                  <span>Δωροκάρτα</span>
+                <div className="mt-1.5 flex justify-between text-slate-600">
+                  <span>Κάλυψη δωροκάρτας</span>
                   <span className="tabular-nums">
                     −{formatEUR(payable.giftCardApplied)}
                   </span>
@@ -789,18 +868,49 @@ export function PosClient({
               ) : null}
               {payable.loyaltyAppliedEur > 0 ? (
                 <div className="mt-1 flex justify-between text-slate-600">
-                  <span>Loyalty</span>
+                  <span>Κάλυψη loyalty</span>
                   <span className="tabular-nums">
                     −{formatEUR(payable.loyaltyAppliedEur)}
                   </span>
                 </div>
               ) : null}
               <div className="mt-3 flex justify-between border-t border-slate-200 pt-3 text-base font-semibold text-ink-950">
-                <span>Πληρωτέο</span>
+                <span>Υπόλοιπο (μετρητά/κάρτα)</span>
                 <span className="tabular-nums text-teal-800">
                   {formatEUR(payable.payableDue)}
                 </span>
               </div>
+              {coverLines.some((t) => t.amount > 0) ? (
+                <div className="mt-2 space-y-1 border-t border-dashed border-slate-200 pt-2 text-xs text-slate-500">
+                  <div className="flex justify-between">
+                    <span>Δηλωμένα ποσά</span>
+                    <span className="tabular-nums">
+                      {formatEUR(
+                        coverLines.reduce((s, t) => s + t.amount, 0),
+                      )}
+                    </span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span>Απομένει</span>
+                    <span
+                      className={cn(
+                        "tabular-nums font-medium",
+                        remainingDue > 0 ? "text-amber-700" : "text-emerald-700",
+                      )}
+                    >
+                      {formatEUR(remainingDue)}
+                    </span>
+                  </div>
+                  {changePreview > 0 ? (
+                    <div className="flex justify-between text-teal-800">
+                      <span>Ρέστα</span>
+                      <span className="tabular-nums font-medium">
+                        {formatEUR(changePreview)}
+                      </span>
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
             </div>
 
             <div className="space-y-2 rounded-xl border border-slate-100 p-3">
@@ -921,93 +1031,137 @@ export function PosClient({
                 </div>
               ) : null}
 
-              {tenders
-                .filter(
-                  (t) => methodByCode.get(t.method)?.kind !== "LOYALTY",
-                )
-                .map((t) => {
-                  const pm = methodByCode.get(t.method);
-                  const kind = pm?.kind;
-                  return (
-                  <div key={t.key} className="flex items-center gap-2">
-                    <span className="w-28 shrink-0 text-xs font-medium text-slate-600">
-                      {pm?.name ?? t.method}
-                      {kind === "GIFT_CARD" && t.giftCardCode
-                        ? ` · ${t.giftCardCode}`
-                        : ""}
-                    </span>
-                    <input
-                      type="number"
-                      min="0.01"
-                      step="0.01"
-                      required={
-                        kind !== "GIFT_CARD" && payable.payableDue > 0
-                      }
-                      value={t.amount}
-                      onChange={(e) =>
-                        setTenders((prev) =>
-                          prev.map((x) =>
-                            x.key === t.key
-                              ? { ...x, amount: e.target.value }
-                              : x,
-                          ),
-                        )
-                      }
-                      className="h-10 flex-1 rounded-lg border border-slate-200 px-2 text-sm"
-                    />
+              <div className="space-y-2">
+                <p className="text-[11px] font-medium uppercase tracking-wide text-slate-400">
+                  Ανάλυση είσπραξης
+                </p>
+                {tenders
+                  .filter(
+                    (t) => methodByCode.get(t.method)?.kind !== "LOYALTY",
+                  )
+                  .map((t) => {
+                    const pm = methodByCode.get(t.method);
+                    const kind = pm?.kind;
+                    const isGift = kind === "GIFT_CARD";
+                    return (
+                      <div
+                        key={t.key}
+                        className={cn(
+                          "flex items-center gap-2 rounded-xl border px-2.5 py-2",
+                          isGift
+                            ? "border-teal-100 bg-teal-50/30"
+                            : "border-slate-100 bg-white",
+                        )}
+                      >
+                        <span className="w-28 shrink-0 text-xs font-medium text-slate-700">
+                          {pm?.name ?? t.method}
+                          {isGift && t.giftCardCode
+                            ? ` · ${t.giftCardCode}`
+                            : ""}
+                        </span>
+                        <input
+                          type="number"
+                          min="0"
+                          step="0.01"
+                          required={!isGift && payable.payableDue > 0}
+                          value={t.amount}
+                          onChange={(e) =>
+                            setTenders((prev) =>
+                              prev.map((x) =>
+                                x.key === t.key
+                                  ? { ...x, amount: e.target.value }
+                                  : x,
+                              ),
+                            )
+                          }
+                          className="h-9 flex-1 rounded-lg border border-slate-200 bg-white px-2 text-sm"
+                        />
+                        <button
+                          type="button"
+                          className="rounded-lg p-2 text-slate-400 hover:bg-slate-100 hover:text-rose-600"
+                          aria-label="Αφαίρεση"
+                          onClick={() => {
+                            const removingGift = isGift;
+                            setTenders((prev) => {
+                              const next = prev.filter((x) => x.key !== t.key);
+                              return next.length
+                                ? next
+                                : [
+                                    {
+                                      key: "cash",
+                                      method: defaultCashCode,
+                                      amount:
+                                        payable.payableDue > 0
+                                          ? String(payable.payableDue)
+                                          : "",
+                                    },
+                                  ];
+                            });
+                            if (removingGift) {
+                              setGiftBalance(null);
+                              setShowGiftEntry(false);
+                            }
+                          }}
+                        >
+                          <Trash2 size={16} />
+                        </button>
+                      </div>
+                    );
+                  })}
+              </div>
+
+              {showAddMethod ? (
+                <div className="space-y-2 rounded-xl border border-slate-200 bg-slate-50/80 p-3">
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="text-xs font-medium text-ink-900">
+                      Επιλέξτε επιπλέον τρόπο
+                    </p>
                     <button
                       type="button"
-                      className="rounded-lg p-2 text-slate-400 hover:bg-slate-100 hover:text-rose-600"
-                      aria-label="Αφαίρεση"
-                      onClick={() => {
-                        const removingGift = kind === "GIFT_CARD";
-                        setTenders((prev) => {
-                          const next = prev.filter((x) => x.key !== t.key);
-                          return next.length
-                            ? next
-                            : [
-                                {
-                                  key: "cash",
-                                  method: defaultCashCode,
-                                  amount: "",
-                                },
-                              ];
-                        });
-                        if (removingGift) {
-                          setGiftBalance(null);
-                          setShowGiftEntry(false);
-                        }
-                      }}
+                      className="text-xs text-slate-500 hover:text-ink-900"
+                      onClick={() => setShowAddMethod(false)}
                     >
-                      <Trash2 size={16} />
+                      Ακύρωση
                     </button>
                   </div>
-                  );
-                })}
-              <Button
-                type="button"
-                size="sm"
-                variant="ghost"
-                onClick={() => {
-                  const card =
-                    paymentMethods.find((m) => m.kind === "CARD") ??
-                    paymentMethods.find((m) => m.kind !== "LOYALTY");
-                  if (!card) return;
-                  setTenders((prev) => [
-                    ...prev,
-                    {
-                      key: `t-${Date.now()}`,
-                      method: card.code,
-                      amount:
-                        payable.payableDue > 0
-                          ? String(payable.payableDue)
-                          : "",
-                    },
-                  ]);
-                }}
-              >
-                + Επιπλέον τρόπος
-              </Button>
+                  <p className="text-[11px] text-slate-500">
+                    Θα προστεθεί με ποσό{" "}
+                    <span className="font-medium text-ink-800">
+                      {formatEUR(remainingDue)}
+                    </span>{" "}
+                    (υπόλοιπο προς κάλυψη).
+                  </p>
+                  <div className="grid grid-cols-2 gap-2">
+                    {coverMethodOptions.map((pm) => {
+                      const Icon = paymentMethodIcon[pm.kind] ?? MoreHorizontal;
+                      return (
+                        <button
+                          key={pm.id}
+                          type="button"
+                          onClick={() => addCoverTender(pm, "append")}
+                          className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-left text-xs font-medium text-slate-700 transition hover:border-teal-200 hover:bg-teal-50/50"
+                        >
+                          <Icon size={16} className="shrink-0 text-slate-400" />
+                          {pm.name}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              ) : (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="secondary"
+                  className="w-full"
+                  disabled={remainingDue <= 0 && coverLines.length > 0}
+                  onClick={() => setShowAddMethod(true)}
+                >
+                  <Plus size={15} />
+                  Επιπλέον τρόπος
+                  {remainingDue > 0 ? ` · ${formatEUR(remainingDue)}` : ""}
+                </Button>
+              )}
             </div>
 
             {error ? (
@@ -1040,7 +1194,13 @@ export function PosClient({
               className="w-full"
               disabled={pending || !seriesId || !customerId}
             >
-              {pending ? "Ολοκλήρωση..." : `Είσπραξη ${formatEUR(payable.payableDue)}`}
+              {pending
+                ? "Ολοκλήρωση..."
+                : remainingDue > 0
+                  ? `Είσπραξη υπόλοιπου ${formatEUR(remainingDue)}`
+                  : changePreview > 0
+                    ? `Ολοκλήρωση · ρέστα ${formatEUR(changePreview)}`
+                    : "Ολοκλήρωση πώλησης"}
             </Button>
           </section>
         </div>
