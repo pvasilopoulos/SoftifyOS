@@ -9,10 +9,24 @@ import { Button } from "@/shared/ui/button";
 import { cn } from "@/shared/lib/cn";
 import {
   customerEffectLabel,
+  documentKindGroup,
+  documentKindGroupLabel,
   documentKindLabel,
   inventoryEffectLabel,
 } from "@/modules/documents/series";
 import { MYDATA_INVOICE_TYPES } from "@/modules/documents/schemas";
+
+type Kind = keyof typeof documentKindLabel;
+type KindGroup = keyof typeof documentKindGroupLabel;
+
+const kinds = Object.keys(documentKindLabel) as Kind[];
+const kindGroups = Object.keys(documentKindGroupLabel) as KindGroup[];
+
+const kindsByGroup = kindGroups.map((group) => ({
+  group,
+  label: documentKindGroupLabel[group],
+  kinds: kinds.filter((k) => documentKindGroup[k] === group),
+}));
 
 type Site = {
   id: string;
@@ -26,7 +40,7 @@ type Series = {
   id: string;
   code: string;
   name: string;
-  kind: keyof typeof documentKindLabel;
+  kind: Kind;
   prefix: string;
   nextNumber?: number;
   padLength?: number;
@@ -45,10 +59,6 @@ type Series = {
   isDefault: boolean;
   isActive: boolean;
 };
-
-const kinds = Object.keys(documentKindLabel) as Array<
-  keyof typeof documentKindLabel
->;
 
 function payloadFromForm(form: FormData) {
   return {
@@ -82,9 +92,7 @@ export function SeriesSettingsClient({
   initialSeries: Series[];
 }) {
   const [tab, setTab] = useState<"series" | "org">("series");
-  const [kindFilter, setKindFilter] = useState<"all" | keyof typeof documentKindLabel>(
-    "all",
-  );
+  const [kindFilter, setKindFilter] = useState<"all" | KindGroup>("all");
   const [sites, setSites] = useState(initialSites);
   const [series, setSeries] = useState(initialSeries);
   const [error, setError] = useState<string | null>(null);
@@ -115,13 +123,16 @@ export function SeriesSettingsClient({
 
   const visibleSeries = useMemo(() => {
     if (kindFilter === "all") return series;
-    return series.filter((s) => s.kind === kindFilter);
+    return series.filter((s) => documentKindGroup[s.kind] === kindFilter);
   }, [series, kindFilter]);
 
   const counts = useMemo(() => {
     const map: Record<string, number> = { all: series.length };
-    for (const k of kinds) map[k] = 0;
-    for (const s of series) map[s.kind] = (map[s.kind] ?? 0) + 1;
+    for (const g of kindGroups) map[g] = 0;
+    for (const s of series) {
+      const g = documentKindGroup[s.kind];
+      map[g] = (map[g] ?? 0) + 1;
+    }
     return map;
   }, [series]);
 
@@ -258,13 +269,13 @@ export function SeriesSettingsClient({
               label="Όλες"
               count={counts.all ?? 0}
             />
-            {kinds.map((k) => (
+            {kindGroups.map((g) => (
               <FilterChip
-                key={k}
-                active={kindFilter === k}
-                onClick={() => setKindFilter(k)}
-                label={documentKindLabel[k]}
-                count={counts[k] ?? 0}
+                key={g}
+                active={kindFilter === g}
+                onClick={() => setKindFilter(g)}
+                label={documentKindGroupLabel[g]}
+                count={counts[g] ?? 0}
               />
             ))}
           </div>
@@ -576,10 +587,14 @@ function SeriesDrawer({
                     className="h-11 w-full rounded-xl border border-slate-200 px-3"
                     defaultValue={initial?.kind ?? "SALES_INVOICE"}
                   >
-                    {kinds.map((k) => (
-                      <option key={k} value={k}>
-                        {documentKindLabel[k]}
-                      </option>
+                    {kindsByGroup.map(({ group, label, kinds: groupKinds }) => (
+                      <optgroup key={group} label={label}>
+                        {groupKinds.map((k) => (
+                          <option key={k} value={k}>
+                            {documentKindLabel[k]}
+                          </option>
+                        ))}
+                      </optgroup>
                     ))}
                   </select>
                 </label>

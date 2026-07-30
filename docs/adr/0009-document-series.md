@@ -19,5 +19,17 @@ payment history, SKU lines, and partial order invoicing.
 - myDATA / GL are stored for later filing/posting — no live ΑΑΔΕ API yet
 - Inventory *effects* are declared on series; stock engine comes with Αποθήκη
 
+### Document kinds (expanded)
+Sales: quote, order, invoice, retail receipt, credit, delivery note  
+Purchasing: purchase order, goods receipt, purchase invoice/credit  
+Cash: customer receipt, supplier payment  
+Inventory: stock transfer / receipt / issue  
+Other: cancellation  
+
+Kinds declare intent; modules wire up issuance over time. Settings filters
+group by `documentKindGroup` (Πωλήσεις / Αγορές / Αποθήκη / Χρηματικά).
+
 ## Consequences
 Settings → Σειρές & Τύποι is the control plane for document behaviour.
+Demo seed (`npm run db:seed:series`) upserts metadata but never resets
+`nextNumber` / `lastYear` on existing series.

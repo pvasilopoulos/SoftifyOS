@@ -4,11 +4,50 @@ import type { DocumentKind, PrismaClient } from "@/generated/prisma/client";
 type Tx = Prisma.TransactionClient | PrismaClient;
 
 export const documentKindLabel = {
+  SALES_QUOTE: "Προσφορά",
   SALES_ORDER: "Παραγγελία πώλησης",
   SALES_INVOICE: "Τιμολόγιο πώλησης",
-  SALES_CREDIT: "Πιστωτικό",
+  RETAIL_RECEIPT: "Λιανική / ΑΠΥ",
+  SALES_CREDIT: "Πιστωτικό πώλησης",
   CUSTOMER_RECEIPT: "Είσπραξη πελάτη",
   DELIVERY_NOTE: "Δελτίο αποστολής",
+  PURCHASE_ORDER: "Παραγγελία αγοράς",
+  GOODS_RECEIPT: "Δελτίο παραλαβής",
+  PURCHASE_INVOICE: "Τιμολόγιο αγοράς",
+  PURCHASE_CREDIT: "Πιστωτικό αγοράς",
+  SUPPLIER_PAYMENT: "Πληρωμή προμηθευτή",
+  STOCK_TRANSFER: "Ενδοδιακίνηση",
+  STOCK_RECEIPT: "Εισαγωγή αποθήκης",
+  STOCK_ISSUE: "Εξαγωγή αποθήκης",
+  CANCELLATION: "Ακυρωτικό",
+} as const;
+
+/** Grouping for settings filters / future menus */
+export const documentKindGroup = {
+  SALES_QUOTE: "sales",
+  SALES_ORDER: "sales",
+  SALES_INVOICE: "sales",
+  RETAIL_RECEIPT: "sales",
+  SALES_CREDIT: "sales",
+  DELIVERY_NOTE: "sales",
+  CUSTOMER_RECEIPT: "cash",
+  SUPPLIER_PAYMENT: "cash",
+  PURCHASE_ORDER: "purchasing",
+  GOODS_RECEIPT: "purchasing",
+  PURCHASE_INVOICE: "purchasing",
+  PURCHASE_CREDIT: "purchasing",
+  STOCK_TRANSFER: "inventory",
+  STOCK_RECEIPT: "inventory",
+  STOCK_ISSUE: "inventory",
+  CANCELLATION: "other",
+} as const;
+
+export const documentKindGroupLabel = {
+  sales: "Πωλήσεις",
+  purchasing: "Αγορές",
+  inventory: "Αποθήκη",
+  cash: "Χρηματικά",
+  other: "Λοιπά",
 } as const;
 
 export const customerEffectLabel = {

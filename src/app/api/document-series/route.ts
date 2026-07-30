@@ -5,21 +5,13 @@ import { prisma } from "@/server/db";
 import { getSession } from "@/platform/auth/session";
 import { writeAuditEvent } from "@/platform/tenancy/audit";
 import { getErrorMessage } from "@/shared/lib/safe";
-import { seriesCreateSchema } from "@/modules/documents/schemas";
+import { documentKindSchema, seriesCreateSchema } from "@/modules/documents/schemas";
 import { previewNextNumber } from "@/modules/documents/series";
 
 export const dynamic = "force-dynamic";
 
 const listSchema = z.object({
-  kind: z
-    .enum([
-      "SALES_ORDER",
-      "SALES_INVOICE",
-      "SALES_CREDIT",
-      "CUSTOMER_RECEIPT",
-      "DELIVERY_NOTE",
-    ])
-    .optional(),
+  kind: documentKindSchema.optional(),
   siteId: z.string().optional(),
 });
 

@@ -1,5 +1,28 @@
 import { z } from "zod";
 
+export const DOCUMENT_KINDS = [
+  "SALES_ORDER",
+  "SALES_INVOICE",
+  "SALES_CREDIT",
+  "CUSTOMER_RECEIPT",
+  "DELIVERY_NOTE",
+  "SALES_QUOTE",
+  "RETAIL_RECEIPT",
+  "PURCHASE_ORDER",
+  "PURCHASE_INVOICE",
+  "PURCHASE_CREDIT",
+  "SUPPLIER_PAYMENT",
+  "GOODS_RECEIPT",
+  "STOCK_TRANSFER",
+  "STOCK_RECEIPT",
+  "STOCK_ISSUE",
+  "CANCELLATION",
+] as const;
+
+export type DocumentKindCode = (typeof DOCUMENT_KINDS)[number];
+
+export const documentKindSchema = z.enum(DOCUMENT_KINDS);
+
 export const siteCreateSchema = z.object({
   code: z.string().trim().min(1).max(40),
   name: z.string().trim().min(1).max(200),
@@ -11,13 +34,7 @@ export const siteCreateSchema = z.object({
 export const seriesCreateSchema = z.object({
   code: z.string().trim().min(1).max(40),
   name: z.string().trim().min(1).max(200),
-  kind: z.enum([
-    "SALES_ORDER",
-    "SALES_INVOICE",
-    "SALES_CREDIT",
-    "CUSTOMER_RECEIPT",
-    "DELIVERY_NOTE",
-  ]),
+  kind: documentKindSchema,
   prefix: z.string().trim().min(1).max(40),
   padLength: z.coerce.number().int().min(3).max(10).optional().default(5),
   nextNumber: z.coerce.number().int().min(1).optional().default(1),
@@ -46,6 +63,8 @@ export const MYDATA_INVOICE_TYPES = [
   { code: "2.1", label: "Τιμολόγιο Ενδοκοινοτικό" },
   { code: "5.1", label: "Πιστωτικό Τιμολόγιο" },
   { code: "5.2", label: "Πιστωτικό Στοιχείο Λιανικής" },
+  { code: "6.1", label: "Στοιχείο Λιανικής Πώλησης" },
   { code: "8.1", label: "Αποδείξη Είσπραξης" },
+  { code: "8.2", label: "Αποδείξη Πληρωμής" },
   { code: "9.3", label: "Δελτίο Αποστολής" },
 ] as const;
