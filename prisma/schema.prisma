@@ -54,6 +54,7 @@ model Tenant {
   loyaltyLedgers   LoyaltyLedger[]
   loyaltyProgram   LoyaltyProgram?
   paymentMethods   PaymentMethod[]
+  unitsOfMeasure   UnitOfMeasure[]
   tenantSettings   TenantSettings?
   appRoles         AppRole[]
   userGroups       UserGroup[]
@@ -207,7 +208,9 @@ model Product {
   /// Barcode / EAN / QR payload for POS scan (optional)
   barcode   String?
   name      String
+  /// Denormalized display symbol (from UnitOfMeasure.symbol)
   unit      String        @default("τεμ")
+  unitId    String?
   vatRate   Decimal       @default(24) @db.Decimal(5, 2)
   price     Decimal       @db.Decimal(14, 2)
   status    ProductStatus @default(ACTIVE)
@@ -215,16 +218,58 @@ model Product {
   createdAt DateTime      @default(now())
   updatedAt DateTime      @updatedAt
 
-  tenant Tenant      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  lines  OrderLine[]
-  invoiceLines InvoiceLine[]
+  tenant        Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  unitOfMeasure UnitOfMeasure? @relation(fields: [unitId], references: [id], onDelete: SetNull)
+  lines         OrderLine[]
+  invoiceLines  InvoiceLine[]
 
   @@unique([tenantId, sku])
   @@unique([tenantId, barcode])
   @@index([tenantId, name])
+  @@index([tenantId, unitId])
   @@index([tenantId, createdAt(sort: Desc), id(sort: Desc)])
   @@index([tenantId, status, createdAt(sort: Desc)])
   @@map("products")
+}
+
+enum UnitOfMeasureKind {
+  COUNT
+  WEIGHT
+  VOLUME
+  LENGTH
+  AREA
+  TIME
+  OTHER
+}
+
+/// Παραμετρικές μονάδες μέτρησης ανά tenant
+model UnitOfMeasure {
+  id          String            @id @default(cuid())
+  tenantId    String
+  /// Stable code e.g. PCS, KG, LT
+  code        String
+  name        String
+  /// Short symbol shown on products / docs e.g. τεμ, kg
+  symbol      String
+  kind        UnitOfMeasureKind @default(COUNT)
+  /// Decimal places allowed for quantities
+  decimals    Int               @default(0)
+  description String?
+  sortOrder   Int               @default(100)
+  isActive    Boolean           @default(true)
+  isDefault   Boolean           @default(false)
+  isSystem    Boolean           @default(false)
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+
+  tenant   Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  products Product[]
+
+  @@unique([tenantId, code])
+  @@unique([tenantId, symbol])
+  @@index([tenantId, isActive, sortOrder])
+  @@index([tenantId, kind, sortOrder])
+  @@map("units_of_measure")
 }
 
 enum InvoiceStatus {

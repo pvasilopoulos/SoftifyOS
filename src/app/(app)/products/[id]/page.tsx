@@ -34,10 +34,18 @@ export default async function ProductDetailPage({
   const { id } = await params;
   const product = await prisma.product.findFirst({
     where: { id, tenantId: session.tenantId },
+    include: {
+      unitOfMeasure: {
+        select: { id: true, code: true, name: true, symbol: true, kind: true },
+      },
+    },
   });
   if (!product) notFound();
 
   const status = product.status as keyof typeof productStatusLabel;
+  const unitLabel = product.unitOfMeasure
+    ? `${product.unitOfMeasure.symbol} · ${product.unitOfMeasure.name}`
+    : product.unit;
 
   return (
     <div className="space-y-6">
@@ -63,7 +71,7 @@ export default async function ProductDetailPage({
       <div className="soft-panel grid gap-4 p-5 sm:grid-cols-2 lg:grid-cols-5">
         <Stat label="Τιμή" value={formatEUR(toNumber(product.price))} />
         <Stat label="ΦΠΑ" value={`${toNumber(product.vatRate)}%`} />
-        <Stat label="Μονάδα" value={product.unit} />
+        <Stat label="Μονάδα" value={unitLabel} />
         <Stat label="Barcode" value={product.barcode || "—"} />
         <Stat
           label="Ενημέρωση"

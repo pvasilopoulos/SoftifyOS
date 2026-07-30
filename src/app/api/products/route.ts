@@ -9,6 +9,10 @@ import {
   listQuerySchema,
 } from "@/shared/lib/cursor";
 import { productCreateSchema } from "@/modules/master-data/schemas";
+import {
+  resolveProductUnit,
+  UnitOfMeasureError,
+} from "@/modules/units/service";
 import { writeAuditEvent } from "@/platform/tenancy/audit";
 import { getErrorMessage } from "@/shared/lib/safe";
 import { toNumber } from "@/modules/sales/invoice-utils";
@@ -116,13 +120,19 @@ export async function POST(request: Request) {
     }
 
     const body = productCreateSchema.parse(await request.json());
+    const unit = await resolveProductUnit(prisma, {
+      tenantId: session.tenantId,
+      unitId: body.unitId,
+      unit: body.unit,
+    });
     const product = await prisma.product.create({
       data: {
         tenantId: session.tenantId,
         sku: body.sku,
         barcode: body.barcode || null,
         name: body.name,
-        unit: body.unit || "τεμ",
+        unit: unit.symbol,
+        unitId: unit.id,
         vatRate: body.vatRate ?? 24,
         price: body.price,
         notes: body.notes || null,
@@ -160,6 +170,12 @@ export async function POST(request: Request) {
         { error: "Το SKU ή barcode υπάρχει ήδη" },
         { status: 409 },
       );
+    }
+    if (error instanceof UnitOfMeasureError) {
+      return NextResponse.json({ error: error.message }, { status: error.status });
+    }
+    if (error instanceof z.ZodError) {
+      return NextResponse.json({ error: "Μη έγκυρα δεδομένα" }, { status: 400 });
     }
     return NextResponse.json(
       { error: getErrorMessage(error, "Create failed") },
