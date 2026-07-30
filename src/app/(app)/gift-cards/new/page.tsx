@@ -32,7 +32,7 @@ export default async function NewGiftCardPage() {
         </Link>
         <PageHeader
           title="Έκδοση δωροκάρτας"
-          description="Νέος κωδικός με αρχικό υπόλοιπο και προαιρετική σύνδεση πελάτη"
+          description="Νέος κωδικός, αρχικό υπόλοιπο και λογιστικοί λογαριασμοί έκδοσης/εξαργύρωσης"
         />
       </div>
       <IssueGiftCardClient customers={customers} />

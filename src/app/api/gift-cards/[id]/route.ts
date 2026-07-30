@@ -7,11 +7,13 @@ import { getErrorMessage } from "@/shared/lib/safe";
 import { toNumber } from "@/modules/sales/invoice-utils";
 import {
   adjustGiftCardSchema,
+  patchGiftCardAccountingSchema,
   voidGiftCardSchema,
 } from "@/modules/gift-cards/schemas";
 import {
   adjustGiftCard,
   GiftCardError,
+  updateGiftCardAccounting,
   voidGiftCard,
 } from "@/modules/gift-cards/service";
 
@@ -28,6 +30,11 @@ function serializeCard(card: {
   status: string;
   expiresAt: Date | null;
   notes: string | null;
+  glLiabilityAccount?: string | null;
+  glCashAccount?: string | null;
+  glRedeemContraAccount?: string | null;
+  costCenter?: string | null;
+  accountingCode?: string | null;
   createdAt: Date;
   updatedAt: Date;
   customer: { id: string; code: string; name: string } | null;
@@ -38,6 +45,8 @@ function serializeCard(card: {
     balanceAfter: { toString(): string } | number;
     invoiceId: string | null;
     note: string | null;
+    glDebitAccount?: string | null;
+    glCreditAccount?: string | null;
     createdAt: Date;
   }>;
 }) {
@@ -50,6 +59,11 @@ function serializeCard(card: {
     status: card.status,
     expiresAt: card.expiresAt?.toISOString() ?? null,
     notes: card.notes,
+    glLiabilityAccount: card.glLiabilityAccount ?? null,
+    glCashAccount: card.glCashAccount ?? null,
+    glRedeemContraAccount: card.glRedeemContraAccount ?? null,
+    costCenter: card.costCenter ?? null,
+    accountingCode: card.accountingCode ?? null,
     createdAt: card.createdAt.toISOString(),
     updatedAt: card.updatedAt.toISOString(),
     customer: card.customer,
@@ -60,6 +74,8 @@ function serializeCard(card: {
       balanceAfter: toNumber(l.balanceAfter),
       invoiceId: l.invoiceId,
       note: l.note,
+      glDebitAccount: l.glDebitAccount ?? null,
+      glCreditAccount: l.glCreditAccount ?? null,
       createdAt: l.createdAt.toISOString(),
     })),
   };
@@ -136,6 +152,24 @@ export async function PATCH(req: Request, ctx: Ctx) {
         entity: "gift_card",
         entityId: id,
         meta: { amount: data.amount },
+      });
+      return NextResponse.json({ item: serializeCard(card) });
+    }
+
+    if (body.action === "accounting") {
+      const data = patchGiftCardAccountingSchema.parse(body);
+      const card = await updateGiftCardAccounting(prisma, {
+        tenantId: session.tenantId,
+        giftCardId: id,
+        data,
+      });
+      await writeAuditEvent({
+        tenantId: session.tenantId,
+        userId: session.sub,
+        action: "gift_cards.accounting",
+        entity: "gift_card",
+        entityId: id,
+        meta: data,
       });
       return NextResponse.json({ item: serializeCard(card) });
     }

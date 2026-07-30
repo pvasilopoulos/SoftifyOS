@@ -12,7 +12,7 @@ import {
   pointsToEur,
   validateTenders,
 } from "@/modules/pos/payable";
-import { redeemGiftCard } from "@/modules/gift-cards/service";
+import { GiftCardError, redeemGiftCard } from "@/modules/gift-cards/service";
 import {
   earnLoyaltyPoints,
   getLoyaltyRules,
@@ -165,8 +165,29 @@ export async function POST(request: Request) {
       loyaltyAppliedEur,
     });
 
+    // Cap gift/loyalty tender amounts to what calcPayable actually applies
+    // so we never burn more balance than the sale needs.
+    let giftBudget = payable.giftCardApplied;
+    let loyaltyBudget = payable.loyaltyAppliedEur;
+    const settledTenders = body.tenders.map((t) => {
+      const kind = tenderKind(t.method);
+      if (kind === "GIFT_CARD") {
+        const applied = roundMoney(Math.min(Math.max(0, t.amount), giftBudget));
+        giftBudget = roundMoney(Math.max(0, giftBudget - applied));
+        return { ...t, amount: applied };
+      }
+      if (kind === "LOYALTY") {
+        const applied = roundMoney(
+          Math.min(Math.max(0, t.amount), loyaltyBudget),
+        );
+        loyaltyBudget = roundMoney(Math.max(0, loyaltyBudget - applied));
+        return { ...t, amount: applied };
+      }
+      return t;
+    });
+
     // Non gift/loyalty tenders cover payableDue
-    const coverTenders = body.tenders
+    const coverTenders = settledTenders
       .filter((t) => {
         const kind = tenderKind(t.method);
         return kind !== "GIFT_CARD" && kind !== "LOYALTY";
@@ -234,7 +255,12 @@ export async function POST(request: Request) {
           })
         : [];
 
-    for (const t of body.tenders.filter((x) => tenderKind(x.method) === "GIFT_CARD")) {
+    const remainingByCode = new Map(
+      giftCards.map((g) => [g.code, toNumber(g.balance)] as const),
+    );
+    for (const t of settledTenders.filter(
+      (x) => tenderKind(x.method) === "GIFT_CARD" && x.amount > 0,
+    )) {
       const code = (t.giftCardCode || "").trim().toUpperCase();
       const card = giftCards.find((g) => g.code === code);
       if (!card) {
@@ -249,14 +275,16 @@ export async function POST(request: Request) {
           { status: 400 },
         );
       }
-      if (toNumber(card.balance) + 0.001 < t.amount) {
+      const remaining = remainingByCode.get(code) ?? 0;
+      if (remaining + 0.001 < t.amount) {
         return NextResponse.json(
           {
-            error: `Ανεπαρκές υπόλοιπο δωροκάρτας ${code} (${toNumber(card.balance).toFixed(2)} €)`,
+            error: `Ανεπαρκές υπόλοιπο δωροκάρτας ${code} (${remaining.toFixed(2)} €)`,
           },
           { status: 400 },
         );
       }
+      remainingByCode.set(code, roundMoney(remaining - t.amount));
     }
 
     const result = await prisma.$transaction(async (tx) => {
@@ -298,7 +326,10 @@ export async function POST(request: Request) {
       });
 
       let changeLeft = tenderCheck.change;
-      for (const t of body.tenders) {
+      for (const t of settledTenders) {
+        if (t.amount <= 0 && (tenderKind(t.method) === "GIFT_CARD" || tenderKind(t.method) === "LOYALTY")) {
+          continue;
+        }
         const pm = methodByCode.get(t.method)!;
         const kind = pm.kind;
         let giftCardId: string | null = null;
@@ -309,7 +340,7 @@ export async function POST(request: Request) {
           const code = (t.giftCardCode || "").trim().toUpperCase();
           const card = giftCards.find((g) => g.code === code)!;
           giftCardId = card.id;
-          const updated = await redeemGiftCard(tx, {
+          await redeemGiftCard(tx, {
             tenantId: session.tenantId,
             giftCardId: card.id,
             amount: t.amount,
@@ -317,8 +348,6 @@ export async function POST(request: Request) {
             userId: session.sub,
             note: `POS redeem ${t.amount.toFixed(2)} €`,
           });
-          // keep in-memory balance for multi-tender same card
-          (card as { balance: typeof card.balance }).balance = updated.balance;
         }
 
         if (kind === "LOYALTY") {
@@ -413,6 +442,9 @@ export async function POST(request: Request) {
   } catch (error) {
     if (error instanceof z.ZodError) {
       return NextResponse.json({ error: "Μη έγκυρα δεδομένα POS" }, { status: 400 });
+    }
+    if (error instanceof GiftCardError) {
+      return NextResponse.json({ error: error.message }, { status: error.status });
     }
     return NextResponse.json(
       { error: getErrorMessage(error, "POS checkout failed") },
