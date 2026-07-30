@@ -3,8 +3,11 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import {
+  ArrowLeftRight,
+  Banknote,
   CreditCard,
   Gift,
+  MoreHorizontal,
   Plus,
   Star,
   Trash2,
@@ -13,6 +16,7 @@ import {
 import { PageHeader } from "@/shared/ui/page-header";
 import { Button } from "@/shared/ui/button";
 import { Badge } from "@/shared/ui/badge";
+import { cn } from "@/shared/lib/cn";
 import {
   calcInvoiceTotals,
   calcLineTotals,
@@ -25,6 +29,22 @@ import {
   type TenderMethod,
 } from "@/modules/pos/payable";
 import { SeriesPicker } from "@/modules/documents/series-picker";
+
+const PAYMENT_GRID_METHODS = [
+  "CASH",
+  "CARD",
+  "TRANSFER",
+  "GIFT_CARD",
+  "OTHER",
+] as const satisfies readonly TenderMethod[];
+
+const paymentMethodIcon = {
+  CASH: Banknote,
+  CARD: CreditCard,
+  TRANSFER: ArrowLeftRight,
+  GIFT_CARD: Gift,
+  OTHER: MoreHorizontal,
+} as const;
 
 type Site = { id: string; code: string; name: string; kind: string };
 type Customer = { id: string; code: string; name: string };
@@ -88,6 +108,7 @@ export function PosClient({
   const [discount, setDiscount] = useState("0");
   const [giftCode, setGiftCode] = useState("");
   const [giftBalance, setGiftBalance] = useState<number | null>(null);
+  const [showGiftEntry, setShowGiftEntry] = useState(false);
   const [loyalty, setLoyalty] = useState<{
     pointsBalance: number;
     maxRedeemEur: number;
@@ -200,7 +221,11 @@ export function PosClient({
       return;
     }
     setGiftBalance(data.giftCard!.balance);
-    const apply = Math.min(data.giftCard!.balance, payable.saleTotal);
+    const afterDiscount = Math.max(
+      0,
+      payable.saleTotal - (Number(discount) || 0),
+    );
+    const apply = Math.min(data.giftCard!.balance, afterDiscount);
     setTenders((prev) => {
       const without = prev.filter((t) => t.method !== "GIFT_CARD");
       return [
@@ -211,6 +236,40 @@ export function PosClient({
           amount: String(apply),
           giftCardCode: data.giftCard!.code,
         },
+      ];
+    });
+    setShowGiftEntry(true);
+  }
+
+  function pickPaymentMethod(method: (typeof PAYMENT_GRID_METHODS)[number]) {
+    setError(null);
+    if (method === "GIFT_CARD") {
+      setShowGiftEntry(true);
+      return;
+    }
+    setShowGiftEntry(false);
+    const amount =
+      payable.payableDue > 0 ? String(payable.payableDue) : "";
+    setTenders((prev) => {
+      const special = prev.filter(
+        (t) => t.method === "GIFT_CARD" || t.method === "LOYALTY",
+      );
+      const covers = prev.filter(
+        (t) => t.method !== "GIFT_CARD" && t.method !== "LOYALTY",
+      );
+      if (covers.length <= 1) {
+        return [
+          ...special,
+          {
+            key: covers[0]?.key ?? `t-${Date.now()}`,
+            method,
+            amount: amount || covers[0]?.amount || "",
+          },
+        ];
+      }
+      return [
+        ...prev,
+        { key: `t-${Date.now()}`, method, amount },
       ];
     });
   }
@@ -340,6 +399,7 @@ export function PosClient({
     setDiscount("0");
     setGiftCode("");
     setGiftBalance(null);
+    setShowGiftEntry(false);
     setLoyaltyRedeemEur("0");
     // refresh loyalty
     if (customerId) {
@@ -618,28 +678,6 @@ export function PosClient({
 
             <div className="space-y-2 rounded-xl border border-slate-100 p-3">
               <p className="flex items-center gap-1.5 text-xs font-medium text-slate-500">
-                <Gift size={13} /> Δωροκάρτα
-              </p>
-              <div className="flex gap-2">
-                <input
-                  value={giftCode}
-                  onChange={(e) => setGiftCode(e.target.value)}
-                  placeholder="κωδικός π.χ. GIFT-100"
-                  className="h-10 flex-1 rounded-lg border border-slate-200 px-2 text-sm"
-                />
-                <Button type="button" size="sm" variant="secondary" onClick={() => void lookupGift()}>
-                  Εφαρμογή
-                </Button>
-              </div>
-              {giftBalance != null ? (
-                <p className="text-xs text-emerald-700">
-                  Υπόλοιπο {formatEUR(giftBalance)}
-                </p>
-              ) : null}
-            </div>
-
-            <div className="space-y-2 rounded-xl border border-slate-100 p-3">
-              <p className="flex items-center gap-1.5 text-xs font-medium text-slate-500">
                 <Star size={13} /> Loyalty
               </p>
               {loyalty ? (
@@ -675,43 +713,87 @@ export function PosClient({
               )}
             </div>
 
-            <div className="space-y-2">
+            <div className="space-y-3">
               <p className="flex items-center gap-1.5 text-xs font-medium text-slate-500">
                 <Wallet size={13} /> Τρόποι πληρωμής
               </p>
-              {tenders
-                .filter((t) => t.method !== "GIFT_CARD" && t.method !== "LOYALTY")
-                .map((t) => (
-                  <div key={t.key} className="flex gap-2">
-                    <select
-                      value={t.method}
-                      onChange={(e) =>
-                        setTenders((prev) =>
-                          prev.map((x) =>
-                            x.key === t.key
-                              ? {
-                                  ...x,
-                                  method: e.target.value as TenderMethod,
-                                }
-                              : x,
-                          ),
-                        )
-                      }
-                      className="h-10 rounded-lg border border-slate-200 px-2 text-sm"
-                    >
-                      {(["CASH", "CARD", "TRANSFER", "OTHER"] as const).map(
-                        (m) => (
-                          <option key={m} value={m}>
-                            {tenderMethodLabel[m]}
-                          </option>
-                        ),
+              <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+                {PAYMENT_GRID_METHODS.map((method) => {
+                  const Icon = paymentMethodIcon[method];
+                  const active =
+                    method === "GIFT_CARD"
+                      ? showGiftEntry ||
+                        tenders.some((t) => t.method === "GIFT_CARD")
+                      : tenders.some((t) => t.method === method);
+                  return (
+                    <button
+                      key={method}
+                      type="button"
+                      onClick={() => pickPaymentMethod(method)}
+                      className={cn(
+                        "flex flex-col items-center justify-center gap-1.5 rounded-xl border px-2 py-3 text-center text-xs font-medium transition",
+                        active
+                          ? "border-teal-300 bg-teal-50 text-teal-900"
+                          : "border-slate-200 bg-white text-slate-700 hover:border-teal-200 hover:bg-teal-50/40",
                       )}
-                    </select>
+                    >
+                      <Icon size={18} className={active ? "text-teal-700" : "text-slate-400"} />
+                      {tenderMethodLabel[method]}
+                    </button>
+                  );
+                })}
+              </div>
+
+              {showGiftEntry || tenders.some((t) => t.method === "GIFT_CARD") ? (
+                <div className="space-y-2 rounded-xl border border-teal-100 bg-teal-50/40 p-3">
+                  <p className="flex items-center gap-1.5 text-xs font-medium text-teal-800">
+                    <Gift size={13} /> Κωδικός δωροκάρτας
+                  </p>
+                  <div className="flex gap-2">
+                    <input
+                      value={giftCode}
+                      onChange={(e) => setGiftCode(e.target.value)}
+                      placeholder="π.χ. GIFT-100"
+                      autoFocus={showGiftEntry}
+                      className="h-10 flex-1 rounded-lg border border-slate-200 bg-white px-2 text-sm"
+                    />
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="secondary"
+                      onClick={() => void lookupGift()}
+                    >
+                      Εφαρμογή
+                    </Button>
+                  </div>
+                  {giftBalance != null ? (
+                    <p className="text-xs text-emerald-700">
+                      Υπόλοιπο {formatEUR(giftBalance)}
+                      {giftApplied > 0
+                        ? ` · εφαρμόστηκε ${formatEUR(giftApplied)}`
+                        : ""}
+                    </p>
+                  ) : null}
+                </div>
+              ) : null}
+
+              {tenders
+                .filter((t) => t.method !== "LOYALTY")
+                .map((t) => (
+                  <div key={t.key} className="flex items-center gap-2">
+                    <span className="w-28 shrink-0 text-xs font-medium text-slate-600">
+                      {tenderMethodLabel[t.method]}
+                      {t.method === "GIFT_CARD" && t.giftCardCode
+                        ? ` · ${t.giftCardCode}`
+                        : ""}
+                    </span>
                     <input
                       type="number"
                       min="0.01"
                       step="0.01"
-                      required={payable.payableDue > 0}
+                      required={
+                        t.method !== "GIFT_CARD" && payable.payableDue > 0
+                      }
                       value={t.amount}
                       onChange={(e) =>
                         setTenders((prev) =>
@@ -724,11 +806,26 @@ export function PosClient({
                       }
                       className="h-10 flex-1 rounded-lg border border-slate-200 px-2 text-sm"
                     />
-                    {t.method === "CARD" ? (
-                      <span className="flex h-10 items-center text-slate-400">
-                        <CreditCard size={16} />
-                      </span>
-                    ) : null}
+                    <button
+                      type="button"
+                      className="rounded-lg p-2 text-slate-400 hover:bg-slate-100 hover:text-rose-600"
+                      aria-label="Αφαίρεση"
+                      onClick={() => {
+                        const removingGift = t.method === "GIFT_CARD";
+                        setTenders((prev) => {
+                          const next = prev.filter((x) => x.key !== t.key);
+                          return next.length
+                            ? next
+                            : [{ key: "cash", method: "CASH", amount: "" }];
+                        });
+                        if (removingGift) {
+                          setGiftBalance(null);
+                          setShowGiftEntry(false);
+                        }
+                      }}
+                    >
+                      <Trash2 size={16} />
+                    </button>
                   </div>
                 ))}
               <Button
@@ -741,12 +838,12 @@ export function PosClient({
                     {
                       key: `t-${Date.now()}`,
                       method: "CARD",
-                      amount: "",
+                      amount: payable.payableDue > 0 ? String(payable.payableDue) : "",
                     },
                   ])
                 }
               >
-                + Τρόπος πληρωμής
+                + Επιπλέον τρόπος
               </Button>
             </div>
 
