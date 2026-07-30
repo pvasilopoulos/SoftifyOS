@@ -41,6 +41,7 @@ model Tenant {
   branches    Branch[]
   spaces      Space[]
   invoices    Invoice[]
+  products    Product[]
 
   @@map("tenants")
 }
@@ -167,6 +168,34 @@ model Space {
   @@index([tenantId, branchId, createdAt(sort: Desc)])
   @@index([tenantId, type, createdAt(sort: Desc)])
   @@map("spaces")
+}
+
+enum ProductStatus {
+  ACTIVE
+  INACTIVE
+}
+
+/// Προϊόν / υπηρεσία καταλόγου — βάση για παραγγελίες & αποθήκη
+model Product {
+  id        String        @id @default(cuid())
+  tenantId  String
+  sku       String
+  name      String
+  unit      String        @default("τεμ")
+  vatRate   Decimal       @default(24) @db.Decimal(5, 2)
+  price     Decimal       @db.Decimal(14, 2)
+  status    ProductStatus @default(ACTIVE)
+  notes     String?
+  createdAt DateTime      @default(now())
+  updatedAt DateTime      @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, sku])
+  @@index([tenantId, name])
+  @@index([tenantId, createdAt(sort: Desc), id(sort: Desc)])
+  @@index([tenantId, status, createdAt(sort: Desc)])
+  @@map("products")
 }
 
 enum InvoiceStatus {

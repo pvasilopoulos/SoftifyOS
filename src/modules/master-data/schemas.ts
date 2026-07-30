@@ -39,3 +39,18 @@ export const spaceTypeLabel = {
   YARD: "Αυλή/Υπαίθριος",
   OTHER: "Άλλο",
 } as const;
+
+export const productCreateSchema = z.object({
+  sku: z.string().trim().min(1).max(40),
+  name: z.string().trim().min(1).max(200),
+  unit: z.string().trim().min(1).max(20).optional().default("τεμ"),
+  vatRate: z.coerce.number().min(0).max(100).optional().default(24),
+  price: z.coerce.number().nonnegative().max(10_000_000),
+  notes: z.string().trim().max(2000).optional().nullable(),
+  status: z.enum(["ACTIVE", "INACTIVE"]).optional(),
+});
+
+export const productStatusLabel = {
+  ACTIVE: "Ενεργό",
+  INACTIVE: "Ανενεργό",
+} as const;

@@ -10,6 +10,7 @@ import {
   FileText,
   Truck,
   ScrollText,
+  Tags,
   type LucideIcon,
 } from "lucide-react";
 
@@ -62,6 +63,11 @@ export const navGroups: NavGroup[] = [
     label: "Λειτουργίες",
     items: [
       {
+        href: "/products",
+        label: "Προϊόντα",
+        icon: Tags,
+      },
+      {
         href: "/inventory",
         label: "Αποθήκη",
         icon: Package,
@@ -111,6 +117,12 @@ export const quickActions = [
     label: "Άνοιγμα πελάτη",
     href: "/customers",
     shortcut: "G C",
+  },
+  {
+    id: "open-products",
+    label: "Κατάλογος προϊόντων",
+    href: "/products",
+    shortcut: "G P",
   },
   {
     id: "inventory",
