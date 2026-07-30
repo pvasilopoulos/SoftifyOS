@@ -18,3 +18,5 @@ linked to Customer → Branch → Space.
 
 ## Consequences
 Orders and payments will later post into / against invoices using the same workspace patterns.
+Invoice actions: PDF print view (`/invoices/:id/print`), send (audit + promote DRAFT→ISSUED),
+collect payment (`POST .../collect` updates paidAmount + status).

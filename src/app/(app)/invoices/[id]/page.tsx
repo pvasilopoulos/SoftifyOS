@@ -1,11 +1,10 @@
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
-import { ArrowLeft, FileDown, Send, Wallet } from "lucide-react";
+import { ArrowLeft } from "lucide-react";
 import { getSession } from "@/platform/auth/session";
 import { prisma } from "@/server/db";
 import { PageHeader } from "@/shared/ui/page-header";
 import { Badge } from "@/shared/ui/badge";
-import { Button } from "@/shared/ui/button";
 import {
   formatEUR,
   invoiceStatusLabel,
@@ -13,6 +12,7 @@ import {
   toNumber,
   type InvoiceStatusKey,
 } from "@/modules/sales/invoice-utils";
+import { InvoiceActions } from "../invoice-actions";
 
 export const dynamic = "force-dynamic";
 
@@ -67,20 +67,13 @@ export default async function InvoiceDetailPage({
           title={invoice.number}
           description={`${invoice.customer.name}${invoice.branch ? ` · ${invoice.branch.name}` : ""}${invoice.space ? ` · ${invoice.space.name}` : ""}`}
           actions={
-            <>
-              <Button variant="secondary" size="sm">
-                <FileDown size={15} />
-                PDF
-              </Button>
-              <Button variant="secondary" size="sm">
-                <Send size={15} />
-                Αποστολή
-              </Button>
-              <Button size="sm">
-                <Wallet size={15} />
-                Είσπραξη
-              </Button>
-            </>
+            <InvoiceActions
+              invoiceId={invoice.id}
+              status={invoice.status}
+              total={total}
+              paidAmount={paid}
+              size="md"
+            />
           }
         />
       </div>

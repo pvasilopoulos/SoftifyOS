@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useState, useTransition } from "react";
-import { FileDown, Filter, Search, Send, Wallet } from "lucide-react";
+import { FileDown, Filter, Search, Send } from "lucide-react";
 import { Badge } from "@/shared/ui/badge";
 import { Button } from "@/shared/ui/button";
 import { cn } from "@/shared/lib/cn";
@@ -13,6 +13,7 @@ import {
   paidRatio,
   type InvoiceStatusKey,
 } from "@/modules/sales/invoice-utils";
+import { InvoiceActions } from "./invoice-actions";
 
 export type InvoiceListItem = {
   id: string;
@@ -238,6 +239,32 @@ export function InvoicesWorkspace({
             size="sm"
             variant="secondary"
             className="bg-white/10 text-white hover:bg-white/20"
+            disabled={isPending}
+            onClick={() => {
+              startTransition(async () => {
+                setError(null);
+                let ok = 0;
+                for (const id of selectedIds) {
+                  const res = await fetch(`/api/invoices/${id}/send`, {
+                    method: "POST",
+                  });
+                  if (res.ok) ok += 1;
+                }
+                setError(
+                  ok === selectedIds.length
+                    ? null
+                    : `Αποστολή: ${ok}/${selectedIds.length} επιτυχημένες`,
+                );
+                void loadList(tab, false);
+                if (previewId) {
+                  const res = await fetch(`/api/invoices/${previewId}`, {
+                    cache: "no-store",
+                  });
+                  const data = (await res.json()) as DetailResponse;
+                  if (res.ok && data.item) setPreview(data.item);
+                }
+              });
+            }}
           >
             <Send size={14} />
             Αποστολή
@@ -246,6 +273,11 @@ export function InvoicesWorkspace({
             size="sm"
             variant="secondary"
             className="bg-white/10 text-white hover:bg-white/20"
+            onClick={() => {
+              for (const id of selectedIds.slice(0, 5)) {
+                window.open(`/invoices/${id}/print`, "_blank", "noopener");
+              }
+            }}
           >
             <FileDown size={14} />
             PDF
@@ -456,19 +488,23 @@ export function InvoicesWorkspace({
                 </ul>
               </div>
 
-              <div className="flex flex-wrap gap-2 pt-1">
-                <Button size="sm">
-                  <FileDown size={14} />
-                  PDF
-                </Button>
-                <Button size="sm" variant="secondary">
-                  <Send size={14} />
-                  Αποστολή
-                </Button>
-                <Button size="sm" variant="secondary">
-                  <Wallet size={14} />
-                  Είσπραξη
-                </Button>
+              <div className="space-y-2 pt-1">
+                <InvoiceActions
+                  invoiceId={preview.id}
+                  status={preview.status}
+                  total={preview.total}
+                  paidAmount={preview.paidAmount}
+                  onDone={() => {
+                    void loadList(tab, false);
+                    void (async () => {
+                      const res = await fetch(`/api/invoices/${preview.id}`, {
+                        cache: "no-store",
+                      });
+                      const data = (await res.json()) as DetailResponse;
+                      if (res.ok && data.item) setPreview(data.item);
+                    })();
+                  }}
+                />
                 <Link
                   href={`/invoices/${preview.id}`}
                   className="inline-flex h-8 items-center rounded-xl px-3 text-xs font-medium text-teal-700 hover:bg-teal-50"

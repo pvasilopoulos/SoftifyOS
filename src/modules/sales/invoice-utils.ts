@@ -83,3 +83,19 @@ export function calcInvoiceTotals(
     total: roundMoney(subtotal + vatAmount),
   };
 }
+
+/** Status after applying a new paidAmount (does not revive CANCELLED). */
+export function statusAfterPayment(
+  current: InvoiceStatusKey,
+  paidAmount: number,
+  total: number,
+): InvoiceStatusKey {
+  if (current === "CANCELLED" || current === "DRAFT") return current;
+  if (paidAmount >= total - 0.001) return "PAID";
+  if (paidAmount > 0) {
+    if (current === "OVERDUE") return "OVERDUE";
+    return "PARTIAL";
+  }
+  if (current === "PARTIAL" || current === "PAID") return "ISSUED";
+  return current;
+}

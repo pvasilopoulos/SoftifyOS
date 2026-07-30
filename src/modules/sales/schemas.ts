@@ -28,4 +28,10 @@ export const invoiceCreateSchema = z.object({
   lines: z.array(invoiceLineCreateSchema).min(1).max(100),
 });
 
+export const invoiceCollectSchema = z.object({
+  amount: z.coerce.number().positive().max(10_000_000),
+  note: z.string().trim().max(500).optional().nullable(),
+});
+
 export type InvoiceCreateInput = z.infer<typeof invoiceCreateSchema>;
+export type InvoiceCollectInput = z.infer<typeof invoiceCollectSchema>;
