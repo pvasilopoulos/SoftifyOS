@@ -32,7 +32,7 @@ async function main() {
     },
   });
 
-  await prisma.membership.upsert({
+  const membership = await prisma.membership.upsert({
     where: {
       tenantId_userId: {
         tenantId: tenant.id,
@@ -46,6 +46,91 @@ async function main() {
       role: MembershipRole.OWNER,
     },
   });
+
+  const systemRoles: Array<{
+    code: string;
+    name: string;
+    description: string;
+    permissions: string[];
+  }> = [
+    {
+      code: "OWNER",
+      name: "Ιδιοκτήτης",
+      description: "Πλήρης πρόσβαση στο tenant",
+      permissions: ["*"],
+    },
+    {
+      code: "ADMIN",
+      name: "Διαχειριστής",
+      description: "Διαχείριση ρυθμίσεων, χρηστών και δεδομένων",
+      permissions: ["*"],
+    },
+    {
+      code: "MEMBER",
+      name: "Μέλος",
+      description: "Καθημερινή εργασία σε πωλήσεις και λειτουργίες",
+      permissions: [
+        "dashboard.view",
+        "customers.read",
+        "customers.write",
+        "quotes.read",
+        "quotes.write",
+        "orders.read",
+        "orders.write",
+        "invoices.read",
+        "invoices.write",
+        "pos.use",
+        "products.read",
+        "inventory.read",
+        "purchasing.read",
+        "finance.read",
+        "reports.read",
+      ],
+    },
+    {
+      code: "VIEWER",
+      name: "Αναγνώστης",
+      description: "Μόνο ανάγνωση",
+      permissions: [
+        "dashboard.view",
+        "customers.read",
+        "quotes.read",
+        "orders.read",
+        "invoices.read",
+        "products.read",
+        "inventory.read",
+        "purchasing.read",
+        "finance.read",
+        "reports.read",
+      ],
+    },
+  ];
+
+  for (const role of systemRoles) {
+    const appRole = await prisma.appRole.upsert({
+      where: { tenantId_code: { tenantId: tenant.id, code: role.code } },
+      create: {
+        tenantId: tenant.id,
+        code: role.code,
+        name: role.name,
+        description: role.description,
+        permissions: role.permissions,
+        isSystem: true,
+      },
+      update: {
+        name: role.name,
+        description: role.description,
+        permissions: role.permissions,
+        isSystem: true,
+      },
+    });
+    if (role.code === "OWNER") {
+      await prisma.membership.update({
+        where: { id: membership.id },
+        data: { appRoleId: appRole.id },
+      });
+    }
+  }
 
   await prisma.auditEvent.create({
     data: {
@@ -61,6 +146,7 @@ async function main() {
   console.log("Seeded SoftifyOS Phase 0");
   console.log("  tenant:", tenant.slug);
   console.log("  user:  maria@akropolis.gr / SoftifyOS!2026");
+  console.log("  roles: OWNER/ADMIN/MEMBER/VIEWER");
 
   await prisma.$disconnect();
   await pool.end();

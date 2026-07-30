@@ -3,15 +3,17 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { PanelLeftClose, PanelLeft } from "lucide-react";
-import { navGroups } from "@/platform/navigation";
+import type { NavGroup } from "@/platform/navigation";
 import { cn } from "@/shared/lib/cn";
 
 export function Sidebar({
   collapsed,
   onToggle,
+  groups,
 }: {
   collapsed: boolean;
   onToggle: () => void;
+  groups: NavGroup[];
 }) {
   const pathname = usePathname();
 
@@ -44,7 +46,7 @@ export function Sidebar({
       </div>
 
       <nav className="flex-1 overflow-y-auto px-2 py-4">
-        {navGroups.map((group) => (
+        {groups.map((group) => (
           <div key={group.id} className="mb-5">
             {!collapsed ? (
               <p className="mb-1.5 px-2.5 text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-400">
@@ -59,7 +61,7 @@ export function Sidebar({
                     : pathname.startsWith(item.href);
                 const Icon = item.icon;
                 return (
-                  <li key={item.href}>
+                  <li key={item.id || item.href}>
                     <Link
                       href={item.href}
                       title={item.label}
@@ -78,7 +80,9 @@ export function Sidebar({
                           active ? "text-teal-700" : "text-slate-400",
                         )}
                       />
-                      {!collapsed ? <span className="truncate">{item.label}</span> : null}
+                      {!collapsed ? (
+                        <span className="truncate">{item.label}</span>
+                      ) : null}
                     </Link>
                   </li>
                 );

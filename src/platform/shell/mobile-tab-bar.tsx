@@ -2,11 +2,12 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { mobileTabs } from "@/platform/navigation";
+import { useNav } from "@/platform/navigation/nav-context";
 import { cn } from "@/shared/lib/cn";
 
 export function MobileTabBar() {
   const pathname = usePathname();
+  const { mobileTabs } = useNav();
 
   return (
     <nav className="fixed inset-x-0 bottom-0 z-40 border-t border-slate-200/90 bg-white/95 pb-[env(safe-area-inset-bottom)] backdrop-blur lg:hidden">

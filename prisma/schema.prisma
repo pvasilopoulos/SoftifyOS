@@ -51,6 +51,9 @@ model Tenant {
   giftCards        GiftCard[]
   loyaltyAccounts  LoyaltyAccount[]
   loyaltyLedgers   LoyaltyLedger[]
+  tenantSettings   TenantSettings?
+  appRoles         AppRole[]
+  userGroups       UserGroup[]
 
   @@map("tenants")
 }
@@ -74,15 +77,19 @@ model Membership {
   tenantId  String
   userId    String
   role      MembershipRole @default(MEMBER)
+  appRoleId String?
   createdAt DateTime       @default(now())
   updatedAt DateTime       @updatedAt
 
-  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tenant  Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  user    User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  appRole AppRole? @relation(fields: [appRoleId], references: [id], onDelete: SetNull)
+  groups  UserGroupMember[]
 
   @@unique([tenantId, userId])
   @@index([userId])
   @@index([tenantId, role])
+  @@index([tenantId, appRoleId])
   @@map("memberships")
 }
 
@@ -641,4 +648,88 @@ model LoyaltyLedger {
 
   @@index([tenantId, accountId, createdAt(sort: Desc)])
   @@map("loyalty_ledgers")
+}
+
+/// Tenant-level UI / menu preferences
+model TenantSettings {
+  id        String   @id @default(cuid())
+  tenantId  String   @unique
+  /// JSON MenuNodeConfig[]
+  menuJson  Json?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@map("tenant_settings")
+}
+
+/// Custom role with permission codes (plus MembershipRole for backward compat)
+model AppRole {
+  id          String   @id @default(cuid())
+  tenantId    String
+  code        String
+  name        String
+  description String?
+  /// Permission codes e.g. ["invoices.write","pos.use","users.manage"]
+  permissions String[]
+  isSystem    Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  tenant      Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  memberships Membership[]
+  groups      UserGroupRole[]
+
+  @@unique([tenantId, code])
+  @@index([tenantId, isSystem])
+  @@map("app_roles")
+}
+
+model UserGroup {
+  id          String   @id @default(cuid())
+  tenantId    String
+  code        String
+  name        String
+  description String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  tenant  Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  members UserGroupMember[]
+  roles   UserGroupRole[]
+
+  @@unique([tenantId, code])
+  @@index([tenantId])
+  @@map("user_groups")
+}
+
+model UserGroupMember {
+  id           String   @id @default(cuid())
+  tenantId     String
+  groupId      String
+  membershipId String
+  createdAt    DateTime @default(now())
+
+  group      UserGroup  @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  membership Membership @relation(fields: [membershipId], references: [id], onDelete: Cascade)
+
+  @@unique([groupId, membershipId])
+  @@index([tenantId, groupId])
+  @@map("user_group_members")
+}
+
+model UserGroupRole {
+  id        String   @id @default(cuid())
+  tenantId  String
+  groupId   String
+  appRoleId String
+  createdAt DateTime @default(now())
+
+  group   UserGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  appRole AppRole   @relation(fields: [appRoleId], references: [id], onDelete: Cascade)
+
+  @@unique([groupId, appRoleId])
+  @@index([tenantId, groupId])
+  @@map("user_group_roles")
 }
