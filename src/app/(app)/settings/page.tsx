@@ -44,6 +44,20 @@ const links = [
     badge: "Παραμετρικό",
   },
   {
+    href: "/settings/print-forms",
+    title: "Φόρμες εκτύπωσης",
+    description:
+      "Print Form Builder — blocks κεφαλίδας, γραμμών και συνόλων για τιμολόγια/ΑΠΥ.",
+    badge: "Παραμετρικό",
+  },
+  {
+    href: "/settings/gl-accounts",
+    title: "Λογιστικό σχέδιο",
+    description:
+      "Λογαριασμοί γενικής λογιστικής (χάρτης λογαριασμών) για άρθρα ημερολογίου.",
+    badge: "Λογιστική",
+  },
+  {
     href: "/settings/units",
     title: "Μονάδες μέτρησης",
     description:
@@ -54,7 +68,7 @@ const links = [
     href: "/settings/series",
     title: "Σειρές & Τύποι",
     description:
-      "Αρίθμηση, κινήσεις, myDATA και επιτρεπόμενοι τρόποι εξόφλησης ανά σειρά.",
+      "Αρίθμηση, myDATA, εξοφλήσεις και φόρμες εκτύπωσης ανά σειρά.",
     badge: "Κρίσιμο",
   },
 ];

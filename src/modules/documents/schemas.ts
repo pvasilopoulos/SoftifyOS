@@ -55,6 +55,9 @@ export const seriesCreateSchema = z.object({
   /** Empty / omitted = all catalog methods allowed for this series */
   allowedPaymentMethodIds: z.array(z.string().min(1)).max(50).optional(),
   defaultPaymentMethodId: z.string().min(1).nullable().optional(),
+  /** Empty / omitted = default form for document kind */
+  allowedPrintFormIds: z.array(z.string().min(1)).max(50).optional(),
+  defaultPrintFormId: z.string().min(1).nullable().optional(),
 });
 
 export const seriesUpdateSchema = seriesCreateSchema.partial();

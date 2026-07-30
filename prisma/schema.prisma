@@ -53,12 +53,17 @@ model Tenant {
   loyaltyAccounts  LoyaltyAccount[]
   loyaltyLedgers   LoyaltyLedger[]
   loyaltyProgram   LoyaltyProgram?
-  paymentMethods              PaymentMethod[]
+  paymentMethods               PaymentMethod[]
   documentSeriesPaymentMethods DocumentSeriesPaymentMethod[]
-  unitsOfMeasure              UnitOfMeasure[]
-  tenantSettings              TenantSettings?
-  appRoles                    AppRole[]
-  userGroups                  UserGroup[]
+  documentSeriesPrintForms     DocumentSeriesPrintForm[]
+  printForms                   PrintForm[]
+  glAccounts                   GlAccount[]
+  fiscalPeriods                FiscalPeriod[]
+  journalEntries               JournalEntry[]
+  unitsOfMeasure               UnitOfMeasure[]
+  tenantSettings               TenantSettings?
+  appRoles                     AppRole[]
+  userGroups                   UserGroup[]
 
   @@map("tenants")
 }
@@ -569,6 +574,7 @@ model DocumentSeries {
   invoices       Invoice[]
   orders         Order[]
   paymentMethods DocumentSeriesPaymentMethod[]
+  printForms     DocumentSeriesPrintForm[]
 
   @@unique([tenantId, code])
   @@index([tenantId, kind, isActive])
@@ -919,4 +925,168 @@ model UserGroupRole {
   @@unique([groupId, appRoleId])
   @@index([tenantId, groupId])
   @@map("user_group_roles")
+}
+
+// ─── Print Form Builder ─────────────────────────────────────────────
+
+enum PrintPaperSize {
+  A4
+  A5
+  RECEIPT_80
+}
+
+enum PrintOrientation {
+  PORTRAIT
+  LANDSCAPE
+}
+
+/// Parametric print form template (bodyJson = block layout)
+model PrintForm {
+  id            String           @id @default(cuid())
+  tenantId      String
+  code          String
+  name          String
+  documentKind  DocumentKind
+  paper         PrintPaperSize   @default(A4)
+  orientation   PrintOrientation @default(PORTRAIT)
+  /// Block layout: header, parties, lines, totals, footer, text, spacer
+  bodyJson      Json
+  isDefault     Boolean          @default(false)
+  isSystem      Boolean          @default(false)
+  isActive      Boolean          @default(true)
+  createdAt     DateTime         @default(now())
+  updatedAt     DateTime         @updatedAt
+
+  tenant Tenant                   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  series DocumentSeriesPrintForm[]
+
+  @@unique([tenantId, code])
+  @@index([tenantId, documentKind, isActive])
+  @@map("print_forms")
+}
+
+/// Which print forms a document series may use (grid in series settings)
+model DocumentSeriesPrintForm {
+  id          String   @id @default(cuid())
+  tenantId    String
+  seriesId    String
+  printFormId String
+  isDefault   Boolean  @default(false)
+  sortOrder   Int      @default(0)
+  createdAt   DateTime @default(now())
+
+  tenant    Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  series    DocumentSeries @relation(fields: [seriesId], references: [id], onDelete: Cascade)
+  printForm PrintForm      @relation(fields: [printFormId], references: [id], onDelete: Cascade)
+
+  @@unique([seriesId, printFormId])
+  @@index([tenantId, seriesId])
+  @@map("document_series_print_forms")
+}
+
+// ─── General Ledger ─────────────────────────────────────────────────
+
+enum GlAccountType {
+  ASSET
+  LIABILITY
+  EQUITY
+  REVENUE
+  EXPENSE
+}
+
+enum FiscalPeriodStatus {
+  OPEN
+  CLOSED
+}
+
+enum JournalStatus {
+  DRAFT
+  POSTED
+  VOID
+}
+
+model GlAccount {
+  id         String        @id @default(cuid())
+  tenantId   String
+  code       String
+  name       String
+  type       GlAccountType
+  parentId   String?
+  isPostable Boolean       @default(true)
+  isSystem   Boolean       @default(false)
+  isActive   Boolean       @default(true)
+  createdAt  DateTime      @default(now())
+  updatedAt  DateTime      @updatedAt
+
+  tenant   Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  parent   GlAccount?     @relation("GlAccountTree", fields: [parentId], references: [id], onDelete: SetNull)
+  children GlAccount[]    @relation("GlAccountTree")
+  lines    JournalLine[]
+
+  @@unique([tenantId, code])
+  @@index([tenantId, type, isActive])
+  @@index([tenantId, parentId])
+  @@map("gl_accounts")
+}
+
+model FiscalPeriod {
+  id        String             @id @default(cuid())
+  tenantId  String
+  code      String
+  name      String
+  year      Int
+  startsAt  DateTime
+  endsAt    DateTime
+  status    FiscalPeriodStatus @default(OPEN)
+  createdAt DateTime           @default(now())
+  updatedAt DateTime           @updatedAt
+
+  tenant  Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  journals JournalEntry[]
+
+  @@unique([tenantId, code])
+  @@index([tenantId, year, status])
+  @@map("fiscal_periods")
+}
+
+model JournalEntry {
+  id             String        @id @default(cuid())
+  tenantId       String
+  number         String
+  status         JournalStatus @default(DRAFT)
+  description    String?
+  sourceType     String?
+  sourceId       String?
+  fiscalPeriodId String?
+  postedAt       DateTime?
+  createdByUserId String?
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+
+  tenant       Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  fiscalPeriod FiscalPeriod?  @relation(fields: [fiscalPeriodId], references: [id], onDelete: SetNull)
+  lines        JournalLine[]
+
+  @@unique([tenantId, number])
+  @@index([tenantId, status, postedAt])
+  @@index([tenantId, sourceType, sourceId])
+  @@map("journal_entries")
+}
+
+model JournalLine {
+  id             String  @id @default(cuid())
+  tenantId       String
+  journalEntryId String
+  glAccountId    String
+  lineNo         Int     @default(0)
+  memo           String?
+  debit          Decimal @default(0) @db.Decimal(14, 2)
+  credit         Decimal @default(0) @db.Decimal(14, 2)
+
+  journalEntry JournalEntry @relation(fields: [journalEntryId], references: [id], onDelete: Cascade)
+  glAccount    GlAccount    @relation(fields: [glAccountId], references: [id], onDelete: Restrict)
+
+  @@index([tenantId, journalEntryId])
+  @@index([tenantId, glAccountId])
+  @@map("journal_lines")
 }

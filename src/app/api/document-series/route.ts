@@ -12,6 +12,11 @@ import {
   syncSeriesPaymentMethods,
 } from "@/modules/documents/series-payments";
 import { ensurePaymentMethods } from "@/modules/payments/service";
+import {
+  ensureDefaultPrintForms,
+  mapSeriesPrintLinks,
+  syncSeriesPrintForms,
+} from "@/modules/print-forms/service";
 
 export const dynamic = "force-dynamic";
 
@@ -20,7 +25,7 @@ const listSchema = z.object({
   siteId: z.string().optional(),
 });
 
-const paymentInclude = {
+const seriesInclude = {
   paymentMethods: {
     orderBy: [{ sortOrder: "asc" as const }, { createdAt: "asc" as const }],
     include: {
@@ -35,7 +40,40 @@ const paymentInclude = {
       },
     },
   },
+  printForms: {
+    orderBy: [{ sortOrder: "asc" as const }, { createdAt: "asc" as const }],
+    include: {
+      printForm: {
+        select: {
+          id: true,
+          code: true,
+          name: true,
+          documentKind: true,
+          isActive: true,
+        },
+      },
+    },
+  },
 };
+
+function mapSeriesItem(s: {
+  paymentMethods: Parameters<typeof mapSeriesPaymentLinks>[0];
+  printForms: Parameters<typeof mapSeriesPrintLinks>[0];
+  prefix: string;
+  padLength: number;
+  nextNumber: number;
+  lastYear: number | null;
+  resetPolicy: "NEVER" | "YEARLY";
+  [key: string]: unknown;
+}) {
+  const { paymentMethods: payLinks, printForms: formLinks, ...rest } = s;
+  return {
+    ...rest,
+    previewNumber: previewNextNumber(s),
+    ...mapSeriesPaymentLinks(payLinks),
+    ...mapSeriesPrintLinks(formLinks),
+  };
+}
 
 export async function GET(request: NextRequest) {
   try {
@@ -50,7 +88,10 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: "Invalid query" }, { status: 400 });
     }
 
-    await ensurePaymentMethods(prisma, session.tenantId);
+    await Promise.all([
+      ensurePaymentMethods(prisma, session.tenantId),
+      ensureDefaultPrintForms(prisma, session.tenantId),
+    ]);
 
     const items = await prisma.documentSeries.findMany({
       where: {
@@ -61,19 +102,12 @@ export async function GET(request: NextRequest) {
       orderBy: [{ kind: "asc" }, { code: "asc" }],
       include: {
         site: { select: { id: true, code: true, name: true, kind: true } },
-        ...paymentInclude,
+        ...seriesInclude,
       },
     });
 
     return NextResponse.json({
-      items: items.map((s) => {
-        const { paymentMethods: links, ...rest } = s;
-        return {
-          ...rest,
-          previewNumber: previewNextNumber(s),
-          ...mapSeriesPaymentLinks(links),
-        };
-      }),
+      items: items.map((s) => mapSeriesItem(s)),
     });
   } catch (error) {
     return NextResponse.json(
@@ -103,7 +137,10 @@ export async function POST(request: Request) {
       }
     }
 
-    await ensurePaymentMethods(prisma, session.tenantId);
+    await Promise.all([
+      ensurePaymentMethods(prisma, session.tenantId),
+      ensureDefaultPrintForms(prisma, session.tenantId),
+    ]);
 
     const item = await prisma.$transaction(async (tx) => {
       if (body.isDefault) {
@@ -152,9 +189,18 @@ export async function POST(request: Request) {
         });
       }
 
+      if (body.allowedPrintFormIds !== undefined) {
+        await syncSeriesPrintForms(tx, {
+          tenantId: session.tenantId,
+          seriesId: created.id,
+          printFormIds: body.allowedPrintFormIds,
+          defaultPrintFormId: body.defaultPrintFormId,
+        });
+      }
+
       return tx.documentSeries.findUniqueOrThrow({
         where: { id: created.id },
-        include: paymentInclude,
+        include: seriesInclude,
       });
     });
 
@@ -168,21 +214,11 @@ export async function POST(request: Request) {
         code: item.code,
         kind: item.kind,
         paymentMethods: item.paymentMethods.length,
+        printForms: item.printForms.length,
       },
     });
 
-    const pay = mapSeriesPaymentLinks(item.paymentMethods);
-    const { paymentMethods: _links, ...rest } = item;
-    return NextResponse.json(
-      {
-        item: {
-          ...rest,
-          previewNumber: previewNextNumber(item),
-          ...pay,
-        },
-      },
-      { status: 201 },
-    );
+    return NextResponse.json({ item: mapSeriesItem(item) }, { status: 201 });
   } catch (error) {
     if (
       error instanceof Prisma.PrismaClientKnownRequestError &&

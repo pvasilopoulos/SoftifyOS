@@ -3,6 +3,8 @@ import { prisma } from "@/server/db";
 import { getSession } from "@/platform/auth/session";
 import { writeAuditEvent } from "@/platform/tenancy/audit";
 import { getErrorMessage } from "@/shared/lib/safe";
+import { tryPostInvoiceIssue } from "@/modules/ledger/service";
+import { toNumber } from "@/modules/sales/invoice-utils";
 
 export const dynamic = "force-dynamic";
 
@@ -22,6 +24,15 @@ export async function POST(
     const { id } = await context.params;
     const invoice = await prisma.invoice.findFirst({
       where: { id, tenantId: session.tenantId },
+      include: {
+        series: {
+          select: {
+            glDebitAccount: true,
+            glCreditAccount: true,
+            glVatAccount: true,
+          },
+        },
+      },
     });
     if (!invoice) {
       return NextResponse.json({ error: "Δεν βρέθηκε" }, { status: 404 });
@@ -41,16 +52,37 @@ export async function POST(
       },
     });
 
+    let journalId: string | null = null;
+    try {
+      const journal = await tryPostInvoiceIssue(prisma, {
+        tenantId: session.tenantId,
+        invoiceId: invoice.id,
+        invoiceNumber: updated.number,
+        total: toNumber(updated.total),
+        vatAmount: toNumber(updated.vatAmount),
+        glDebitAccount: invoice.series?.glDebitAccount,
+        glCreditAccount: invoice.series?.glCreditAccount,
+        glVatAccount: invoice.series?.glVatAccount,
+        userId: session.sub,
+      });
+      journalId = journal?.id ?? null;
+    } catch {
+      // Issue succeeds even if GL posting cannot resolve accounts / balance
+      journalId = null;
+    }
+
     await writeAuditEvent({
       tenantId: session.tenantId,
       userId: session.sub,
       action: "invoice.issue",
       entity: "invoice",
       entityId: invoice.id,
-      meta: { number: updated.number },
+      meta: { number: updated.number, journalId },
     });
 
-    return NextResponse.json({ item: { id: updated.id, status: updated.status } });
+    return NextResponse.json({
+      item: { id: updated.id, status: updated.status, journalId },
+    });
   } catch (error) {
     return NextResponse.json(
       { error: getErrorMessage(error, "Issue failed") },

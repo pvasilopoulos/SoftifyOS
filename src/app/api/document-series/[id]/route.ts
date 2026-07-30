@@ -10,10 +10,15 @@ import {
   syncSeriesPaymentMethods,
 } from "@/modules/documents/series-payments";
 import { ensurePaymentMethods } from "@/modules/payments/service";
+import {
+  ensureDefaultPrintForms,
+  mapSeriesPrintLinks,
+  syncSeriesPrintForms,
+} from "@/modules/print-forms/service";
 
 export const dynamic = "force-dynamic";
 
-const paymentInclude = {
+const seriesInclude = {
   paymentMethods: {
     orderBy: [{ sortOrder: "asc" as const }, { createdAt: "asc" as const }],
     include: {
@@ -23,6 +28,20 @@ const paymentInclude = {
           code: true,
           name: true,
           kind: true,
+          isActive: true,
+        },
+      },
+    },
+  },
+  printForms: {
+    orderBy: [{ sortOrder: "asc" as const }, { createdAt: "asc" as const }],
+    include: {
+      printForm: {
+        select: {
+          id: true,
+          code: true,
+          name: true,
+          documentKind: true,
           isActive: true,
         },
       },
@@ -53,7 +72,10 @@ export async function PATCH(
 
     const body = seriesUpdateSchema.parse(await request.json());
     const kind = body.kind ?? existing.kind;
-    await ensurePaymentMethods(prisma, session.tenantId);
+    await Promise.all([
+      ensurePaymentMethods(prisma, session.tenantId),
+      ensureDefaultPrintForms(prisma, session.tenantId),
+    ]);
 
     const item = await prisma.$transaction(async (tx) => {
       if (body.isDefault) {
@@ -118,9 +140,18 @@ export async function PATCH(
         });
       }
 
+      if (body.allowedPrintFormIds !== undefined) {
+        await syncSeriesPrintForms(tx, {
+          tenantId: session.tenantId,
+          seriesId: id,
+          printFormIds: body.allowedPrintFormIds,
+          defaultPrintFormId: body.defaultPrintFormId,
+        });
+      }
+
       return tx.documentSeries.findUniqueOrThrow({
         where: { id },
-        include: paymentInclude,
+        include: seriesInclude,
       });
     });
 
@@ -133,15 +164,17 @@ export async function PATCH(
       meta: {
         code: item.code,
         paymentMethods: item.paymentMethods.length,
+        printForms: item.printForms.length,
       },
     });
 
-    const { paymentMethods: links, ...rest } = item;
+    const { paymentMethods: payLinks, printForms: formLinks, ...rest } = item;
     return NextResponse.json({
       item: {
         ...rest,
         previewNumber: previewNextNumber(item),
-        ...mapSeriesPaymentLinks(links),
+        ...mapSeriesPaymentLinks(payLinks),
+        ...mapSeriesPrintLinks(formLinks),
       },
     });
   } catch (error) {

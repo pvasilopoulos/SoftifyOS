@@ -45,6 +45,13 @@ type PaymentMethodOpt = {
   showInCollect: boolean;
 };
 
+type PrintFormOpt = {
+  id: string;
+  code: string;
+  name: string;
+  documentKind: Kind;
+};
+
 type Series = {
   id: string;
   code: string;
@@ -77,11 +84,22 @@ type Series = {
     isActive: boolean;
     isDefault: boolean;
   }[];
+  allowedPrintFormIds: string[];
+  defaultPrintFormId: string | null;
+  printForms: {
+    id: string;
+    code: string;
+    name: string;
+    documentKind: string;
+    isActive: boolean;
+    isDefault: boolean;
+  }[];
 };
 
 function payloadFromForm(
   form: FormData,
   payments: { allowedPaymentMethodIds: string[]; defaultPaymentMethodId: string | null },
+  prints: { allowedPrintFormIds: string[]; defaultPrintFormId: string | null },
 ) {
   return {
     code: String(form.get("code") || ""),
@@ -105,6 +123,8 @@ function payloadFromForm(
     isActive: form.get("isActive") === "on",
     allowedPaymentMethodIds: payments.allowedPaymentMethodIds,
     defaultPaymentMethodId: payments.defaultPaymentMethodId,
+    allowedPrintFormIds: prints.allowedPrintFormIds,
+    defaultPrintFormId: prints.defaultPrintFormId,
   };
 }
 
@@ -112,16 +132,19 @@ export function SeriesSettingsClient({
   initialSites,
   initialSeries,
   initialPaymentMethods,
+  initialPrintForms,
 }: {
   initialSites: Site[];
   initialSeries: Series[];
   initialPaymentMethods: PaymentMethodOpt[];
+  initialPrintForms: PrintFormOpt[];
 }) {
   const [tab, setTab] = useState<"series" | "org">("series");
   const [kindFilter, setKindFilter] = useState<"all" | KindGroup>("all");
   const [sites, setSites] = useState(initialSites);
   const [series, setSeries] = useState(initialSeries);
   const [paymentCatalog] = useState(initialPaymentMethods);
+  const [printCatalog] = useState(initialPrintForms);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [editing, setEditing] = useState<Series | null>(null);
@@ -214,12 +237,20 @@ export function SeriesSettingsClient({
       allowedPaymentMethodIds: string[];
       defaultPaymentMethodId: string | null;
     },
+    prints: {
+      allowedPrintFormIds: string[];
+      defaultPrintFormId: string | null;
+    },
   ) {
     e.preventDefault();
     setPending(true);
     setError(null);
     setMessage(null);
-    const payload = payloadFromForm(new FormData(e.currentTarget), payments);
+    const payload = payloadFromForm(
+      new FormData(e.currentTarget),
+      payments,
+      prints,
+    );
     const res = editing
       ? await fetch(`/api/document-series/${editing.id}`, {
           method: "PATCH",
@@ -383,6 +414,20 @@ export function SeriesSettingsClient({
                         </>
                       ) : null}
                     </p>
+                    <p className="text-xs text-slate-500">
+                      Εκτύπωση:{" "}
+                      {s.allowedPrintFormIds.length === 0
+                        ? "προεπιλογή τύπου"
+                        : s.printForms.map((p) => p.code).join(", ")}
+                      {s.defaultPrintFormId &&
+                      s.allowedPrintFormIds.length > 0 ? (
+                        <>
+                          <span className="mx-1.5">·</span>
+                          default{" "}
+                          {s.printForms.find((p) => p.isDefault)?.code ?? "—"}
+                        </>
+                      ) : null}
+                    </p>
                   </div>
                   <Button
                     type="button"
@@ -498,6 +543,7 @@ export function SeriesSettingsClient({
           title={editing ? `Επεξεργασία ${editing.code}` : "Νέα σειρά"}
           sites={sites}
           paymentCatalog={paymentCatalog}
+          printCatalog={printCatalog}
           initial={editing}
           pending={pending}
           onSubmit={onSaveSeries}
@@ -570,6 +616,7 @@ function SeriesDrawer({
   title,
   sites,
   paymentCatalog,
+  printCatalog,
   initial,
   pending,
   onSubmit,
@@ -578,6 +625,7 @@ function SeriesDrawer({
   title: string;
   sites: Site[];
   paymentCatalog: PaymentMethodOpt[];
+  printCatalog: PrintFormOpt[];
   initial: Series | null;
   pending: boolean;
   onSubmit: (
@@ -585,6 +633,10 @@ function SeriesDrawer({
     payments: {
       allowedPaymentMethodIds: string[];
       defaultPaymentMethodId: string | null;
+    },
+    prints: {
+      allowedPrintFormIds: string[];
+      defaultPrintFormId: string | null;
     },
   ) => void;
   onClose: () => void;
@@ -595,7 +647,18 @@ function SeriesDrawer({
   const [defaultId, setDefaultId] = useState<string | null>(
     () => initial?.defaultPaymentMethodId ?? null,
   );
+  const [allowedPrintIds, setAllowedPrintIds] = useState<string[]>(
+    () => initial?.allowedPrintFormIds ?? [],
+  );
+  const [defaultPrintId, setDefaultPrintId] = useState<string | null>(
+    () => initial?.defaultPrintFormId ?? null,
+  );
+  const [kind, setKind] = useState<Kind>(
+    () => initial?.kind ?? "SALES_INVOICE",
+  );
   const restrictPayments = allowedIds.length > 0;
+  const restrictPrints = allowedPrintIds.length > 0;
+  const formsForKind = printCatalog.filter((f) => f.documentKind === kind);
 
   const toggleMethod = (id: string) => {
     setAllowedIds((prev) => {
@@ -606,6 +669,19 @@ function SeriesDrawer({
       }
       const next = [...prev, id];
       if (!defaultId) setDefaultId(id);
+      return next;
+    });
+  };
+
+  const togglePrint = (id: string) => {
+    setAllowedPrintIds((prev) => {
+      if (prev.includes(id)) {
+        const next = prev.filter((x) => x !== id);
+        if (defaultPrintId === id) setDefaultPrintId(next[0] ?? null);
+        return next;
+      }
+      const next = [...prev, id];
+      if (!defaultPrintId) setDefaultPrintId(id);
       return next;
     });
   };
@@ -640,14 +716,25 @@ function SeriesDrawer({
 
         <form
           onSubmit={(e) =>
-            onSubmit(e, {
-              allowedPaymentMethodIds: allowedIds,
-              defaultPaymentMethodId: restrictPayments
-                ? defaultId && allowedIds.includes(defaultId)
-                  ? defaultId
-                  : (allowedIds[0] ?? null)
-                : null,
-            })
+            onSubmit(
+              e,
+              {
+                allowedPaymentMethodIds: allowedIds,
+                defaultPaymentMethodId: restrictPayments
+                  ? defaultId && allowedIds.includes(defaultId)
+                    ? defaultId
+                    : (allowedIds[0] ?? null)
+                  : null,
+              },
+              {
+                allowedPrintFormIds: allowedPrintIds,
+                defaultPrintFormId: restrictPrints
+                  ? defaultPrintId && allowedPrintIds.includes(defaultPrintId)
+                    ? defaultPrintId
+                    : (allowedPrintIds[0] ?? null)
+                  : null,
+              },
+            )
           }
           className="flex min-h-0 flex-1 flex-col"
         >
@@ -671,7 +758,25 @@ function SeriesDrawer({
                   <select
                     name="kind"
                     className="h-11 w-full rounded-xl border border-slate-200 px-3"
-                    defaultValue={initial?.kind ?? "SALES_INVOICE"}
+                    value={kind}
+                    onChange={(e) => {
+                      const next = e.target.value as Kind;
+                      setKind(next);
+                      setAllowedPrintIds((prev) =>
+                        prev.filter((id) =>
+                          printCatalog.some(
+                            (f) => f.id === id && f.documentKind === next,
+                          ),
+                        ),
+                      );
+                      setDefaultPrintId((prev) => {
+                        if (!prev) return null;
+                        const ok = printCatalog.some(
+                          (f) => f.id === prev && f.documentKind === next,
+                        );
+                        return ok ? prev : null;
+                      });
+                    }}
                   >
                     {kindsByGroup.map(({ group, label, kinds: groupKinds }) => (
                       <optgroup key={group} label={label}>
@@ -888,6 +993,95 @@ function SeriesDrawer({
                   </li>
                 ) : null}
               </ul>
+            </Section>
+
+            <Section title="Φόρμες εκτύπωσης">
+              <p className="text-xs leading-relaxed text-slate-500">
+                Επιλέξτε ποιες φόρμες Print Builder τρέχει αυτή η σειρά. Κενό =
+                προεπιλογή του τύπου παραστατικού.
+              </p>
+              <label className="inline-flex items-center gap-2.5 text-sm">
+                <input
+                  type="checkbox"
+                  checked={!restrictPrints}
+                  onChange={(e) => {
+                    if (e.target.checked) {
+                      setAllowedPrintIds([]);
+                      setDefaultPrintId(null);
+                    } else {
+                      const first = formsForKind[0]?.id ?? null;
+                      setAllowedPrintIds(first ? [first] : []);
+                      setDefaultPrintId(first);
+                    }
+                  }}
+                  className="size-4 rounded border-slate-300 text-teal-600 focus:ring-teal-500"
+                />
+                Προεπιλογή τύπου
+              </label>
+              <div className="grid gap-2 sm:grid-cols-2">
+                {formsForKind.map((f) => {
+                  const checked = allowedPrintIds.includes(f.id);
+                  return (
+                    <label
+                      key={f.id}
+                      className={cn(
+                        "flex cursor-pointer flex-col gap-2 rounded-xl border bg-white px-3 py-3 transition",
+                        restrictPrints && checked
+                          ? "border-teal-400 ring-1 ring-teal-200"
+                          : "border-slate-200 hover:border-teal-200",
+                      )}
+                    >
+                      <div className="flex items-start gap-2">
+                        <input
+                          type="checkbox"
+                          checked={restrictPrints ? checked : false}
+                          onChange={() => {
+                            if (!restrictPrints) {
+                              setAllowedPrintIds([f.id]);
+                              setDefaultPrintId(f.id);
+                              return;
+                            }
+                            togglePrint(f.id);
+                          }}
+                          className="mt-0.5 size-4 rounded border-slate-300 text-teal-600 focus:ring-teal-500"
+                        />
+                        <div className="min-w-0 flex-1">
+                          <p className="text-sm font-medium text-ink-900">
+                            {f.name}
+                          </p>
+                          <p className="font-mono text-[11px] text-slate-400">
+                            {f.code}
+                          </p>
+                        </div>
+                      </div>
+                      <div className="flex items-center justify-between pl-6">
+                        <span className="text-[11px] text-slate-400">
+                          {documentKindLabel[f.documentKind]}
+                        </span>
+                        <span className="inline-flex items-center gap-1.5 text-[11px] text-slate-500">
+                          <input
+                            type="radio"
+                            name="defaultPrintForm"
+                            disabled={!checked}
+                            checked={defaultPrintId === f.id}
+                            onChange={() => setDefaultPrintId(f.id)}
+                          />
+                          Default
+                        </span>
+                      </div>
+                    </label>
+                  );
+                })}
+              </div>
+              {formsForKind.length === 0 ? (
+                <p className="rounded-xl border border-dashed border-slate-200 px-3 py-4 text-center text-xs text-slate-500">
+                  Δεν υπάρχουν φόρμες για αυτόν τον τύπο —{" "}
+                  <Link href="/settings/print-forms" className="text-teal-700">
+                    Print Form Builder
+                  </Link>
+                  .
+                </p>
+              ) : null}
             </Section>
 
             <Section title="Επιλογές">
