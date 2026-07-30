@@ -1,0 +1,15 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: softify
+      POSTGRES_PASSWORD: softify
+      POSTGRES_DB: softifyos
+    ports:
+      - "5432:5432"
+    volumes:
+      - softifyos_pg:/var/lib/postgresql/data
+
+volumes:
+  softifyos_pg:
