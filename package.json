@@ -19,6 +19,7 @@
     "db:seed:products": "tsx scripts/seed-products.ts",
     "db:seed:orders": "tsx scripts/seed-orders.ts",
     "db:seed:series": "tsx scripts/seed-document-series.ts",
+    "db:seed:pos": "tsx scripts/seed-pos.ts",
     "db:bench": "tsx scripts/benchmark-audit.ts",
     "db:rls": "bash -c 'psql \"${DATABASE_URL%%\\?*}\" -f prisma/sql/rls.sql'",
     "db:rls:master": "bash -c 'psql \"${DATABASE_URL%%\\?*}\" -f prisma/sql/rls-master-data.sql'",

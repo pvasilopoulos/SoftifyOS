@@ -12,6 +12,7 @@ import {
   ScrollText,
   Tags,
   ClipboardList,
+  Store,
   type LucideIcon,
 } from "lucide-react";
 
@@ -58,6 +59,7 @@ export const navGroups: NavGroup[] = [
       },
       { href: "/orders", label: "Παραγγελίες", icon: ShoppingCart },
       { href: "/quotes", label: "Προσφορές", icon: ClipboardList },
+      { href: "/pos", label: "POS Λιανική", icon: Store, mobileTab: true },
     ],
   },
   {
