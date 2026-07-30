@@ -40,6 +40,10 @@ type Item = {
 
 type Tab = "accounts" | "program";
 
+/** Shared header/row template so columns stay aligned. */
+const loyaltyRowGrid =
+  "lg:grid-cols-[minmax(0,1fr)_6.5rem_6.5rem_6rem_7rem]";
+
 function tierTone(tier: string): "slate" | "teal" | "amber" | "emerald" {
   switch (tier) {
     case "SILVER":
@@ -269,10 +273,15 @@ export function LoyaltyAccountsClient({
           </div>
 
           <section className="overflow-hidden rounded-2xl border border-slate-200/90 bg-white shadow-[0_1px_2px_rgba(15,23,42,0.04)]">
-            <div className="hidden border-b border-slate-100 bg-slate-50/80 px-4 py-2.5 text-[11px] font-semibold uppercase tracking-[0.06em] text-slate-500 lg:grid lg:grid-cols-[minmax(0,1.6fr)_7rem_7rem_7rem_6.5rem]">
+            <div
+              className={cn(
+                "hidden border-b border-slate-100 bg-slate-50/80 px-4 py-2.5 text-[11px] font-semibold uppercase tracking-[0.06em] text-slate-500 lg:grid lg:items-center lg:gap-3",
+                loyaltyRowGrid,
+              )}
+            >
               <span>Πελάτης</span>
-              <span>Πόντοι</span>
-              <span>Αξία €</span>
+              <span className="text-right">Πόντοι</span>
+              <span className="text-right">Αξία €</span>
               <span>Tier</span>
               <span>Κατάσταση</span>
             </div>
@@ -301,18 +310,21 @@ export function LoyaltyAccountsClient({
                   <li key={a.id}>
                     <Link
                       href={`/loyalty/${a.id}`}
-                      className="grid gap-2 px-4 py-3.5 transition hover:bg-slate-50/90 focus-visible:bg-slate-50 focus-visible:outline-none lg:grid-cols-[minmax(0,1.6fr)_7rem_7rem_7rem_6.5rem] lg:items-center"
+                      className={cn(
+                        "grid gap-2 px-4 py-3.5 transition hover:bg-slate-50/90 focus-visible:bg-slate-50 focus-visible:outline-none lg:items-center lg:gap-3",
+                        loyaltyRowGrid,
+                      )}
                     >
                       <div className="min-w-0">
                         <p className="truncate text-sm font-semibold text-ink-950">
                           {a.customer.name}
                         </p>
-                        <p className="mt-0.5 font-mono text-[11px] text-slate-400">
+                        <p className="mt-0.5 truncate font-mono text-[11px] text-slate-400">
                           {a.customer.code}
                           {a.customer.email ? ` · ${a.customer.email}` : ""}
                         </p>
                       </div>
-                      <div>
+                      <div className="lg:text-right">
                         <p className="text-[10px] font-medium uppercase tracking-wide text-slate-400 lg:hidden">
                           Πόντοι
                         </p>
@@ -320,7 +332,7 @@ export function LoyaltyAccountsClient({
                           {a.pointsBalance.toLocaleString("el-GR")}
                         </p>
                       </div>
-                      <div>
+                      <div className="lg:text-right">
                         <p className="text-[10px] font-medium uppercase tracking-wide text-slate-400 lg:hidden">
                           Αξία
                         </p>
@@ -328,7 +340,7 @@ export function LoyaltyAccountsClient({
                           {formatEUR(a.balanceEur)}
                         </p>
                       </div>
-                      <div>
+                      <div className="lg:justify-self-start">
                         <p className="text-[10px] font-medium uppercase tracking-wide text-slate-400 lg:hidden">
                           Tier
                         </p>
@@ -338,7 +350,7 @@ export function LoyaltyAccountsClient({
                           ] ?? a.tier}
                         </Badge>
                       </div>
-                      <div>
+                      <div className="lg:justify-self-start">
                         <p className="text-[10px] font-medium uppercase tracking-wide text-slate-400 lg:hidden">
                           Κατάσταση
                         </p>
