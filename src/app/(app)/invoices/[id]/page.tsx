@@ -44,7 +44,13 @@ export default async function InvoiceDetailPage({
       customer: true,
       branch: true,
       space: true,
-      lines: { orderBy: { position: "asc" } },
+      series: true,
+      site: true,
+      payments: { orderBy: { paidAt: "desc" } },
+      lines: {
+        orderBy: { position: "asc" },
+        include: { product: { select: { sku: true } } },
+      },
     },
   });
   if (!invoice) notFound();
@@ -65,7 +71,7 @@ export default async function InvoiceDetailPage({
         </Link>
         <PageHeader
           title={invoice.number}
-          description={`${invoice.customer.name}${invoice.branch ? ` · ${invoice.branch.name}` : ""}${invoice.space ? ` · ${invoice.space.name}` : ""}`}
+          description={`${invoice.customer.name}${invoice.branch ? ` · ${invoice.branch.name}` : ""}${invoice.space ? ` · ${invoice.space.name}` : ""}${invoice.series ? ` · σειρά ${invoice.series.code}` : ""}`}
           actions={
             <InvoiceActions
               invoiceId={invoice.id}
@@ -81,6 +87,12 @@ export default async function InvoiceDetailPage({
       <div className="soft-panel p-4 sm:p-5">
         <div className="mb-4 flex flex-wrap items-center gap-2">
           <Badge tone={invoiceStatusTone[status]}>{invoiceStatusLabel[status]}</Badge>
+          {invoice.series?.myDataEnabled ? (
+            <Badge tone="emerald">
+              myDATA {invoice.series.myDataInvoiceType ?? ""}
+            </Badge>
+          ) : null}
+          {invoice.site ? <Badge tone="slate">{invoice.site.code}</Badge> : null}
           <span className="text-sm text-slate-500">
             Έκδοση{" "}
             {invoice.issuedAt
@@ -96,6 +108,15 @@ export default async function InvoiceDetailPage({
         <p className="mt-2 text-sm text-slate-500">
           Εξοφλημένα {formatEUR(paid)} · Υπόλοιπο {formatEUR(total - paid)}
         </p>
+        {invoice.series ? (
+          <p className="mt-2 text-xs text-slate-500">
+            Κινήσεις: πελάτης {invoice.series.affectsCustomer} · αποθήκη{" "}
+            {invoice.series.affectsInventory}
+            {invoice.series.glDebitAccount
+              ? ` · λογ. ${invoice.series.glDebitAccount}/${invoice.series.glCreditAccount ?? "—"}`
+              : ""}
+          </p>
+        ) : null}
       </div>
 
       <section className="soft-panel overflow-hidden">
@@ -111,6 +132,7 @@ export default async function InvoiceDetailPage({
               <div>
                 <p className="font-medium text-ink-900">{line.description}</p>
                 <p className="text-xs text-slate-500">
+                  {line.product?.sku ? `${line.product.sku} · ` : ""}
                   {toNumber(line.quantity)} × {formatEUR(toNumber(line.unitPrice))} ·
                   ΦΠΑ {toNumber(line.vatRate)}%
                 </p>
@@ -120,6 +142,32 @@ export default async function InvoiceDetailPage({
           ))}
         </ul>
       </section>
+
+      {invoice.payments.length > 0 ? (
+        <section className="soft-panel overflow-hidden">
+          <div className="border-b border-slate-100 px-4 py-3">
+            <h2 className="text-sm font-semibold text-ink-950">Εισπράξεις</h2>
+          </div>
+          <ul className="divide-y divide-slate-100 text-sm">
+            {invoice.payments.map((p) => (
+              <li
+                key={p.id}
+                className="flex items-center justify-between gap-3 px-4 py-3"
+              >
+                <div>
+                  <p className="font-medium text-ink-900">
+                    {formatEUR(toNumber(p.amount))}
+                  </p>
+                  <p className="text-xs text-slate-500">
+                    {p.paidAt.toLocaleString("el-GR")} · {p.method}
+                    {p.note ? ` · ${p.note}` : ""}
+                  </p>
+                </div>
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
     </div>
   );
 }

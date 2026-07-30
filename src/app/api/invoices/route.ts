@@ -12,6 +12,11 @@ import {
 import { getErrorMessage } from "@/shared/lib/safe";
 import { calcInvoiceTotals, toNumber } from "@/modules/sales/invoice-utils";
 import { invoiceCreateSchema } from "@/modules/sales/schemas";
+import { syncOverdueInvoices } from "@/modules/sales/overdue";
+import {
+  allocateFromSeries,
+  resolveDefaultSeries,
+} from "@/modules/documents/series";
 
 export const dynamic = "force-dynamic";
 
@@ -26,7 +31,7 @@ const listSchema = listQuerySchema.extend({
   customerId: z.string().min(1).optional(),
 });
 
-async function nextInvoiceNumber(tenantId: string) {
+async function nextInvoiceNumberFallback(tenantId: string) {
   const year = new Date().getFullYear();
   const prefix = `ΤΙΜ-${year}-`;
   const latest = await prisma.invoice.findFirst({
@@ -56,6 +61,8 @@ export async function GET(request: NextRequest) {
     if (!session) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
+
+    await syncOverdueInvoices(session.tenantId);
 
     const parsed = listSchema.safeParse(
       Object.fromEntries(request.nextUrl.searchParams),
@@ -272,44 +279,77 @@ export async function POST(request: Request) {
     const status = body.status ?? "DRAFT";
     const issuedAt = status === "ISSUED" ? new Date() : null;
     const dueAt = parseDueAt(body.dueAt ?? null);
-    const number =
-      (body.number && body.number.trim()) ||
-      (await nextInvoiceNumber(session.tenantId));
 
-    const invoice = await prisma.invoice.create({
-      data: {
-        tenantId: session.tenantId,
-        customerId: customer.id,
-        branchId,
-        spaceId,
-        number,
-        status,
-        issuedAt,
-        dueAt,
-        currency: "EUR",
-        subtotal: totals.subtotal,
-        vatAmount: totals.vatAmount,
-        total: totals.total,
-        paidAmount: 0,
-        notes: body.notes || null,
-        lines: {
-          create: body.lines.map((line, idx) => ({
+    const series =
+      (body.seriesId
+        ? await prisma.documentSeries.findFirst({
+            where: {
+              id: body.seriesId,
+              tenantId: session.tenantId,
+              kind: "SALES_INVOICE",
+              isActive: true,
+            },
+          })
+        : null) ??
+      (await resolveDefaultSeries(prisma, session.tenantId, "SALES_INVOICE"));
+
+    const invoice = await prisma.$transaction(async (tx) => {
+      let number = body.number?.trim() || "";
+      let seriesId: string | null = series?.id ?? null;
+      let siteId: string | null = series?.siteId ?? null;
+      if (!number) {
+        if (series) {
+          const allocated = await allocateFromSeries(tx, {
             tenantId: session.tenantId,
-            position: idx + 1,
-            description: line.description,
-            quantity: line.quantity,
-            unitPrice: line.unitPrice,
-            vatRate: line.vatRate,
-            lineTotal: totals.lines[idx]!.lineTotal,
-          })),
+            seriesId: series.id,
+            kind: "SALES_INVOICE",
+          });
+          number = allocated.number;
+          seriesId = allocated.seriesId;
+          siteId = allocated.siteId;
+        } else {
+          number = await nextInvoiceNumberFallback(session.tenantId);
+        }
+      }
+
+      return tx.invoice.create({
+        data: {
+          tenantId: session.tenantId,
+          customerId: customer.id,
+          branchId,
+          spaceId,
+          seriesId,
+          siteId,
+          number,
+          status,
+          issuedAt,
+          dueAt,
+          currency: "EUR",
+          subtotal: totals.subtotal,
+          vatAmount: totals.vatAmount,
+          total: totals.total,
+          paidAmount: 0,
+          notes: body.notes || null,
+          lines: {
+            create: body.lines.map((line, idx) => ({
+              tenantId: session.tenantId,
+              productId: line.productId || null,
+              position: idx + 1,
+              description: line.description,
+              quantity: line.quantity,
+              unitPrice: line.unitPrice,
+              vatRate: line.vatRate,
+              lineTotal: totals.lines[idx]!.lineTotal,
+            })),
+          },
         },
-      },
-      include: {
-        lines: { orderBy: { position: "asc" } },
-        customer: true,
-        branch: true,
-        space: true,
-      },
+        include: {
+          lines: { orderBy: { position: "asc" } },
+          customer: true,
+          branch: true,
+          space: true,
+        },
+      });
     });
 
     await writeAuditEvent({

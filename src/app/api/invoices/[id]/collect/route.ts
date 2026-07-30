@@ -72,9 +72,20 @@ export async function POST(
     const paidAmount = roundMoney(currentPaid + body.amount);
     const nextStatus = statusAfterPayment(status, paidAmount, total);
 
-    const updated = await prisma.invoice.update({
-      where: { id: invoice.id },
-      data: { paidAmount, status: nextStatus },
+    const updated = await prisma.$transaction(async (tx) => {
+      await tx.invoicePayment.create({
+        data: {
+          tenantId: session.tenantId,
+          invoiceId: invoice.id,
+          amount: body.amount,
+          method: body.method ?? "OTHER",
+          note: body.note || null,
+        },
+      });
+      return tx.invoice.update({
+        where: { id: invoice.id },
+        data: { paidAmount, status: nextStatus },
+      });
     });
 
     await writeAuditEvent({
@@ -85,6 +96,7 @@ export async function POST(
       entityId: invoice.id,
       meta: {
         amount: body.amount,
+        method: body.method ?? "OTHER",
         paidAmount,
         status: nextStatus,
         note: body.note || null,
@@ -98,7 +110,9 @@ export async function POST(
         status: updated.status,
         paidAmount: toNumber(updated.paidAmount),
         total: toNumber(updated.total),
-        balance: roundMoney(toNumber(updated.total) - toNumber(updated.paidAmount)),
+        balance: roundMoney(
+          toNumber(updated.total) - toNumber(updated.paidAmount),
+        ),
       },
     });
   } catch (error) {

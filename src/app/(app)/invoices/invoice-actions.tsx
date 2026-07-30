@@ -2,7 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useState } from "react";
-import { FileDown, Send, Wallet, X } from "lucide-react";
+import { Ban, CheckCircle2, FileDown, Send, Wallet, X } from "lucide-react";
 import { Button } from "@/shared/ui/button";
 import { formatEUR } from "@/modules/sales/invoice-utils";
 
@@ -16,6 +16,8 @@ type Props = {
   showPdf?: boolean;
   showSend?: boolean;
   showCollect?: boolean;
+  showIssue?: boolean;
+  showCancel?: boolean;
   onDone?: () => void;
 };
 
@@ -28,10 +30,14 @@ export function InvoiceActions({
   showPdf = true,
   showSend = true,
   showCollect = true,
+  showIssue = true,
+  showCancel = true,
   onDone,
 }: Props) {
   const router = useRouter();
-  const [busy, setBusy] = useState<"send" | "collect" | null>(null);
+  const [busy, setBusy] = useState<"send" | "collect" | "issue" | "cancel" | null>(
+    null,
+  );
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [collectOpen, setCollectOpen] = useState(false);
@@ -42,6 +48,8 @@ export function InvoiceActions({
     status !== "CANCELLED" &&
     status !== "PAID";
   const canSend = status !== "CANCELLED";
+  const canIssue = status === "DRAFT";
+  const canCancel = status !== "CANCELLED" && status !== "PAID" && paidAmount <= 0;
 
   async function sendInvoice() {
     setBusy("send");
@@ -100,13 +108,70 @@ export function InvoiceActions({
     }
   }
 
+  async function issueInvoice() {
+    setBusy("issue");
+    setError(null);
+    setMessage(null);
+    try {
+      const res = await fetch(`/api/invoices/${invoiceId}/issue`, {
+        method: "POST",
+      });
+      const data = (await res.json()) as { error?: string };
+      if (!res.ok) {
+        setError(data.error || "Αποτυχία έκδοσης");
+        return;
+      }
+      setMessage("Το τιμολόγιο εκδόθηκε");
+      router.refresh();
+      onDone?.();
+    } catch {
+      setError("Αποτυχία έκδοσης");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function cancelInvoice() {
+    if (!window.confirm("Ακύρωση παραστατικού;")) return;
+    setBusy("cancel");
+    setError(null);
+    setMessage(null);
+    try {
+      const res = await fetch(`/api/invoices/${invoiceId}/cancel`, {
+        method: "POST",
+      });
+      const data = (await res.json()) as { error?: string };
+      if (!res.ok) {
+        setError(data.error || "Αποτυχία ακύρωσης");
+        return;
+      }
+      setMessage("Το τιμολόγιο ακυρώθηκε");
+      router.refresh();
+      onDone?.();
+    } catch {
+      setError("Αποτυχία ακύρωσης");
+    } finally {
+      setBusy(null);
+    }
+  }
+
   return (
     <div className="space-y-2">
       <div className="flex flex-wrap gap-2">
+        {showIssue && canIssue ? (
+          <Button
+            size={size}
+            disabled={busy === "issue"}
+            onClick={() => void issueInvoice()}
+          >
+            <CheckCircle2 size={14} />
+            {busy === "issue" ? "..." : "Έκδοση"}
+          </Button>
+        ) : null}
         {showPdf ? (
           <Button
             size={size}
-            variant={size === "sm" ? "primary" : "secondary"}
+            variant={size === "sm" && !canIssue ? "primary" : "secondary"}
             onClick={() =>
               window.open(`/invoices/${invoiceId}/print`, "_blank", "noopener")
             }
@@ -129,12 +194,23 @@ export function InvoiceActions({
         {showCollect ? (
           <Button
             size={size}
-            variant={size === "md" ? "primary" : "secondary"}
+            variant={size === "md" && !canIssue ? "primary" : "secondary"}
             disabled={!canCollect || busy === "collect"}
             onClick={() => setCollectOpen(true)}
           >
             <Wallet size={14} />
             Είσπραξη
+          </Button>
+        ) : null}
+        {showCancel && canCancel ? (
+          <Button
+            size={size}
+            variant="ghost"
+            disabled={busy === "cancel"}
+            onClick={() => void cancelInvoice()}
+          >
+            <Ban size={14} />
+            Ακύρωση
           </Button>
         ) : null}
       </div>

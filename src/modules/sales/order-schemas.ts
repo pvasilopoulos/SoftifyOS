@@ -12,10 +12,23 @@ export const orderCreateSchema = z.object({
   customerId: z.string().trim().min(1),
   branchId: z.string().trim().min(1).optional().nullable(),
   spaceId: z.string().trim().min(1).optional().nullable(),
+  seriesId: z.string().trim().min(1).optional().nullable(),
   number: z.string().trim().min(1).max(40).optional().nullable(),
   status: z.enum(["DRAFT", "CONFIRMED"]).optional().default("DRAFT"),
   notes: z.string().trim().max(2000).optional().nullable(),
   lines: z.array(orderLineCreateSchema).min(1).max(100),
+});
+
+export const orderInvoiceSchema = z.object({
+  seriesId: z.string().trim().min(1).optional().nullable(),
+  lines: z
+    .array(
+      z.object({
+        orderLineId: z.string().trim().min(1),
+        quantity: z.coerce.number().positive().max(1_000_000),
+      }),
+    )
+    .optional(),
 });
 
 export type OrderCreateInput = z.infer<typeof orderCreateSchema>;

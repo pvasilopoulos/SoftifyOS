@@ -35,14 +35,17 @@ model Tenant {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  memberships Membership[]
-  auditEvents AuditEvent[]
-  customers   Customer[]
-  branches    Branch[]
-  spaces      Space[]
-  invoices    Invoice[]
-  products    Product[]
-  orders      Order[]
+  memberships      Membership[]
+  auditEvents      AuditEvent[]
+  customers        Customer[]
+  branches         Branch[]
+  spaces           Space[]
+  invoices         Invoice[]
+  products         Product[]
+  orders           Order[]
+  sites            Site[]
+  documentSeries   DocumentSeries[]
+  invoicePayments  InvoicePayment[]
 
   @@map("tenants")
 }
@@ -195,6 +198,7 @@ model Product {
 
   tenant Tenant      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   lines  OrderLine[]
+  invoiceLines InvoiceLine[]
 
   @@unique([tenantId, sku])
   @@index([tenantId, name])
@@ -220,6 +224,8 @@ model Invoice {
   branchId    String?
   spaceId     String?
   orderId     String?
+  seriesId    String?
+  siteId      String?
   number      String
   status      InvoiceStatus @default(DRAFT)
   issuedAt    DateTime?
@@ -233,12 +239,15 @@ model Invoice {
   createdAt   DateTime      @default(now())
   updatedAt   DateTime      @updatedAt
 
-  tenant   Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  customer Customer      @relation(fields: [customerId], references: [id], onDelete: Restrict)
-  branch   Branch?       @relation(fields: [branchId], references: [id], onDelete: SetNull)
-  space    Space?        @relation(fields: [spaceId], references: [id], onDelete: SetNull)
-  order    Order?        @relation(fields: [orderId], references: [id], onDelete: SetNull)
+  tenant   Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  customer Customer         @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  branch   Branch?          @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  space    Space?           @relation(fields: [spaceId], references: [id], onDelete: SetNull)
+  order    Order?           @relation(fields: [orderId], references: [id], onDelete: SetNull)
+  series   DocumentSeries?  @relation(fields: [seriesId], references: [id], onDelete: SetNull)
+  site     Site?            @relation(fields: [siteId], references: [id], onDelete: SetNull)
   lines    InvoiceLine[]
+  payments InvoicePayment[]
 
   @@unique([tenantId, number])
   @@index([tenantId, status, issuedAt(sort: Desc)])
@@ -246,6 +255,7 @@ model Invoice {
   @@index([tenantId, createdAt(sort: Desc), id(sort: Desc)])
   @@index([tenantId, dueAt, status])
   @@index([tenantId, orderId])
+  @@index([tenantId, seriesId])
   @@map("invoices")
 }
 
@@ -253,6 +263,8 @@ model InvoiceLine {
   id          String  @id @default(cuid())
   tenantId    String
   invoiceId   String
+  productId   String?
+  orderLineId String?
   position    Int
   description String
   quantity    Decimal @db.Decimal(14, 3)
@@ -260,26 +272,50 @@ model InvoiceLine {
   vatRate     Decimal @db.Decimal(5, 2)
   lineTotal   Decimal @db.Decimal(14, 2)
 
-  invoice Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  invoice   Invoice    @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  product   Product?   @relation(fields: [productId], references: [id], onDelete: SetNull)
+  orderLine OrderLine? @relation(fields: [orderLineId], references: [id], onDelete: SetNull)
 
   @@index([tenantId, invoiceId, position])
+  @@index([tenantId, productId])
+  @@index([tenantId, orderLineId])
   @@map("invoice_lines")
+}
+
+model InvoicePayment {
+  id        String   @id @default(cuid())
+  tenantId  String
+  invoiceId String
+  amount    Decimal  @db.Decimal(14, 2)
+  method    String   @default("OTHER")
+  note      String?
+  paidAt    DateTime @default(now())
+  createdAt DateTime @default(now())
+
+  tenant  Tenant  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  invoice Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, invoiceId, paidAt(sort: Desc)])
+  @@map("invoice_payments")
 }
 
 enum OrderStatus {
   DRAFT
   CONFIRMED
+  PARTIAL_INVOICED
   INVOICED
   CANCELLED
 }
 
-/// Παραγγελία πώλησης — μπορεί να εκδοθεί σε τιμολόγιο
+/// Παραγγελία πώλησης — μπορεί να εκδοθεί (και μερικώς) σε τιμολόγιο
 model Order {
   id         String      @id @default(cuid())
   tenantId   String
   customerId String
   branchId   String?
   spaceId    String?
+  seriesId   String?
+  siteId     String?
   number     String
   status     OrderStatus @default(DRAFT)
   orderedAt  DateTime    @default(now())
@@ -291,10 +327,12 @@ model Order {
   createdAt  DateTime    @default(now())
   updatedAt  DateTime    @updatedAt
 
-  tenant   Tenant      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  customer Customer    @relation(fields: [customerId], references: [id], onDelete: Restrict)
-  branch   Branch?     @relation(fields: [branchId], references: [id], onDelete: SetNull)
-  space    Space?      @relation(fields: [spaceId], references: [id], onDelete: SetNull)
+  tenant   Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  customer Customer        @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  branch   Branch?         @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  space    Space?          @relation(fields: [spaceId], references: [id], onDelete: SetNull)
+  series   DocumentSeries? @relation(fields: [seriesId], references: [id], onDelete: SetNull)
+  site     Site?           @relation(fields: [siteId], references: [id], onDelete: SetNull)
   lines    OrderLine[]
   invoices Invoice[]
 
@@ -302,25 +340,121 @@ model Order {
   @@index([tenantId, status, orderedAt(sort: Desc)])
   @@index([tenantId, customerId, orderedAt(sort: Desc)])
   @@index([tenantId, createdAt(sort: Desc), id(sort: Desc)])
+  @@index([tenantId, seriesId])
   @@map("orders")
 }
 
 model OrderLine {
-  id          String  @id @default(cuid())
-  tenantId    String
-  orderId     String
-  productId   String?
-  position    Int
-  description String
-  quantity    Decimal @db.Decimal(14, 3)
-  unitPrice   Decimal @db.Decimal(14, 2)
-  vatRate     Decimal @db.Decimal(5, 2)
-  lineTotal   Decimal @db.Decimal(14, 2)
+  id               String  @id @default(cuid())
+  tenantId         String
+  orderId          String
+  productId        String?
+  position         Int
+  description      String
+  quantity         Decimal @db.Decimal(14, 3)
+  quantityInvoiced Decimal @default(0) @db.Decimal(14, 3)
+  unitPrice        Decimal @db.Decimal(14, 2)
+  vatRate          Decimal @db.Decimal(5, 2)
+  lineTotal        Decimal @db.Decimal(14, 2)
 
-  order   Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
-  product Product? @relation(fields: [productId], references: [id], onDelete: SetNull)
+  order        Order         @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  product      Product?      @relation(fields: [productId], references: [id], onDelete: SetNull)
+  invoiceLines InvoiceLine[]
 
   @@index([tenantId, orderId, position])
   @@index([tenantId, productId])
   @@map("order_lines")
+}
+
+enum SiteKind {
+  BRANCH
+  TILL
+}
+
+/// Υποκατάστημα / ταμείο εταιρείας (όχι πελάτη)
+model Site {
+  id        String   @id @default(cuid())
+  tenantId  String
+  code      String
+  name      String
+  kind      SiteKind @default(BRANCH)
+  parentId  String?
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant   Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  parent   Site?            @relation("SiteTree", fields: [parentId], references: [id], onDelete: SetNull)
+  children Site[]           @relation("SiteTree")
+  series   DocumentSeries[]
+  invoices Invoice[]
+  orders   Order[]
+
+  @@unique([tenantId, code])
+  @@index([tenantId, kind, isActive])
+  @@map("sites")
+}
+
+enum DocumentKind {
+  SALES_ORDER
+  SALES_INVOICE
+  SALES_CREDIT
+  CUSTOMER_RECEIPT
+  DELIVERY_NOTE
+}
+
+enum NumberResetPolicy {
+  NEVER
+  YEARLY
+}
+
+enum CustomerEffect {
+  NONE
+  DEBIT
+  CREDIT
+}
+
+enum InventoryEffect {
+  NONE
+  OUT
+  IN
+}
+
+/// Σειρά παραστατικού — αρίθμηση + επιχειρησιακοί/φορολογικοί κανόνες
+model DocumentSeries {
+  id                   String            @id @default(cuid())
+  tenantId             String
+  code                 String
+  name                 String
+  kind                 DocumentKind
+  prefix               String
+  padLength            Int               @default(5)
+  nextNumber           Int               @default(1)
+  lastYear             Int?
+  resetPolicy          NumberResetPolicy @default(YEARLY)
+  siteId               String?
+  affectsCustomer      CustomerEffect    @default(NONE)
+  affectsInventory     InventoryEffect   @default(NONE)
+  allowPartial         Boolean           @default(false)
+  editableAfterIssue   Boolean           @default(false)
+  myDataEnabled        Boolean           @default(false)
+  myDataInvoiceType    String?
+  myDataVatCategory    String?
+  glDebitAccount       String?
+  glCreditAccount      String?
+  glVatAccount         String?
+  isDefault            Boolean           @default(false)
+  isActive             Boolean           @default(true)
+  createdAt            DateTime          @default(now())
+  updatedAt            DateTime          @updatedAt
+
+  tenant   Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  site     Site?     @relation(fields: [siteId], references: [id], onDelete: SetNull)
+  invoices Invoice[]
+  orders   Order[]
+
+  @@unique([tenantId, code])
+  @@index([tenantId, kind, isActive])
+  @@index([tenantId, siteId, kind])
+  @@map("document_series")
 }

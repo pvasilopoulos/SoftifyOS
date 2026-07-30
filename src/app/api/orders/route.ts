@@ -12,6 +12,10 @@ import {
 import { getErrorMessage } from "@/shared/lib/safe";
 import { calcInvoiceTotals, toNumber } from "@/modules/sales/invoice-utils";
 import { orderCreateSchema } from "@/modules/sales/order-schemas";
+import {
+  allocateFromSeries,
+  resolveDefaultSeries,
+} from "@/modules/documents/series";
 
 export const dynamic = "force-dynamic";
 
@@ -20,7 +24,7 @@ const listSchema = listQuerySchema.extend({
   status: z.enum(["DRAFT", "CONFIRMED", "INVOICED", "CANCELLED"]).optional(),
 });
 
-async function nextOrderNumber(tenantId: string) {
+async function nextOrderNumberFallback(tenantId: string) {
   const year = new Date().getFullYear();
   const prefix = `ΠΑΡ-${year}-`;
   const latest = await prisma.order.findFirst({
@@ -210,40 +214,71 @@ export async function POST(request: Request) {
     }
 
     const totals = calcInvoiceTotals(body.lines);
-    const number =
-      (body.number && body.number.trim()) ||
-      (await nextOrderNumber(session.tenantId));
+    const series =
+      (body.seriesId
+        ? await prisma.documentSeries.findFirst({
+            where: {
+              id: body.seriesId,
+              tenantId: session.tenantId,
+              kind: "SALES_ORDER",
+              isActive: true,
+            },
+          })
+        : null) ??
+      (await resolveDefaultSeries(prisma, session.tenantId, "SALES_ORDER"));
 
-    const order = await prisma.order.create({
-      data: {
-        tenantId: session.tenantId,
-        customerId: hierarchy.customerId,
-        branchId: hierarchy.branchId,
-        spaceId: hierarchy.spaceId,
-        number,
-        status: body.status ?? "DRAFT",
-        currency: "EUR",
-        subtotal: totals.subtotal,
-        vatAmount: totals.vatAmount,
-        total: totals.total,
-        notes: body.notes || null,
-        lines: {
-          create: body.lines.map((line, idx) => ({
+    const order = await prisma.$transaction(async (tx) => {
+      let number = body.number?.trim() || "";
+      let seriesId: string | null = series?.id ?? null;
+      let siteId: string | null = series?.siteId ?? null;
+      if (!number) {
+        if (series) {
+          const allocated = await allocateFromSeries(tx, {
             tenantId: session.tenantId,
-            productId: line.productId || null,
-            position: idx + 1,
-            description: line.description,
-            quantity: line.quantity,
-            unitPrice: line.unitPrice,
-            vatRate: line.vatRate,
-            lineTotal: totals.lines[idx]!.lineTotal,
-          })),
+            seriesId: series.id,
+            kind: "SALES_ORDER",
+          });
+          number = allocated.number;
+          seriesId = allocated.seriesId;
+          siteId = allocated.siteId;
+        } else {
+          number = await nextOrderNumberFallback(session.tenantId);
+        }
+      }
+
+      return tx.order.create({
+        data: {
+          tenantId: session.tenantId,
+          customerId: hierarchy.customerId,
+          branchId: hierarchy.branchId,
+          spaceId: hierarchy.spaceId,
+          seriesId,
+          siteId,
+          number,
+          status: body.status ?? "DRAFT",
+          currency: "EUR",
+          subtotal: totals.subtotal,
+          vatAmount: totals.vatAmount,
+          total: totals.total,
+          notes: body.notes || null,
+          lines: {
+            create: body.lines.map((line, idx) => ({
+              tenantId: session.tenantId,
+              productId: line.productId || null,
+              position: idx + 1,
+              description: line.description,
+              quantity: line.quantity,
+              unitPrice: line.unitPrice,
+              vatRate: line.vatRate,
+              lineTotal: totals.lines[idx]!.lineTotal,
+            })),
+          },
         },
-      },
-      include: {
-        lines: { orderBy: { position: "asc" } },
-        customer: true,
-      },
+        include: {
+          lines: { orderBy: { position: "asc" } },
+          customer: true,
+        },
+      });
     });
 
     await writeAuditEvent({
