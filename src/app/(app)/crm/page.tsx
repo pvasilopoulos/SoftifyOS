@@ -1,7 +1,5 @@
-import { ModulePlaceholder } from "@/shared/ui/module-placeholder";
+import { redirect } from "next/navigation";
 
-export const metadata = { title: "CRM" };
-
-export default function Page() {
-  return <ModulePlaceholder title="CRM" description="Customers & pipeline · placeholder" />;
+export default function CrmRedirectPage() {
+  redirect("/customers");
 }

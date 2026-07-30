@@ -44,10 +44,15 @@ export const navGroups: NavGroup[] = [
     label: "Πωλήσεις",
     items: [
       {
+        href: "/customers",
+        label: "Πελάτες",
+        icon: Users,
+        mobileTab: true,
+      },
+      {
         href: "/invoices",
         label: "Τιμολόγια",
         icon: FileText,
-        mobileTab: true,
       },
       { href: "/orders", label: "Παραγγελίες", icon: ShoppingCart },
     ],
@@ -70,7 +75,6 @@ export const navGroups: NavGroup[] = [
     label: "Οργάνωση",
     items: [
       { href: "/finance", label: "Οικονομικά", icon: Wallet },
-      { href: "/crm", label: "CRM", icon: Users },
       { href: "/hr", label: "HR", icon: UserRound },
       { href: "/reports", label: "Αναφορές", icon: BarChart3 },
       { href: "/audit", label: "Audit log", icon: ScrollText },
@@ -105,7 +109,7 @@ export const quickActions = [
   {
     id: "open-customer",
     label: "Άνοιγμα πελάτη",
-    href: "/crm",
+    href: "/customers",
     shortcut: "G C",
   },
   {

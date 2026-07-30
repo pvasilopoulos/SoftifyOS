@@ -70,4 +70,5 @@ npm run db:bench        # keyset vs OFFSET timing
 
 1. ~~Tenant model + auth + RLS~~ ✅ Phase 0
 2. ~~Cursor list APIs + 1M-row seed/benchmark~~ ✅ Scale proof
-3. Phase 1 ERP modules (Master Data → Sales → Inventory → Purchasing → Finance light)
+3. ~~Master Data: Customer → Branch → Space~~ ✅ Phase 1 start
+4. Phase 1 continued: Products → Sales documents → Inventory

@@ -14,8 +14,10 @@
     "db:push": "prisma db push",
     "db:seed": "tsx prisma/seed.ts",
     "db:seed:scale": "tsx scripts/seed-scale.ts",
+    "db:seed:customers": "tsx scripts/seed-customers.ts",
     "db:bench": "tsx scripts/benchmark-audit.ts",
-    "db:rls": "bash -c 'psql \"${DATABASE_URL%%\\?*} \" -f prisma/sql/rls.sql'",
+    "db:rls": "bash -c 'psql \"${DATABASE_URL%%\\?*}\" -f prisma/sql/rls.sql'",
+    "db:rls:master": "bash -c 'psql \"${DATABASE_URL%%\\?*}\" -f prisma/sql/rls-master-data.sql'",
     "db:scale-indexes": "bash -c 'psql \"${DATABASE_URL%%\\?*}\" -f prisma/sql/scale-indexes.sql'",
     "db:setup": "prisma migrate dev --name phase0_platform && npm run db:seed && npm run db:rls",
     "postinstall": "prisma generate"
