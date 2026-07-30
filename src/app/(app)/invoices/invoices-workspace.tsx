@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useState, useTransition } from "react";
-import { FileDown, Filter, Search, Send } from "lucide-react";
+import { FileDown, Filter, Pencil, Search, Send } from "lucide-react";
 import { Badge } from "@/shared/ui/badge";
 import { Button } from "@/shared/ui/button";
 import { cn } from "@/shared/lib/cn";
@@ -322,7 +322,7 @@ export function InvoicesWorkspace({
                 <li key={inv.id} className="soft-row">
                   <div
                     className={cn(
-                      "grid grid-cols-[auto_1fr] gap-3 px-4 py-3 md:grid-cols-[auto_1fr_1.2fr_0.7fr_0.8fr_0.8fr] md:items-center",
+                      "grid grid-cols-[auto_1fr_auto] gap-3 px-4 py-3 md:grid-cols-[auto_1fr_1.2fr_0.7fr_0.8fr_0.8fr] md:items-center",
                       previewId === inv.id && "bg-teal-50/60",
                     )}
                   >
@@ -331,6 +331,7 @@ export function InvoicesWorkspace({
                       checked={selectedSet.has(inv.id)}
                       onChange={() => toggleSelect(inv.id)}
                       aria-label={`Επιλογή ${inv.number}`}
+                      className="mt-1 md:mt-0"
                     />
                     <button
                       type="button"
@@ -344,6 +345,13 @@ export function InvoicesWorkspace({
                         {inv.customerName}
                       </p>
                     </button>
+                    <Link
+                      href={`/invoices/${inv.id}`}
+                      className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-600 hover:border-teal-200 hover:bg-teal-50 hover:text-teal-700 md:hidden"
+                      aria-label={`Επεξεργασία ${inv.number}`}
+                    >
+                      <Pencil size={15} />
+                    </Link>
                     <button
                       type="button"
                       className="hidden min-w-0 text-left md:block"
@@ -358,15 +366,15 @@ export function InvoicesWorkspace({
                           .join(" · ") || inv.customerCode}
                       </p>
                     </button>
-                    <p className="text-right text-sm font-medium">
+                    <p className="col-start-2 text-sm font-medium md:col-start-auto md:text-right">
                       {formatEUR(inv.total)}
                     </p>
-                    <div>
+                    <div className="col-start-3 row-start-2 justify-self-end md:col-start-auto md:row-start-auto md:justify-self-auto">
                       <Badge tone={invoiceStatusTone[status] ?? "slate"}>
                         {invoiceStatusLabel[status] ?? inv.status}
                       </Badge>
                     </div>
-                    <div>
+                    <div className="col-span-2 col-start-2 md:col-span-1 md:col-start-auto">
                       <div className="mb-1 flex justify-between text-[11px] text-slate-500">
                         <span>{Math.round(ratio * 100)}%</span>
                       </div>
