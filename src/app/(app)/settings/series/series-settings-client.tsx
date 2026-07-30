@@ -2,7 +2,7 @@
 
 import { FormEvent, useMemo, useState, useTransition } from "react";
 import Link from "next/link";
-import { ArrowLeft, Building2, Pencil, Plus, X } from "lucide-react";
+import { ArrowLeft, Building2, Hash, Pencil, Plus, Search, X } from "lucide-react";
 import { PageHeader } from "@/shared/ui/page-header";
 import { Badge } from "@/shared/ui/badge";
 import { Button } from "@/shared/ui/button";
@@ -93,6 +93,7 @@ export function SeriesSettingsClient({
 }) {
   const [tab, setTab] = useState<"series" | "org">("series");
   const [kindFilter, setKindFilter] = useState<"all" | KindGroup>("all");
+  const [query, setQuery] = useState("");
   const [sites, setSites] = useState(initialSites);
   const [series, setSeries] = useState(initialSeries);
   const [error, setError] = useState<string | null>(null);
@@ -122,9 +123,20 @@ export function SeriesSettingsClient({
   }
 
   const visibleSeries = useMemo(() => {
-    if (kindFilter === "all") return series;
-    return series.filter((s) => documentKindGroup[s.kind] === kindFilter);
-  }, [series, kindFilter]);
+    const q = query.trim().toLowerCase();
+    return series.filter((s) => {
+      if (kindFilter !== "all" && documentKindGroup[s.kind] !== kindFilter) {
+        return false;
+      }
+      if (!q) return true;
+      return (
+        s.code.toLowerCase().includes(q) ||
+        s.name.toLowerCase().includes(q) ||
+        documentKindLabel[s.kind].toLowerCase().includes(q) ||
+        (s.site?.code.toLowerCase().includes(q) ?? false)
+      );
+    });
+  }, [series, kindFilter, query]);
 
   const counts = useMemo(() => {
     const map: Record<string, number> = { all: series.length };
@@ -212,10 +224,10 @@ export function SeriesSettingsClient({
   const branches = sites.filter((s) => s.kind === "BRANCH");
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-6">
       <Link
         href="/settings"
-        className="inline-flex items-center gap-1.5 text-sm text-slate-500 hover:text-ink-900"
+        className="inline-flex items-center gap-1.5 text-sm text-slate-500 transition hover:text-ink-900"
       >
         <ArrowLeft size={14} />
         Ρυθμίσεις
@@ -223,7 +235,7 @@ export function SeriesSettingsClient({
 
       <PageHeader
         title="Σειρές & Τύποι"
-        description="Αρίθμηση παραστατικών και κανόνες κινήσεων ανά σειρά."
+        description="Αρίθμηση παραστατικών, λογιστικοί λογαριασμοί και κανόνες κινήσεων ανά σειρά."
         actions={
           tab === "series" ? (
             <Button size="sm" onClick={openCreate}>
@@ -234,151 +246,245 @@ export function SeriesSettingsClient({
         }
       />
 
-      <div className="flex gap-1 rounded-2xl bg-slate-200/60 p-1 w-fit">
-        <TabButton
-          active={tab === "series"}
-          onClick={() => setTab("series")}
-          label="Σειρές"
-          count={series.length}
-        />
-        <TabButton
-          active={tab === "org"}
-          onClick={() => setTab("org")}
-          label="Οργάνωση"
-          count={sites.length}
-        />
+      <div className="border-b border-slate-200">
+        <div className="-mb-px flex gap-6">
+          <TabButton
+            active={tab === "series"}
+            onClick={() => setTab("series")}
+            label="Σειρές"
+            count={series.length}
+          />
+          <TabButton
+            active={tab === "org"}
+            onClick={() => setTab("org")}
+            label="Οργάνωση"
+            count={sites.length}
+          />
+        </div>
       </div>
 
       {message ? (
-        <p className="rounded-xl bg-emerald-50 px-3 py-2 text-sm text-emerald-800">
+        <p className="rounded-xl border border-emerald-200/80 bg-emerald-50 px-3.5 py-2.5 text-sm text-emerald-800">
           {message}
         </p>
       ) : null}
       {error ? (
-        <p className="rounded-xl bg-rose-50 px-3 py-2 text-sm text-rose-700">
+        <p className="rounded-xl border border-rose-200/80 bg-rose-50 px-3.5 py-2.5 text-sm text-rose-700">
           {error}
         </p>
       ) : null}
 
       {tab === "series" ? (
         <div className="space-y-4">
-          <div className="flex flex-wrap gap-2">
-            <FilterChip
-              active={kindFilter === "all"}
-              onClick={() => setKindFilter("all")}
-              label="Όλες"
-              count={counts.all ?? 0}
-            />
-            {kindGroups.map((g) => (
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+            <div className="flex flex-wrap gap-1.5">
               <FilterChip
-                key={g}
-                active={kindFilter === g}
-                onClick={() => setKindFilter(g)}
-                label={documentKindGroupLabel[g]}
-                count={counts[g] ?? 0}
+                active={kindFilter === "all"}
+                onClick={() => setKindFilter("all")}
+                label="Όλες"
+                count={counts.all ?? 0}
               />
-            ))}
+              {kindGroups.map((g) => (
+                <FilterChip
+                  key={g}
+                  active={kindFilter === g}
+                  onClick={() => setKindFilter(g)}
+                  label={documentKindGroupLabel[g]}
+                  count={counts[g] ?? 0}
+                />
+              ))}
+            </div>
+            <label className="relative block w-full lg:max-w-xs">
+              <Search
+                size={15}
+                className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"
+              />
+              <input
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder="Αναζήτηση κωδικού, ονόματος…"
+                className="h-10 w-full rounded-xl border border-slate-200 bg-white pl-9 pr-3 text-sm outline-none ring-teal-500/30 placeholder:text-slate-400 focus:ring-2"
+              />
+            </label>
           </div>
 
-          <section className="soft-panel overflow-hidden">
+          <section className="overflow-hidden rounded-2xl border border-slate-200/90 bg-white shadow-[0_1px_2px_rgba(15,23,42,0.04)]">
+            <div className="hidden border-b border-slate-100 bg-slate-50/80 px-4 py-2.5 text-[11px] font-semibold uppercase tracking-[0.06em] text-slate-500 lg:grid lg:grid-cols-[5.5rem_minmax(0,1.4fr)_minmax(0,1fr)_8.5rem_5rem_minmax(0,1.6fr)_2.5rem] lg:gap-3">
+              <span>Κωδικός</span>
+              <span>Όνομα</span>
+              <span>Τύπος</span>
+              <span>Επόμενο</span>
+              <span>Τοποθεσία</span>
+              <span>Κανόνες</span>
+              <span className="sr-only">Ενέργειες</span>
+            </div>
+
             <ul className="divide-y divide-slate-100">
-              {visibleSeries.map((s) => (
-                <li
-                  key={s.id}
-                  className={cn(
-                    "flex flex-col gap-3 px-4 py-3.5 sm:flex-row sm:items-center sm:justify-between",
-                    editing?.id === s.id && "bg-teal-50/50",
-                  )}
-                >
-                  <div className="min-w-0 flex-1 space-y-1">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <p className="font-semibold text-ink-950">
-                        <span className="font-mono text-teal-800">{s.code}</span>
-                        <span className="mx-1.5 text-slate-300">·</span>
-                        {s.name}
-                      </p>
-                      {s.isDefault ? <Badge tone="teal">Default</Badge> : null}
-                      {s.allowPartial ? (
-                        <Badge tone="amber">Μερική</Badge>
-                      ) : null}
-                      {s.myDataEnabled ? (
-                        <Badge tone="emerald">
-                          myDATA {s.myDataInvoiceType ?? ""}
-                        </Badge>
-                      ) : null}
-                      {!s.isActive ? (
-                        <Badge tone="slate">Ανενεργή</Badge>
-                      ) : null}
-                    </div>
-                    <p className="text-xs text-slate-500">
-                      {documentKindLabel[s.kind]}
-                      <span className="mx-1.5">·</span>
-                      Επόμενο{" "}
-                      <span className="font-mono text-ink-800">
-                        {s.previewNumber}
-                      </span>
-                      {s.site ? (
-                        <>
-                          <span className="mx-1.5">·</span>
-                          {s.site.code}
-                        </>
-                      ) : null}
-                    </p>
-                    <p className="text-xs text-slate-500">
-                      Πελάτης {customerEffectLabel[s.affectsCustomer]}
-                      <span className="mx-1.5">·</span>
-                      Αποθήκη {inventoryEffectLabel[s.affectsInventory]}
-                      {s.glDebitAccount ? (
-                        <>
-                          <span className="mx-1.5">·</span>
-                          Λογ. {s.glDebitAccount}
-                          {s.glCreditAccount ? ` / ${s.glCreditAccount}` : ""}
-                        </>
-                      ) : null}
-                    </p>
-                  </div>
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="secondary"
-                    className="shrink-0 self-start sm:self-center"
-                    onClick={() => openEdit(s)}
-                  >
-                    <Pencil size={14} />
-                    Επεξεργασία
-                  </Button>
-                </li>
-              ))}
+              {visibleSeries.map((s) => {
+                const selected = editing?.id === s.id;
+                return (
+                  <li key={s.id}>
+                    <button
+                      type="button"
+                      onClick={() => openEdit(s)}
+                      className={cn(
+                        "group grid w-full gap-3 px-4 py-3.5 text-left transition",
+                        "hover:bg-slate-50/90 focus-visible:bg-slate-50 focus-visible:outline-none",
+                        selected && "bg-teal-50/40 hover:bg-teal-50/55",
+                        "lg:grid-cols-[5.5rem_minmax(0,1.4fr)_minmax(0,1fr)_8.5rem_5rem_minmax(0,1.6fr)_2.5rem] lg:items-center lg:gap-3 lg:py-3",
+                      )}
+                    >
+                      <div className="flex items-start justify-between gap-3 lg:contents">
+                        <div className="flex min-w-0 flex-1 flex-col gap-2 lg:contents">
+                          <div className="flex flex-wrap items-center gap-2 lg:block">
+                            <span className="inline-flex items-center rounded-md bg-ink-950 px-2 py-1 font-mono text-[11px] font-semibold tracking-wide text-white">
+                              {s.code}
+                            </span>
+                            <div className="flex flex-wrap gap-1 lg:hidden">
+                              {s.isDefault ? <Badge tone="teal">Default</Badge> : null}
+                              {s.allowPartial ? <Badge tone="amber">Μερική</Badge> : null}
+                              {!s.isActive ? <Badge tone="slate">Ανενεργή</Badge> : null}
+                            </div>
+                          </div>
+
+                          <div className="min-w-0 space-y-1.5">
+                            <p className="truncate text-sm font-semibold text-ink-950">
+                              {s.name}
+                            </p>
+                            <div className="hidden flex-wrap gap-1 lg:flex">
+                              {s.isDefault ? <Badge tone="teal">Default</Badge> : null}
+                              {s.allowPartial ? <Badge tone="amber">Μερική</Badge> : null}
+                              {s.myDataEnabled ? (
+                                <Badge tone="emerald">
+                                  myDATA {s.myDataInvoiceType ?? ""}
+                                </Badge>
+                              ) : null}
+                              {!s.isActive ? <Badge tone="slate">Ανενεργή</Badge> : null}
+                            </div>
+                          </div>
+
+                          <div className="space-y-0.5 lg:min-w-0">
+                            <p className="text-[10px] font-medium uppercase tracking-wide text-slate-400 lg:hidden">
+                              Τύπος
+                            </p>
+                            <p className="text-sm text-slate-700 lg:truncate">
+                              {documentKindLabel[s.kind]}
+                            </p>
+                            {s.myDataEnabled ? (
+                              <p className="text-[11px] text-emerald-700 lg:hidden">
+                                myDATA {s.myDataInvoiceType ?? ""}
+                              </p>
+                            ) : null}
+                          </div>
+
+                          <div className="space-y-0.5">
+                            <p className="text-[10px] font-medium uppercase tracking-wide text-slate-400 lg:hidden">
+                              Επόμενο
+                            </p>
+                            <p className="inline-flex items-center gap-1.5 font-mono text-[12px] text-ink-800">
+                              <Hash size={12} className="shrink-0 text-slate-400" />
+                              {s.previewNumber}
+                            </p>
+                          </div>
+
+                          <div className="space-y-0.5">
+                            <p className="text-[10px] font-medium uppercase tracking-wide text-slate-400 lg:hidden">
+                              Τοποθεσία
+                            </p>
+                            <p className="text-sm text-slate-600">
+                              {s.site?.code ?? "—"}
+                            </p>
+                          </div>
+
+                          <div className="space-y-1.5 lg:min-w-0">
+                            <p className="text-[10px] font-medium uppercase tracking-wide text-slate-400 lg:hidden">
+                              Κανόνες
+                            </p>
+                            <div className="flex flex-wrap gap-1.5">
+                              <MetaChip
+                                label="Πελάτης"
+                                value={customerEffectLabel[s.affectsCustomer]}
+                              />
+                              <MetaChip
+                                label="Αποθήκη"
+                                value={inventoryEffectLabel[s.affectsInventory]}
+                              />
+                              {s.glDebitAccount || s.glCreditAccount ? (
+                                <MetaChip
+                                  label="Λογ."
+                                  value={`${s.glDebitAccount ?? "—"}${s.glCreditAccount ? ` / ${s.glCreditAccount}` : ""}`}
+                                  mono
+                                />
+                              ) : null}
+                            </div>
+                          </div>
+                        </div>
+
+                        <span
+                          className={cn(
+                            "inline-flex size-8 shrink-0 items-center justify-center rounded-lg border border-transparent text-slate-400 transition",
+                            "group-hover:border-slate-200 group-hover:bg-white group-hover:text-ink-800 group-hover:shadow-sm",
+                            "lg:justify-self-end",
+                          )}
+                          aria-hidden
+                        >
+                          <Pencil size={14} />
+                        </span>
+                      </div>
+                    </button>
+                  </li>
+                );
+              })}
               {visibleSeries.length === 0 ? (
-                <li className="px-4 py-12 text-center text-sm text-slate-500">
-                  Δεν υπάρχουν σειρές σε αυτή την κατηγορία.
+                <li className="px-4 py-16 text-center">
+                  <p className="text-sm font-medium text-ink-900">
+                    Δεν βρέθηκαν σειρές
+                  </p>
+                  <p className="mt-1 text-sm text-slate-500">
+                    Δοκιμάστε άλλο φίλτρο ή δημιουργήστε νέα σειρά.
+                  </p>
                 </li>
               ) : null}
             </ul>
           </section>
         </div>
       ) : (
-        <div className="space-y-4">
-          <p className="text-sm text-slate-600">
-            Υποκαταστήματα και ταμεία της εταιρείας — για να δεσμεύετε σειρές
-            ανά τοποθεσία.
-          </p>
-          <section className="soft-panel overflow-hidden">
+        <div className="grid gap-5 lg:grid-cols-[minmax(0,1.2fr)_minmax(18rem,0.8fr)]">
+          <section className="overflow-hidden rounded-2xl border border-slate-200/90 bg-white shadow-[0_1px_2px_rgba(15,23,42,0.04)]">
+            <div className="border-b border-slate-100 px-4 py-3">
+              <h2 className="text-sm font-semibold text-ink-950">
+                Υποκαταστήματα & ταμεία
+              </h2>
+              <p className="mt-0.5 text-xs text-slate-500">
+                Δέσμευση σειρών ανά τοποθεσία της εταιρείας.
+              </p>
+            </div>
             <ul className="divide-y divide-slate-100">
               {sites.map((s) => (
                 <li
                   key={s.id}
-                  className="flex items-center justify-between gap-3 px-4 py-3"
+                  className="flex items-center justify-between gap-3 px-4 py-3.5"
                 >
-                  <div className="flex items-start gap-3">
-                    <div className="mt-0.5 flex h-9 w-9 items-center justify-center rounded-xl bg-slate-100 text-slate-500">
+                  <div className="flex min-w-0 items-start gap-3">
+                    <div
+                      className={cn(
+                        "mt-0.5 flex size-9 shrink-0 items-center justify-center rounded-xl",
+                        s.kind === "TILL"
+                          ? "bg-amber-50 text-amber-700"
+                          : "bg-teal-50 text-teal-700",
+                      )}
+                    >
                       <Building2 size={16} />
                     </div>
-                    <div>
-                      <p className="font-medium text-ink-900">
-                        {s.code} — {s.name}
+                    <div className="min-w-0">
+                      <p className="truncate font-medium text-ink-900">
+                        <span className="font-mono text-[12px] text-slate-500">
+                          {s.code}
+                        </span>
+                        <span className="mx-1.5 text-slate-300">·</span>
+                        {s.name}
                       </p>
-                      <p className="text-xs text-slate-500">
+                      <p className="mt-0.5 text-xs text-slate-500">
                         {s.kind === "BRANCH" ? "Υποκατάστημα" : "Ταμείο"}
                         {s.parentId
                           ? ` · κάτω από ${sites.find((p) => p.id === s.parentId)?.code ?? "—"}`
@@ -387,12 +493,12 @@ export function SeriesSettingsClient({
                     </div>
                   </div>
                   <Badge tone={s.kind === "TILL" ? "amber" : "teal"}>
-                    {s.kind === "BRANCH" ? "Υποκατάστημα" : "Ταμείο"}
+                    {s.kind === "BRANCH" ? "Υποκ." : "Ταμείο"}
                   </Badge>
                 </li>
               ))}
               {sites.length === 0 ? (
-                <li className="px-4 py-8 text-center text-sm text-slate-500">
+                <li className="px-4 py-12 text-center text-sm text-slate-500">
                   Δεν έχουν οριστεί τοποθεσίες
                 </li>
               ) : null}
@@ -401,26 +507,29 @@ export function SeriesSettingsClient({
 
           <form
             onSubmit={onCreateSite}
-            className="soft-panel grid gap-3 p-4 sm:grid-cols-2 lg:grid-cols-5"
+            className="h-fit space-y-3 rounded-2xl border border-slate-200/90 bg-white p-4 shadow-[0_1px_2px_rgba(15,23,42,0.04)] sm:p-5"
           >
-            <p className="sm:col-span-2 lg:col-span-5 text-sm font-semibold text-ink-950">
-              Νέα τοποθεσία
-            </p>
+            <div>
+              <h2 className="text-sm font-semibold text-ink-950">Νέα τοποθεσία</h2>
+              <p className="mt-0.5 text-xs text-slate-500">
+                Προσθήκη υποκαταστήματος ή ταμείου.
+              </p>
+            </div>
             <input
               name="code"
               required
               placeholder="Κωδικός *"
-              className="h-11 rounded-xl border border-slate-200 px-3 text-sm"
+              className="h-11 w-full rounded-xl border border-slate-200 px-3 text-sm outline-none ring-teal-500/30 focus:ring-2"
             />
             <input
               name="name"
               required
               placeholder="Όνομα *"
-              className="h-11 rounded-xl border border-slate-200 px-3 text-sm"
+              className="h-11 w-full rounded-xl border border-slate-200 px-3 text-sm outline-none ring-teal-500/30 focus:ring-2"
             />
             <select
               name="kind"
-              className="h-11 rounded-xl border border-slate-200 px-3 text-sm"
+              className="h-11 w-full rounded-xl border border-slate-200 px-3 text-sm outline-none ring-teal-500/30 focus:ring-2"
               defaultValue="BRANCH"
             >
               <option value="BRANCH">Υποκατάστημα</option>
@@ -428,7 +537,7 @@ export function SeriesSettingsClient({
             </select>
             <select
               name="parentId"
-              className="h-11 rounded-xl border border-slate-200 px-3 text-sm"
+              className="h-11 w-full rounded-xl border border-slate-200 px-3 text-sm outline-none ring-teal-500/30 focus:ring-2"
               defaultValue=""
             >
               <option value="">Χωρίς parent</option>
@@ -438,7 +547,7 @@ export function SeriesSettingsClient({
                 </option>
               ))}
             </select>
-            <Button type="submit" disabled={pending} className="h-11">
+            <Button type="submit" disabled={pending} className="h-11 w-full">
               Προσθήκη
             </Button>
           </form>
@@ -460,6 +569,23 @@ export function SeriesSettingsClient({
   );
 }
 
+function MetaChip({
+  label,
+  value,
+  mono,
+}: {
+  label: string;
+  value: string;
+  mono?: boolean;
+}) {
+  return (
+    <span className="inline-flex max-w-full items-baseline gap-1 rounded-md border border-slate-200/90 bg-slate-50 px-1.5 py-0.5 text-[11px] text-slate-600">
+      <span className="shrink-0 font-medium text-slate-400">{label}</span>
+      <span className={cn("truncate text-ink-800", mono && "font-mono")}>{value}</span>
+    </span>
+  );
+}
+
 function TabButton({
   active,
   onClick,
@@ -476,14 +602,22 @@ function TabButton({
       type="button"
       onClick={onClick}
       className={cn(
-        "rounded-xl px-4 py-2 text-sm font-medium transition",
-        active
-          ? "bg-white text-ink-950 shadow-sm"
-          : "text-slate-600 hover:text-ink-900",
+        "relative pb-3 text-sm font-medium transition",
+        active ? "text-ink-950" : "text-slate-500 hover:text-ink-800",
       )}
     >
       {label}
-      <span className="ml-1.5 tabular-nums text-slate-400">{count}</span>
+      <span
+        className={cn(
+          "ml-1.5 tabular-nums",
+          active ? "text-teal-700" : "text-slate-400",
+        )}
+      >
+        {count}
+      </span>
+      {active ? (
+        <span className="absolute inset-x-0 -bottom-px h-0.5 rounded-full bg-teal-600" />
+      ) : null}
     </button>
   );
 }
@@ -504,14 +638,19 @@ function FilterChip({
       type="button"
       onClick={onClick}
       className={cn(
-        "rounded-full border px-3 py-1.5 text-xs font-medium transition",
+        "rounded-lg border px-2.5 py-1.5 text-xs font-medium transition",
         active
-          ? "border-teal-600 bg-teal-600 text-white"
-          : "border-slate-200 bg-white text-slate-600 hover:border-teal-200 hover:text-teal-800",
+          ? "border-ink-900 bg-ink-900 text-white"
+          : "border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:text-ink-900",
       )}
     >
       {label}
-      <span className={cn("ml-1 tabular-nums", active ? "text-teal-100" : "text-slate-400")}>
+      <span
+        className={cn(
+          "ml-1 tabular-nums",
+          active ? "text-white/70" : "text-slate-400",
+        )}
+      >
         {count}
       </span>
     </button>
