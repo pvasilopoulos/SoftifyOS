@@ -5,7 +5,11 @@ import { Pool } from "pg";
 const globalForPrisma = globalThis as unknown as {
   prisma?: PrismaClient;
   pgPool?: Pool;
+  prismaSchemaVersion?: string;
 };
+
+/** Bump when models change so stale HMR/global clients are discarded in dev. */
+const PRISMA_SCHEMA_VERSION = "customer-branch-space-v1";
 
 function createPrisma() {
   const connectionString = process.env.DATABASE_URL;
@@ -28,11 +32,27 @@ function createPrisma() {
   return new PrismaClient({ adapter });
 }
 
-export const prisma = globalForPrisma.prisma ?? createPrisma();
+function getClient() {
+  const cached = globalForPrisma.prisma;
+  const versionOk = globalForPrisma.prismaSchemaVersion === PRISMA_SCHEMA_VERSION;
+  const hasModels =
+    cached &&
+    typeof (cached as { customer?: { findMany?: unknown } }).customer
+      ?.findMany === "function";
 
-if (process.env.NODE_ENV !== "production") {
-  globalForPrisma.prisma = prisma;
+  if (cached && versionOk && hasModels) {
+    return cached;
+  }
+
+  const client = createPrisma();
+  if (process.env.NODE_ENV !== "production") {
+    globalForPrisma.prisma = client;
+    globalForPrisma.prismaSchemaVersion = PRISMA_SCHEMA_VERSION;
+  }
+  return client;
 }
+
+export const prisma = getClient();
 
 /** Sets Postgres GUC used by RLS policies. Call inside a transaction when possible. */
 export async function withTenantDb<T>(
