@@ -42,6 +42,7 @@ model Tenant {
   spaces      Space[]
   invoices    Invoice[]
   products    Product[]
+  orders      Order[]
 
   @@map("tenants")
 }
@@ -112,6 +113,7 @@ model Customer {
   tenant   Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   branches Branch[]
   invoices Invoice[]
+  orders   Order[]
 
   @@unique([tenantId, code])
   @@index([tenantId, name])
@@ -139,6 +141,7 @@ model Branch {
   customer Customer  @relation(fields: [customerId], references: [id], onDelete: Cascade)
   spaces   Space[]
   invoices Invoice[]
+  orders   Order[]
 
   @@unique([tenantId, customerId, code])
   @@index([tenantId, customerId, createdAt(sort: Desc)])
@@ -163,6 +166,7 @@ model Space {
   tenant   Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   branch   Branch    @relation(fields: [branchId], references: [id], onDelete: Cascade)
   invoices Invoice[]
+  orders   Order[]
 
   @@unique([tenantId, branchId, code])
   @@index([tenantId, branchId, createdAt(sort: Desc)])
@@ -189,7 +193,8 @@ model Product {
   createdAt DateTime      @default(now())
   updatedAt DateTime      @updatedAt
 
-  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tenant Tenant      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  lines  OrderLine[]
 
   @@unique([tenantId, sku])
   @@index([tenantId, name])
@@ -214,6 +219,7 @@ model Invoice {
   customerId  String
   branchId    String?
   spaceId     String?
+  orderId     String?
   number      String
   status      InvoiceStatus @default(DRAFT)
   issuedAt    DateTime?
@@ -231,6 +237,7 @@ model Invoice {
   customer Customer      @relation(fields: [customerId], references: [id], onDelete: Restrict)
   branch   Branch?       @relation(fields: [branchId], references: [id], onDelete: SetNull)
   space    Space?        @relation(fields: [spaceId], references: [id], onDelete: SetNull)
+  order    Order?        @relation(fields: [orderId], references: [id], onDelete: SetNull)
   lines    InvoiceLine[]
 
   @@unique([tenantId, number])
@@ -238,6 +245,7 @@ model Invoice {
   @@index([tenantId, customerId, issuedAt(sort: Desc)])
   @@index([tenantId, createdAt(sort: Desc), id(sort: Desc)])
   @@index([tenantId, dueAt, status])
+  @@index([tenantId, orderId])
   @@map("invoices")
 }
 
@@ -256,4 +264,63 @@ model InvoiceLine {
 
   @@index([tenantId, invoiceId, position])
   @@map("invoice_lines")
+}
+
+enum OrderStatus {
+  DRAFT
+  CONFIRMED
+  INVOICED
+  CANCELLED
+}
+
+/// Παραγγελία πώλησης — μπορεί να εκδοθεί σε τιμολόγιο
+model Order {
+  id         String      @id @default(cuid())
+  tenantId   String
+  customerId String
+  branchId   String?
+  spaceId    String?
+  number     String
+  status     OrderStatus @default(DRAFT)
+  orderedAt  DateTime    @default(now())
+  currency   String      @default("EUR")
+  subtotal   Decimal     @db.Decimal(14, 2)
+  vatAmount  Decimal     @db.Decimal(14, 2)
+  total      Decimal     @db.Decimal(14, 2)
+  notes      String?
+  createdAt  DateTime    @default(now())
+  updatedAt  DateTime    @updatedAt
+
+  tenant   Tenant      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  customer Customer    @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  branch   Branch?     @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  space    Space?      @relation(fields: [spaceId], references: [id], onDelete: SetNull)
+  lines    OrderLine[]
+  invoices Invoice[]
+
+  @@unique([tenantId, number])
+  @@index([tenantId, status, orderedAt(sort: Desc)])
+  @@index([tenantId, customerId, orderedAt(sort: Desc)])
+  @@index([tenantId, createdAt(sort: Desc), id(sort: Desc)])
+  @@map("orders")
+}
+
+model OrderLine {
+  id          String  @id @default(cuid())
+  tenantId    String
+  orderId     String
+  productId   String?
+  position    Int
+  description String
+  quantity    Decimal @db.Decimal(14, 3)
+  unitPrice   Decimal @db.Decimal(14, 2)
+  vatRate     Decimal @db.Decimal(5, 2)
+  lineTotal   Decimal @db.Decimal(14, 2)
+
+  order   Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  product Product? @relation(fields: [productId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, orderId, position])
+  @@index([tenantId, productId])
+  @@map("order_lines")
 }

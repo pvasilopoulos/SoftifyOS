@@ -9,7 +9,7 @@ const globalForPrisma = globalThis as unknown as {
 };
 
 /** Bump when models change so stale HMR/global clients are discarded in dev. */
-const PRISMA_SCHEMA_VERSION = "products-v1";
+const PRISMA_SCHEMA_VERSION = "orders-v1";
 
 function createPrisma() {
   const connectionString = process.env.DATABASE_URL;
@@ -37,8 +37,8 @@ function getClient() {
   const versionOk = globalForPrisma.prismaSchemaVersion === PRISMA_SCHEMA_VERSION;
   const hasModels =
     cached &&
-    typeof (cached as { product?: { findMany?: unknown } }).product
-      ?.findMany === "function";
+    typeof (cached as { order?: { findMany?: unknown } }).order?.findMany ===
+      "function";
 
   if (cached && versionOk && hasModels) {
     return cached;

@@ -109,7 +109,7 @@ export const quickActions = [
   {
     id: "new-order",
     label: "Νέα παραγγελία",
-    href: "/orders?new=1",
+    href: "/orders/new",
     shortcut: "N O",
   },
   {
