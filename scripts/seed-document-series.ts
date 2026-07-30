@@ -64,7 +64,7 @@ async function main() {
       name: "Τιμολόγια πώλησης",
       kind: "SALES_INVOICE" as const,
       prefix: "ΤΙΜ-{YYYY}-",
-      nextNumber: 1485,
+      nextNumber: 1490,
       lastYear: year,
       siteId: hq.id,
       affectsCustomer: "DEBIT" as const,
