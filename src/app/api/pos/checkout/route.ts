@@ -8,12 +8,17 @@ import { calcInvoiceTotals, roundMoney, toNumber } from "@/modules/sales/invoice
 import { posCheckoutSchema } from "@/modules/pos/schemas";
 import {
   calcPayable,
-  earnPointsForSale,
   eurToRedeemPoints,
   pointsToEur,
   validateTenders,
   type TenderMethod,
 } from "@/modules/pos/payable";
+import { redeemGiftCard } from "@/modules/gift-cards/service";
+import {
+  earnLoyaltyPoints,
+  getLoyaltyRules,
+  redeemLoyaltyPoints,
+} from "@/modules/loyalty/service";
 import {
   allocateFromSeries,
   resolveDefaultSeries,
@@ -165,6 +170,8 @@ export async function POST(request: Request) {
       },
     });
 
+    const loyaltyRules = await getLoyaltyRules(prisma, session.tenantId);
+
     if (payable.loyaltyAppliedEur > 0) {
       if (!loyaltyAccount || !loyaltyAccount.isActive) {
         return NextResponse.json(
@@ -175,14 +182,14 @@ export async function POST(request: Request) {
       const needPoints =
         loyaltyPointsRequested > 0
           ? loyaltyPointsRequested
-          : eurToRedeemPoints(payable.loyaltyAppliedEur);
+          : eurToRedeemPoints(payable.loyaltyAppliedEur, loyaltyRules);
       if (needPoints > loyaltyAccount.pointsBalance) {
         return NextResponse.json(
           { error: "Ανεπαρκείς πόντοι loyalty" },
           { status: 400 },
         );
       }
-      if (pointsToEur(needPoints) + 0.001 < payable.loyaltyAppliedEur) {
+      if (pointsToEur(needPoints, loyaltyRules) + 0.001 < payable.loyaltyAppliedEur) {
         return NextResponse.json(
           { error: "Οι πόντοι δεν καλύπτουν το ποσό loyalty" },
           { status: 400 },
@@ -275,14 +282,16 @@ export async function POST(request: Request) {
           const code = (t.giftCardCode || "").trim().toUpperCase();
           const card = giftCards.find((g) => g.code === code)!;
           giftCardId = card.id;
-          const newBal = roundMoney(toNumber(card.balance) - t.amount);
-          await tx.giftCard.update({
-            where: { id: card.id },
-            data: {
-              balance: newBal,
-              status: newBal <= 0 ? "DEPLETED" : "ACTIVE",
-            },
+          const updated = await redeemGiftCard(tx, {
+            tenantId: session.tenantId,
+            giftCardId: card.id,
+            amount: t.amount,
+            invoiceId: invoice.id,
+            userId: session.sub,
+            note: `POS redeem ${t.amount.toFixed(2)} €`,
           });
+          // keep in-memory balance for multi-tender same card
+          (card as { balance: typeof card.balance }).balance = updated.balance;
         }
 
         if (t.method === "LOYALTY") {
@@ -290,20 +299,14 @@ export async function POST(request: Request) {
           const pts =
             t.loyaltyPoints && t.loyaltyPoints > 0
               ? t.loyaltyPoints
-              : eurToRedeemPoints(t.amount);
-          await tx.loyaltyAccount.update({
-            where: { id: loyaltyAccount!.id },
-            data: { pointsBalance: { decrement: pts } },
-          });
-          await tx.loyaltyLedger.create({
-            data: {
-              tenantId: session.tenantId,
-              accountId: loyaltyAccount!.id,
-              kind: "REDEEM",
-              points: -pts,
-              invoiceId: invoice.id,
-              note: `POS redeem ${t.amount.toFixed(2)} €`,
-            },
+              : eurToRedeemPoints(t.amount, loyaltyRules);
+          await redeemLoyaltyPoints(tx, {
+            tenantId: session.tenantId,
+            accountId: loyaltyAccount!.id,
+            points: pts,
+            invoiceId: invoice.id,
+            note: `POS redeem ${t.amount.toFixed(2)} €`,
+            rules: loyaltyRules,
           });
         }
 
@@ -340,23 +343,13 @@ export async function POST(request: Request) {
 
       // Earn loyalty on sale total
       if (loyaltyAccount?.isActive) {
-        const earned = earnPointsForSale(totals.total);
-        if (earned > 0) {
-          await tx.loyaltyAccount.update({
-            where: { id: loyaltyAccount.id },
-            data: { pointsBalance: { increment: earned } },
-          });
-          await tx.loyaltyLedger.create({
-            data: {
-              tenantId: session.tenantId,
-              accountId: loyaltyAccount.id,
-              kind: "EARN",
-              points: earned,
-              invoiceId: invoice.id,
-              note: "POS earn",
-            },
-          });
-        }
+        await earnLoyaltyPoints(tx, {
+          tenantId: session.tenantId,
+          accountId: loyaltyAccount.id,
+          saleTotalEur: totals.total,
+          invoiceId: invoice.id,
+          rules: loyaltyRules,
+        });
       }
 
       return { invoice, change: tenderCheck.change };

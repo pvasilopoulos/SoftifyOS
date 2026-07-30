@@ -1,9 +1,16 @@
 import { roundMoney } from "@/modules/sales/invoice-utils";
+import {
+  defaultLoyaltyRules,
+  earnPointsForSale as earnPointsForSaleWithRules,
+  eurToRedeemPoints as eurToRedeemPointsWithRules,
+  pointsToEur as pointsToEurWithRules,
+  type LoyaltyRules,
+} from "@/modules/loyalty/rules";
 
-/** 100 πόντοι = 1 € */
-export const LOYALTY_POINTS_PER_EUR = 100;
-/** 1 € αγορών = 1 πόντος */
-export const LOYALTY_EARN_POINTS_PER_EUR = 1;
+/** @deprecated use LoyaltyProgram / modules/loyalty/rules — kept for POS compatibility */
+export const LOYALTY_POINTS_PER_EUR = defaultLoyaltyRules.redeemPointsPerEur;
+/** @deprecated */
+export const LOYALTY_EARN_POINTS_PER_EUR = defaultLoyaltyRules.earnPointsPerEur;
 
 export const tenderMethodLabel = {
   CASH: "Μετρητά",
@@ -16,16 +23,16 @@ export const tenderMethodLabel = {
 
 export type TenderMethod = keyof typeof tenderMethodLabel;
 
-export function pointsToEur(points: number) {
-  return roundMoney(points / LOYALTY_POINTS_PER_EUR);
+export function pointsToEur(points: number, rules?: LoyaltyRules) {
+  return pointsToEurWithRules(points, rules ?? defaultLoyaltyRules);
 }
 
-export function eurToRedeemPoints(amountEur: number) {
-  return Math.floor(roundMoney(amountEur) * LOYALTY_POINTS_PER_EUR);
+export function eurToRedeemPoints(amountEur: number, rules?: LoyaltyRules) {
+  return eurToRedeemPointsWithRules(amountEur, rules ?? defaultLoyaltyRules);
 }
 
-export function earnPointsForSale(totalEur: number) {
-  return Math.floor(roundMoney(totalEur) * LOYALTY_EARN_POINTS_PER_EUR);
+export function earnPointsForSale(totalEur: number, rules?: LoyaltyRules) {
+  return earnPointsForSaleWithRules(totalEur, rules ?? defaultLoyaltyRules);
 }
 
 export type PayableInput = {
@@ -79,33 +86,31 @@ export type TenderLine = {
 export function validateTenders(
   payableDue: number,
   tenders: TenderLine[],
-): { ok: true; tendered: number; change: number } | { ok: false; error: string } {
-  if (tenders.length === 0 && payableDue > 0) {
-    return { ok: false, error: "Προσθέστε τρόπο πληρωμής" };
-  }
+): { ok: true; change: number } | { ok: false; error: string } {
+  const cover = tenders.filter(
+    (t) => t.method !== "GIFT_CARD" && t.method !== "LOYALTY",
+  );
+  const paid = roundMoney(cover.reduce((s, t) => s + Math.max(0, t.amount), 0));
+  const due = roundMoney(Math.max(0, payableDue));
 
-  let cash = 0;
-  let nonCash = 0;
-  for (const t of tenders) {
-    const amt = roundMoney(t.amount);
-    if (amt <= 0) return { ok: false, error: "Μη έγκυρο ποσό πληρωμής" };
-    if (t.method === "CASH") cash = roundMoney(cash + amt);
-    else nonCash = roundMoney(nonCash + amt);
-  }
-
-  const due = roundMoney(payableDue);
-  if (nonCash > due + 0.001) {
-    return { ok: false, error: "Οι μη-μετρητές πληρωμές υπερβαίνουν το πληρωτέο" };
-  }
-  const remainingAfterNonCash = roundMoney(due - nonCash);
-  if (cash + 0.001 < remainingAfterNonCash) {
+  if (due > 0 && paid + 0.001 < due) {
     return {
       ok: false,
-      error: `Υπόλοιπο προς είσπραξη ${remainingAfterNonCash.toFixed(2)} €`,
+      error: `Ανεπαρκής κάλυψη πληρωμής (χρειάζονται ${due.toFixed(2)} €)`,
     };
   }
 
-  const tendered = roundMoney(cash + nonCash);
-  const change = roundMoney(Math.max(0, cash - remainingAfterNonCash));
-  return { ok: true, tendered, change };
+  const cash = cover
+    .filter((t) => t.method === "CASH")
+    .reduce((s, t) => s + t.amount, 0);
+  const nonCash = cover
+    .filter((t) => t.method !== "CASH")
+    .reduce((s, t) => s + t.amount, 0);
+
+  if (nonCash > due + 0.001) {
+    return { ok: false, error: "Μη μετρητά δεν μπορούν να υπερκαλύψουν το πληρωτέο" };
+  }
+
+  const change = roundMoney(Math.max(0, cash - Math.max(0, due - nonCash)));
+  return { ok: true, change };
 }

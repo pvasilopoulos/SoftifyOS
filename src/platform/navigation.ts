@@ -15,6 +15,8 @@ import {
   Store,
   Shield,
   FolderTree,
+  Gift,
+  Star,
   type LucideIcon,
 } from "lucide-react";
 
@@ -25,6 +27,8 @@ export type NavIconName =
   | "ShoppingCart"
   | "ClipboardList"
   | "Store"
+  | "Gift"
+  | "Star"
   | "Tags"
   | "Package"
   | "Truck"
@@ -43,6 +47,8 @@ export const navIconMap: Record<NavIconName, LucideIcon> = {
   ShoppingCart,
   ClipboardList,
   Store,
+  Gift,
+  Star,
   Tags,
   Package,
   Truck,
@@ -145,6 +151,20 @@ export const defaultMenuTree: MenuNodeConfig[] = [
         href: "/pos",
         icon: "Store",
         mobileTab: true,
+      },
+      {
+        id: "gift-cards",
+        type: "link",
+        label: "Δωροκάρτες",
+        href: "/gift-cards",
+        icon: "Gift",
+      },
+      {
+        id: "loyalty",
+        type: "link",
+        label: "Loyalty",
+        href: "/loyalty",
+        icon: "Star",
       },
     ],
   },

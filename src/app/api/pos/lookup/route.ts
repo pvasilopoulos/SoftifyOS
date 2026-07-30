@@ -3,7 +3,8 @@ import { prisma } from "@/server/db";
 import { getSession } from "@/platform/auth/session";
 import { getErrorMessage } from "@/shared/lib/safe";
 import { toNumber } from "@/modules/sales/invoice-utils";
-import { pointsToEur } from "@/modules/pos/payable";
+import { getLoyaltyRules } from "@/modules/loyalty/service";
+import { pointsToEur } from "@/modules/loyalty/rules";
 
 export const dynamic = "force-dynamic";
 
@@ -63,10 +64,11 @@ export async function GET(request: NextRequest) {
         },
       });
       if (loyalty?.isActive) {
+        const rules = await getLoyaltyRules(prisma, session.tenantId);
         result.loyalty = {
           id: loyalty.id,
           pointsBalance: loyalty.pointsBalance,
-          maxRedeemEur: pointsToEur(loyalty.pointsBalance),
+          maxRedeemEur: pointsToEur(loyalty.pointsBalance, rules),
           tier: loyalty.tier,
         };
       }
