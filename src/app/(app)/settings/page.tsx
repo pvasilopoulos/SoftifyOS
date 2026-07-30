@@ -44,6 +44,13 @@ const links = [
     badge: "Παραμετρικό",
   },
   {
+    href: "/settings/units",
+    title: "Μονάδες μέτρησης",
+    description:
+      "Κατάλογος μονάδων (τεμ, kg, lt…) για προϊόντα — σύμβολο, δεκαδικά, προεπιλογή.",
+    badge: "Παραμετρικό",
+  },
+  {
     href: "/settings/series",
     title: "Σειρές & Τύποι",
     description:

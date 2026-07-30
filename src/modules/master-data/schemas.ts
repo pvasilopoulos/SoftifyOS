@@ -50,7 +50,10 @@ export const productCreateSchema = z.object({
     .nullable()
     .transform((v) => (v && v.length > 0 ? v : null)),
   name: z.string().trim().min(1).max(200),
-  unit: z.string().trim().min(1).max(20).optional().default("τεμ"),
+  /** Preferred: UnitOfMeasure id */
+  unitId: z.string().min(1).optional().nullable(),
+  /** Legacy / fallback symbol — resolved against catalog */
+  unit: z.string().trim().min(1).max(20).optional().nullable(),
   vatRate: z.coerce.number().min(0).max(100).optional().default(24),
   price: z.coerce.number().nonnegative().max(10_000_000),
   notes: z.string().trim().max(2000).optional().nullable(),
