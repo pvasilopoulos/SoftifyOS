@@ -36,6 +36,16 @@ docker compose up -d
 | Icons | lucide-react |
 | DB (next) | PostgreSQL 16 + Prisma |
 
+## Performance & stability
+
+Baseline rules live in [`docs/adr/0002-performance-stability.md`](docs/adr/0002-performance-stability.md):
+
+- Route loading skeletons + error / not-found recovery
+- Lucide import optimization, Strict Mode, security headers
+- Deferred list filtering + `content-visibility` rows
+- Health check: `GET /api/health`
+- Gate: `npm run check` (lint + typecheck + build)
+
 ## Roadmap after Template v2
 
 1. Tenant model + auth + RLS

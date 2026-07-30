@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useDeferredValue, useMemo, useState, useTransition } from "react";
 import { Filter, Plus, Search } from "lucide-react";
 import { PageHeader } from "@/shared/ui/page-header";
 import { Button } from "@/shared/ui/button";
@@ -26,7 +26,11 @@ const tabs: { id: "all" | InvoiceStatus; label: string }[] = [
 export default function InvoicesPage() {
   const [tab, setTab] = useState<(typeof tabs)[number]["id"]>("all");
   const [query, setQuery] = useState("");
-  const [selected, setSelected] = useState<string | null>(demoInvoices[0]?.id ?? null);
+  const deferredQuery = useDeferredValue(query);
+  const [isPending, startTransition] = useTransition();
+  const [selected, setSelected] = useState<string | null>(
+    demoInvoices[0]?.id ?? null,
+  );
 
   const filtered = useMemo(() => {
     return demoInvoices.filter((inv) => {
@@ -36,14 +40,14 @@ export default function InvoicesPage() {
           : tab === "issued"
             ? inv.status === "issued" || inv.status === "partial"
             : inv.status === tab;
-      const q = query.trim().toLowerCase();
+      const q = deferredQuery.trim().toLowerCase();
       const matchesQuery =
         !q ||
         inv.number.toLowerCase().includes(q) ||
         inv.customer.toLowerCase().includes(q);
       return matchesTab && matchesQuery;
     });
-  }, [tab, query]);
+  }, [tab, deferredQuery]);
 
   const preview = demoInvoices.find((i) => i.id === selected) ?? filtered[0];
 
@@ -65,7 +69,7 @@ export default function InvoicesPage() {
           <button
             key={t.id}
             type="button"
-            onClick={() => setTab(t.id)}
+            onClick={() => startTransition(() => setTab(t.id))}
             className={cn(
               "shrink-0 rounded-full px-3.5 py-1.5 text-sm font-medium transition",
               tab === t.id
@@ -86,6 +90,7 @@ export default function InvoicesPage() {
             onChange={(e) => setQuery(e.target.value)}
             placeholder="Αναζήτηση αριθμού ή πελάτη..."
             className="w-full bg-transparent text-sm outline-none placeholder:text-slate-400"
+            aria-busy={isPending || query !== deferredQuery}
           />
         </label>
         <Button variant="secondary" className="shrink-0">
@@ -94,7 +99,12 @@ export default function InvoicesPage() {
         </Button>
       </div>
 
-      <div className="grid gap-4 xl:grid-cols-[1.35fr_0.9fr]">
+      <div
+        className={cn(
+          "grid gap-4 xl:grid-cols-[1.35fr_0.9fr]",
+          (isPending || query !== deferredQuery) && "opacity-90",
+        )}
+      >
         <section className="soft-panel overflow-hidden">
           <div className="hidden border-b border-slate-100 px-4 py-2.5 text-xs font-medium uppercase tracking-wide text-slate-400 md:grid md:grid-cols-[1.1fr_1.2fr_0.7fr_0.8fr_0.9fr] md:gap-3">
             <span>Αριθμός</span>
@@ -106,9 +116,10 @@ export default function InvoicesPage() {
 
           <ul className="divide-y divide-slate-100">
             {filtered.map((inv) => (
-              <li key={inv.id}>
+              <li key={inv.id} className="soft-row">
                 <Link
                   href={`/invoices/${inv.id}`}
+                  prefetch
                   onClick={() => setSelected(inv.id)}
                   onMouseEnter={() => setSelected(inv.id)}
                   className={cn(
@@ -117,14 +128,20 @@ export default function InvoicesPage() {
                   )}
                 >
                   <div className="flex items-center justify-between gap-2 md:block">
-                    <p className="text-sm font-semibold text-ink-950">{inv.number}</p>
-                    <p className="text-sm font-medium md:hidden">{formatEUR(inv.amount)}</p>
+                    <p className="text-sm font-semibold text-ink-950">
+                      {inv.number}
+                    </p>
+                    <p className="text-sm font-medium md:hidden">
+                      {formatEUR(inv.amount)}
+                    </p>
                   </div>
                   <div className="mt-1 flex items-center gap-2 md:mt-0">
                     <span className="hidden h-7 w-7 items-center justify-center rounded-full bg-ink-950 text-[10px] font-semibold text-white md:flex">
                       {inv.initials}
                     </span>
-                    <p className="truncate text-sm text-slate-600">{inv.customer}</p>
+                    <p className="truncate text-sm text-slate-600">
+                      {inv.customer}
+                    </p>
                   </div>
                   <p className="mt-1 text-xs text-slate-500 md:mt-0 md:text-sm">
                     {inv.issuedAt}
@@ -139,13 +156,20 @@ export default function InvoicesPage() {
                     <div className="mt-2 h-1 overflow-hidden rounded-full bg-slate-100 md:hidden">
                       <div
                         className="h-full bg-teal-500"
-                        style={{ width: `${Math.round(inv.paidRatio * 100)}%` }}
+                        style={{
+                          width: `${Math.round(inv.paidRatio * 100)}%`,
+                        }}
                       />
                     </div>
                   </div>
                 </Link>
               </li>
             ))}
+            {filtered.length === 0 ? (
+              <li className="px-4 py-12 text-center text-sm text-slate-500">
+                Δεν βρέθηκαν τιμολόγια για τα τρέχοντα φίλτρα.
+              </li>
+            ) : null}
           </ul>
 
           <div className="flex items-center justify-between border-t border-slate-100 px-4 py-3 text-xs text-slate-500">
@@ -161,7 +185,9 @@ export default function InvoicesPage() {
             <div className="space-y-4">
               <div className="flex items-start justify-between gap-3">
                 <div>
-                  <p className="text-xs font-medium text-slate-500">Προεπισκόπηση</p>
+                  <p className="text-xs font-medium text-slate-500">
+                    Προεπισκόπηση
+                  </p>
                   <h2 className="mt-1 text-lg font-semibold text-ink-950">
                     {preview.number}
                   </h2>
@@ -193,7 +219,9 @@ export default function InvoicesPage() {
                   <div className="h-2 overflow-hidden rounded-full bg-slate-100">
                     <div
                       className="h-full rounded-full bg-teal-500"
-                      style={{ width: `${Math.round(preview.paidRatio * 100)}%` }}
+                      style={{
+                        width: `${Math.round(preview.paidRatio * 100)}%`,
+                      }}
                     />
                   </div>
                 </div>

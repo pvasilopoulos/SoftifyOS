@@ -79,3 +79,17 @@ body {
   background: white;
   border-radius: 1rem;
 }
+
+/* Cheaper paint for long lists (1M+ ready pattern) */
+.soft-row {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 64px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-fade-in,
+  .animate-rise,
+  .animate-pulse {
+    animation: none !important;
+  }
+}

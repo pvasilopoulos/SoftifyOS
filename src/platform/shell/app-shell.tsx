@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useTransition } from "react";
 import { Sidebar } from "@/platform/shell/sidebar";
 import { Topbar } from "@/platform/shell/topbar";
 import { MobileTabBar } from "@/platform/shell/mobile-tab-bar";
@@ -11,10 +11,11 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const [collapsed, setCollapsed] = useState(false);
   const [commandOpen, setCommandOpen] = useState(false);
   const [quickOpen, setQuickOpen] = useState(false);
+  const [, startTransition] = useTransition();
 
   useEffect(() => {
     function openCommand() {
-      setCommandOpen(true);
+      startTransition(() => setCommandOpen(true));
     }
     document.addEventListener("softify:open-command", openCommand);
     return () =>
@@ -29,17 +30,18 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       />
       <div className="flex min-w-0 flex-1 flex-col">
         <Topbar
-          onOpenCommand={() => setCommandOpen(true)}
-          onOpenQuickActions={() => setQuickOpen(true)}
+          onOpenCommand={() => startTransition(() => setCommandOpen(true))}
+          onOpenQuickActions={() => startTransition(() => setQuickOpen(true))}
         />
         <main className="flex-1 px-3 pb-24 pt-4 sm:px-5 sm:pt-6 lg:pb-8">
-          <div className="mx-auto w-full max-w-7xl animate-fade-in">
-            {children}
-          </div>
+          <div className="mx-auto w-full max-w-7xl animate-fade-in">{children}</div>
         </main>
       </div>
       <MobileTabBar />
-      <CommandPalette open={commandOpen} onClose={() => setCommandOpen(false)} />
+      <CommandPalette
+        open={commandOpen}
+        onClose={() => setCommandOpen(false)}
+      />
       <QuickActionsSheet open={quickOpen} onClose={() => setQuickOpen(false)} />
     </div>
   );

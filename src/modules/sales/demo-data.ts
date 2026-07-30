@@ -128,8 +128,13 @@ export const statusTone: Record<
 };
 
 export function formatEUR(value: number) {
-  return new Intl.NumberFormat("el-GR", {
-    style: "currency",
-    currency: "EUR",
-  }).format(value);
+  const amount = Number.isFinite(value) ? value : 0;
+  try {
+    return new Intl.NumberFormat("el-GR", {
+      style: "currency",
+      currency: "EUR",
+    }).format(amount);
+  } catch {
+    return `€${amount.toFixed(2)}`;
+  }
 }
