@@ -1,0 +1,366 @@
+import {
+  LayoutDashboard,
+  ShoppingCart,
+  Package,
+  Wallet,
+  Users,
+  UserRound,
+  BarChart3,
+  Settings,
+  FileText,
+  Truck,
+  ScrollText,
+  Tags,
+  ClipboardList,
+  Store,
+  Shield,
+  FolderTree,
+  type LucideIcon,
+} from "lucide-react";
+
+export type NavIconName =
+  | "LayoutDashboard"
+  | "Users"
+  | "FileText"
+  | "ShoppingCart"
+  | "ClipboardList"
+  | "Store"
+  | "Tags"
+  | "Package"
+  | "Truck"
+  | "Wallet"
+  | "UserRound"
+  | "BarChart3"
+  | "ScrollText"
+  | "Settings"
+  | "Shield"
+  | "FolderTree";
+
+export const navIconMap: Record<NavIconName, LucideIcon> = {
+  LayoutDashboard,
+  Users,
+  FileText,
+  ShoppingCart,
+  ClipboardList,
+  Store,
+  Tags,
+  Package,
+  Truck,
+  Wallet,
+  UserRound,
+  BarChart3,
+  ScrollText,
+  Settings,
+  Shield,
+  FolderTree,
+};
+
+/** Serializable menu node (stored in DB / edited in settings) */
+export type MenuNodeConfig = {
+  id: string;
+  /** folder | link */
+  type: "folder" | "link";
+  label: string;
+  href?: string;
+  icon?: NavIconName;
+  visible?: boolean;
+  /** Nested children for folders */
+  children?: MenuNodeConfig[];
+  /** Roles that can see this node; empty/undefined = all */
+  roles?: Array<"OWNER" | "ADMIN" | "MEMBER" | "VIEWER">;
+  mobileTab?: boolean;
+};
+
+export type NavItem = {
+  id: string;
+  href: string;
+  label: string;
+  icon: LucideIcon;
+  mobileTab?: boolean;
+};
+
+export type NavGroup = {
+  id: string;
+  label: string;
+  items: NavItem[];
+};
+
+/** Default SoftifyOS menu — source of truth when tenant has no overrides */
+export const defaultMenuTree: MenuNodeConfig[] = [
+  {
+    id: "main",
+    type: "folder",
+    label: "Κύρια",
+    icon: "LayoutDashboard",
+    children: [
+      {
+        id: "dashboard",
+        type: "link",
+        label: "Πίνακας ελέγχου",
+        href: "/",
+        icon: "LayoutDashboard",
+        mobileTab: true,
+      },
+    ],
+  },
+  {
+    id: "sales",
+    type: "folder",
+    label: "Πωλήσεις",
+    icon: "ShoppingCart",
+    children: [
+      {
+        id: "customers",
+        type: "link",
+        label: "Πελάτες",
+        href: "/customers",
+        icon: "Users",
+        mobileTab: true,
+      },
+      {
+        id: "quotes",
+        type: "link",
+        label: "Προσφορές",
+        href: "/quotes",
+        icon: "ClipboardList",
+      },
+      {
+        id: "orders",
+        type: "link",
+        label: "Παραγγελίες",
+        href: "/orders",
+        icon: "ShoppingCart",
+      },
+      {
+        id: "invoices",
+        type: "link",
+        label: "Τιμολόγια",
+        href: "/invoices",
+        icon: "FileText",
+      },
+      {
+        id: "pos",
+        type: "link",
+        label: "POS Λιανική",
+        href: "/pos",
+        icon: "Store",
+        mobileTab: true,
+      },
+    ],
+  },
+  {
+    id: "ops",
+    type: "folder",
+    label: "Λειτουργίες",
+    icon: "Package",
+    children: [
+      {
+        id: "products",
+        type: "link",
+        label: "Προϊόντα",
+        href: "/products",
+        icon: "Tags",
+      },
+      {
+        id: "inventory",
+        type: "link",
+        label: "Αποθήκη",
+        href: "/inventory",
+        icon: "Package",
+        mobileTab: true,
+      },
+      {
+        id: "purchasing",
+        type: "link",
+        label: "Αγορές",
+        href: "/purchasing",
+        icon: "Truck",
+      },
+    ],
+  },
+  {
+    id: "org",
+    type: "folder",
+    label: "Οργάνωση",
+    icon: "Settings",
+    children: [
+      {
+        id: "finance",
+        type: "link",
+        label: "Οικονομικά",
+        href: "/finance",
+        icon: "Wallet",
+      },
+      {
+        id: "hr",
+        type: "link",
+        label: "HR",
+        href: "/hr",
+        icon: "UserRound",
+      },
+      {
+        id: "reports",
+        type: "link",
+        label: "Αναφορές",
+        href: "/reports",
+        icon: "BarChart3",
+      },
+      {
+        id: "audit",
+        type: "link",
+        label: "Audit log",
+        href: "/audit",
+        icon: "ScrollText",
+        roles: ["OWNER", "ADMIN"],
+      },
+      {
+        id: "settings",
+        type: "link",
+        label: "Ρυθμίσεις",
+        href: "/settings",
+        icon: "Settings",
+        roles: ["OWNER", "ADMIN"],
+      },
+    ],
+  },
+];
+
+export function resolveIcon(name?: NavIconName): LucideIcon {
+  if (!name) return FolderTree;
+  return navIconMap[name] ?? FolderTree;
+}
+
+function roleAllowed(
+  node: MenuNodeConfig,
+  role: string | undefined,
+): boolean {
+  if (!node.roles || node.roles.length === 0) return true;
+  if (!role) return true;
+  return node.roles.includes(role as MenuNodeConfig["roles"] extends
+    | Array<infer R>
+    | undefined
+    ? R
+    : never);
+}
+
+/** Flatten configurable tree → sidebar groups (folders → groups, nested folders recurse) */
+export function menuTreeToNavGroups(
+  tree: MenuNodeConfig[],
+  role?: string,
+): NavGroup[] {
+  const groups: NavGroup[] = [];
+
+  function walk(nodes: MenuNodeConfig[]) {
+    for (const node of nodes) {
+      if (node.visible === false) continue;
+      if (!roleAllowed(node, role)) continue;
+
+      if (node.type === "folder") {
+        const items: NavItem[] = [];
+        const nested: MenuNodeConfig[] = [];
+        for (const child of node.children ?? []) {
+          if (child.visible === false) continue;
+          if (!roleAllowed(child, role)) continue;
+          if (child.type === "folder") {
+            nested.push(child);
+            continue;
+          }
+          if (child.type !== "link" || !child.href) continue;
+          items.push({
+            id: child.id,
+            href: child.href,
+            label: child.label,
+            icon: resolveIcon(child.icon),
+            mobileTab: child.mobileTab,
+          });
+        }
+        if (items.length > 0) {
+          groups.push({ id: node.id, label: node.label, items });
+        }
+        if (nested.length > 0) walk(nested);
+      } else if (node.type === "link" && node.href) {
+        groups.push({
+          id: node.id,
+          label: node.label,
+          items: [
+            {
+              id: node.id,
+              href: node.href,
+              label: node.label,
+              icon: resolveIcon(node.icon),
+              mobileTab: node.mobileTab,
+            },
+          ],
+        });
+      }
+    }
+  }
+
+  walk(tree);
+  return groups;
+}
+
+/** @deprecated use menuTreeToNavGroups(defaultMenuTree) — kept for gradual migration */
+export const navGroups: NavGroup[] = menuTreeToNavGroups(defaultMenuTree);
+
+export const mobileTabs: NavItem[] = [
+  ...navGroups.flatMap((g) => g.items).filter((i) => i.mobileTab),
+  {
+    id: "more",
+    href: "/more",
+    label: "Περισσότερα",
+    icon: Settings,
+    mobileTab: true,
+  },
+];
+
+export const quickActions = [
+  {
+    id: "new-invoice",
+    label: "Νέο τιμολόγιο",
+    href: "/invoices/new",
+    shortcut: "N I",
+  },
+  {
+    id: "new-order",
+    label: "Νέα παραγγελία",
+    href: "/orders/new",
+    shortcut: "N O",
+  },
+  {
+    id: "new-quote",
+    label: "Νέα προσφορά",
+    href: "/quotes/new",
+    shortcut: "N Q",
+  },
+  {
+    id: "pos",
+    label: "Άνοιγμα POS",
+    href: "/pos",
+    shortcut: "G R",
+  },
+  {
+    id: "open-customer",
+    label: "Άνοιγμα πελάτη",
+    href: "/customers",
+    shortcut: "G C",
+  },
+  {
+    id: "open-products",
+    label: "Κατάλογος προϊόντων",
+    href: "/products",
+    shortcut: "G P",
+  },
+  {
+    id: "inventory",
+    label: "Μετάβαση σε αποθήκη",
+    href: "/inventory",
+    shortcut: "G W",
+  },
+  {
+    id: "overdue",
+    label: "Αναφορά ληξιπρόθεσμων",
+    href: "/invoices?status=overdue",
+    shortcut: "G D",
+  },
+];
