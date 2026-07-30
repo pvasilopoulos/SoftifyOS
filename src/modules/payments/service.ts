@@ -130,10 +130,6 @@ export async function updatePaymentMethod(
     }
   }
 
-  if (input.data.kind && input.data.kind !== row.kind && row.isSystem) {
-    throw new PaymentMethodError("Το kind των system τρόπων δεν αλλάζει");
-  }
-
   return db.paymentMethod.update({
     where: { id: row.id },
     data: {

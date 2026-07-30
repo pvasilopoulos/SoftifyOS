@@ -376,7 +376,6 @@ export function PaymentMethodsClient({
                   <select
                     className={inputCls}
                     value={draft.kind}
-                    disabled={!creating && editing?.isSystem}
                     onChange={(e) =>
                       setDraft((d) => ({
                         ...d,
@@ -390,6 +389,9 @@ export function PaymentMethodsClient({
                       </option>
                     ))}
                   </select>
+                  <span className="mt-1 block text-[11px] text-slate-500">
+                    Ορίζει τη συμπεριφορά στο POS (μετρητά, δωροκάρτα, loyalty κ.λπ.).
+                  </span>
                 </Field>
                 <Field label="Σειρά">
                   <input
