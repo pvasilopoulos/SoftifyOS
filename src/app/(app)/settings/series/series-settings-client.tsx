@@ -36,6 +36,15 @@ type Site = {
   parentId: string | null;
 };
 
+type PaymentMethodOpt = {
+  id: string;
+  code: string;
+  name: string;
+  kind: string;
+  showInPos: boolean;
+  showInCollect: boolean;
+};
+
 type Series = {
   id: string;
   code: string;
@@ -58,9 +67,22 @@ type Series = {
   glVatAccount: string | null;
   isDefault: boolean;
   isActive: boolean;
+  allowedPaymentMethodIds: string[];
+  defaultPaymentMethodId: string | null;
+  paymentMethods: {
+    id: string;
+    code: string;
+    name: string;
+    kind: string;
+    isActive: boolean;
+    isDefault: boolean;
+  }[];
 };
 
-function payloadFromForm(form: FormData) {
+function payloadFromForm(
+  form: FormData,
+  payments: { allowedPaymentMethodIds: string[]; defaultPaymentMethodId: string | null },
+) {
   return {
     code: String(form.get("code") || ""),
     name: String(form.get("name") || ""),
@@ -81,20 +103,25 @@ function payloadFromForm(form: FormData) {
     glVatAccount: String(form.get("glVatAccount") || "") || null,
     isDefault: form.get("isDefault") === "on",
     isActive: form.get("isActive") === "on",
+    allowedPaymentMethodIds: payments.allowedPaymentMethodIds,
+    defaultPaymentMethodId: payments.defaultPaymentMethodId,
   };
 }
 
 export function SeriesSettingsClient({
   initialSites,
   initialSeries,
+  initialPaymentMethods,
 }: {
   initialSites: Site[];
   initialSeries: Series[];
+  initialPaymentMethods: PaymentMethodOpt[];
 }) {
   const [tab, setTab] = useState<"series" | "org">("series");
   const [kindFilter, setKindFilter] = useState<"all" | KindGroup>("all");
   const [sites, setSites] = useState(initialSites);
   const [series, setSeries] = useState(initialSeries);
+  const [paymentCatalog] = useState(initialPaymentMethods);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [editing, setEditing] = useState<Series | null>(null);
@@ -181,12 +208,18 @@ export function SeriesSettingsClient({
     await reload();
   }
 
-  async function onSaveSeries(e: FormEvent<HTMLFormElement>) {
+  async function onSaveSeries(
+    e: FormEvent<HTMLFormElement>,
+    payments: {
+      allowedPaymentMethodIds: string[];
+      defaultPaymentMethodId: string | null;
+    },
+  ) {
     e.preventDefault();
     setPending(true);
     setError(null);
     setMessage(null);
-    const payload = payloadFromForm(new FormData(e.currentTarget));
+    const payload = payloadFromForm(new FormData(e.currentTarget), payments);
     const res = editing
       ? await fetch(`/api/document-series/${editing.id}`, {
           method: "PATCH",
@@ -223,7 +256,7 @@ export function SeriesSettingsClient({
 
       <PageHeader
         title="Σειρές & Τύποι"
-        description="Αρίθμηση παραστατικών και κανόνες κινήσεων ανά σειρά."
+        description="Αρίθμηση, κινήσεις και επιτρεπόμενοι τρόποι εξόφλησης ανά σειρά."
         actions={
           tab === "series" ? (
             <Button size="sm" onClick={openCreate}>
@@ -333,6 +366,20 @@ export function SeriesSettingsClient({
                           <span className="mx-1.5">·</span>
                           Λογ. {s.glDebitAccount}
                           {s.glCreditAccount ? ` / ${s.glCreditAccount}` : ""}
+                        </>
+                      ) : null}
+                    </p>
+                    <p className="text-xs text-slate-500">
+                      Εξοφλήσεις:{" "}
+                      {s.allowedPaymentMethodIds.length === 0
+                        ? "όλοι οι τρόποι"
+                        : s.paymentMethods.map((p) => p.code).join(", ")}
+                      {s.defaultPaymentMethodId &&
+                      s.allowedPaymentMethodIds.length > 0 ? (
+                        <>
+                          <span className="mx-1.5">·</span>
+                          default{" "}
+                          {s.paymentMethods.find((p) => p.isDefault)?.code ?? "—"}
                         </>
                       ) : null}
                     </p>
@@ -450,6 +497,7 @@ export function SeriesSettingsClient({
           key={editing?.id ?? "new"}
           title={editing ? `Επεξεργασία ${editing.code}` : "Νέα σειρά"}
           sites={sites}
+          paymentCatalog={paymentCatalog}
           initial={editing}
           pending={pending}
           onSubmit={onSaveSeries}
@@ -521,6 +569,7 @@ function FilterChip({
 function SeriesDrawer({
   title,
   sites,
+  paymentCatalog,
   initial,
   pending,
   onSubmit,
@@ -528,11 +577,39 @@ function SeriesDrawer({
 }: {
   title: string;
   sites: Site[];
+  paymentCatalog: PaymentMethodOpt[];
   initial: Series | null;
   pending: boolean;
-  onSubmit: (e: FormEvent<HTMLFormElement>) => void;
+  onSubmit: (
+    e: FormEvent<HTMLFormElement>,
+    payments: {
+      allowedPaymentMethodIds: string[];
+      defaultPaymentMethodId: string | null;
+    },
+  ) => void;
   onClose: () => void;
 }) {
+  const [allowedIds, setAllowedIds] = useState<string[]>(
+    () => initial?.allowedPaymentMethodIds ?? [],
+  );
+  const [defaultId, setDefaultId] = useState<string | null>(
+    () => initial?.defaultPaymentMethodId ?? null,
+  );
+  const restrictPayments = allowedIds.length > 0;
+
+  const toggleMethod = (id: string) => {
+    setAllowedIds((prev) => {
+      if (prev.includes(id)) {
+        const next = prev.filter((x) => x !== id);
+        if (defaultId === id) setDefaultId(next[0] ?? null);
+        return next;
+      }
+      const next = [...prev, id];
+      if (!defaultId) setDefaultId(id);
+      return next;
+    });
+  };
+
   return (
     <div className="fixed inset-0 z-50 flex justify-end bg-ink-950/40">
       <button
@@ -562,7 +639,16 @@ function SeriesDrawer({
         </div>
 
         <form
-          onSubmit={onSubmit}
+          onSubmit={(e) =>
+            onSubmit(e, {
+              allowedPaymentMethodIds: allowedIds,
+              defaultPaymentMethodId: restrictPayments
+                ? defaultId && allowedIds.includes(defaultId)
+                  ? defaultId
+                  : (allowedIds[0] ?? null)
+                : null,
+            })
+          }
           className="flex min-h-0 flex-1 flex-col"
         >
           <div className="flex-1 space-y-5 overflow-y-auto px-5 py-4">
@@ -723,6 +809,85 @@ function SeriesDrawer({
                   defaultValue={initial?.glVatAccount ?? ""}
                 />
               </div>
+            </Section>
+
+            <Section title="Εξοφλήσεις">
+              <p className="text-xs leading-relaxed text-slate-500">
+                Περιορίστε τους τρόπους πληρωμής για αυτή τη σειρά (POS /
+                εισπράξεις). Κενό = όλοι οι ενεργοί τρόποι από τον κατάλογο.
+              </p>
+              <label className="inline-flex items-center gap-2.5 text-sm">
+                <input
+                  type="checkbox"
+                  checked={!restrictPayments}
+                  onChange={(e) => {
+                    if (e.target.checked) {
+                      setAllowedIds([]);
+                      setDefaultId(null);
+                    } else {
+                      const first = paymentCatalog[0]?.id ?? null;
+                      setAllowedIds(first ? [first] : []);
+                      setDefaultId(first);
+                    }
+                  }}
+                  className="size-4 rounded border-slate-300 text-teal-600 focus:ring-teal-500"
+                />
+                Όλοι οι ενεργοί τρόποι
+              </label>
+              <ul className="space-y-1.5 rounded-xl border border-slate-200 bg-slate-50/60 p-2">
+                {paymentCatalog.map((m) => {
+                  const checked = allowedIds.includes(m.id);
+                  return (
+                    <li
+                      key={m.id}
+                      className="flex items-center gap-2 rounded-lg bg-white px-2.5 py-2"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={restrictPayments ? checked : false}
+                        onChange={() => {
+                          if (!restrictPayments) {
+                            setAllowedIds([m.id]);
+                            setDefaultId(m.id);
+                            return;
+                          }
+                          toggleMethod(m.id);
+                        }}
+                        className="size-4 rounded border-slate-300 text-teal-600 focus:ring-teal-500"
+                      />
+                      <div className="min-w-0 flex-1">
+                        <p className="text-sm font-medium text-ink-900">
+                          {m.name}{" "}
+                          <span className="font-mono text-xs text-slate-400">
+                            {m.code}
+                          </span>
+                        </p>
+                        <p className="text-[11px] text-slate-400">
+                          {m.showInPos ? "POS" : null}
+                          {m.showInPos && m.showInCollect ? " · " : null}
+                          {m.showInCollect ? "Εισπράξεις" : null}
+                          {!m.showInPos && !m.showInCollect ? "Κρυφό" : null}
+                        </p>
+                      </div>
+                      <label className="inline-flex items-center gap-1.5 text-[11px] text-slate-500">
+                        <input
+                          type="radio"
+                          name="defaultPaymentMethod"
+                          disabled={!checked}
+                          checked={defaultId === m.id}
+                          onChange={() => setDefaultId(m.id)}
+                        />
+                        Default
+                      </label>
+                    </li>
+                  );
+                })}
+                {paymentCatalog.length === 0 ? (
+                  <li className="px-2 py-4 text-center text-xs text-slate-500">
+                    Δεν υπάρχουν τρόποι — ορίστε από Ρυθμίσεις → Τρόποι πληρωμής.
+                  </li>
+                ) : null}
+              </ul>
             </Section>
 
             <Section title="Επιλογές">

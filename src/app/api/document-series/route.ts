@@ -7,6 +7,11 @@ import { writeAuditEvent } from "@/platform/tenancy/audit";
 import { getErrorMessage } from "@/shared/lib/safe";
 import { documentKindSchema, seriesCreateSchema } from "@/modules/documents/schemas";
 import { previewNextNumber } from "@/modules/documents/series";
+import {
+  mapSeriesPaymentLinks,
+  syncSeriesPaymentMethods,
+} from "@/modules/documents/series-payments";
+import { ensurePaymentMethods } from "@/modules/payments/service";
 
 export const dynamic = "force-dynamic";
 
@@ -14,6 +19,23 @@ const listSchema = z.object({
   kind: documentKindSchema.optional(),
   siteId: z.string().optional(),
 });
+
+const paymentInclude = {
+  paymentMethods: {
+    orderBy: [{ sortOrder: "asc" as const }, { createdAt: "asc" as const }],
+    include: {
+      paymentMethod: {
+        select: {
+          id: true,
+          code: true,
+          name: true,
+          kind: true,
+          isActive: true,
+        },
+      },
+    },
+  },
+};
 
 export async function GET(request: NextRequest) {
   try {
@@ -28,6 +50,8 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: "Invalid query" }, { status: 400 });
     }
 
+    await ensurePaymentMethods(prisma, session.tenantId);
+
     const items = await prisma.documentSeries.findMany({
       where: {
         tenantId: session.tenantId,
@@ -35,14 +59,21 @@ export async function GET(request: NextRequest) {
         siteId: parsed.data.siteId,
       },
       orderBy: [{ kind: "asc" }, { code: "asc" }],
-      include: { site: { select: { id: true, code: true, name: true, kind: true } } },
+      include: {
+        site: { select: { id: true, code: true, name: true, kind: true } },
+        ...paymentInclude,
+      },
     });
 
     return NextResponse.json({
-      items: items.map((s) => ({
-        ...s,
-        previewNumber: previewNextNumber(s),
-      })),
+      items: items.map((s) => {
+        const { paymentMethods: links, ...rest } = s;
+        return {
+          ...rest,
+          previewNumber: previewNextNumber(s),
+          ...mapSeriesPaymentLinks(links),
+        };
+      }),
     });
   } catch (error) {
     return NextResponse.json(
@@ -72,6 +103,8 @@ export async function POST(request: Request) {
       }
     }
 
+    await ensurePaymentMethods(prisma, session.tenantId);
+
     const item = await prisma.$transaction(async (tx) => {
       if (body.isDefault) {
         await tx.documentSeries.updateMany({
@@ -83,7 +116,7 @@ export async function POST(request: Request) {
           data: { isDefault: false },
         });
       }
-      return tx.documentSeries.create({
+      const created = await tx.documentSeries.create({
         data: {
           tenantId: session.tenantId,
           code: body.code,
@@ -109,6 +142,20 @@ export async function POST(request: Request) {
           isActive: body.isActive ?? true,
         },
       });
+
+      if (body.allowedPaymentMethodIds !== undefined) {
+        await syncSeriesPaymentMethods(tx, {
+          tenantId: session.tenantId,
+          seriesId: created.id,
+          paymentMethodIds: body.allowedPaymentMethodIds,
+          defaultPaymentMethodId: body.defaultPaymentMethodId,
+        });
+      }
+
+      return tx.documentSeries.findUniqueOrThrow({
+        where: { id: created.id },
+        include: paymentInclude,
+      });
     });
 
     await writeAuditEvent({
@@ -117,11 +164,23 @@ export async function POST(request: Request) {
       action: "series.create",
       entity: "document_series",
       entityId: item.id,
-      meta: { code: item.code, kind: item.kind },
+      meta: {
+        code: item.code,
+        kind: item.kind,
+        paymentMethods: item.paymentMethods.length,
+      },
     });
 
+    const pay = mapSeriesPaymentLinks(item.paymentMethods);
+    const { paymentMethods: _links, ...rest } = item;
     return NextResponse.json(
-      { item: { ...item, previewNumber: previewNextNumber(item) } },
+      {
+        item: {
+          ...rest,
+          previewNumber: previewNextNumber(item),
+          ...pay,
+        },
+      },
       { status: 201 },
     );
   } catch (error) {

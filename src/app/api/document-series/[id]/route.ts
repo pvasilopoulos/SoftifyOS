@@ -5,8 +5,30 @@ import { writeAuditEvent } from "@/platform/tenancy/audit";
 import { getErrorMessage } from "@/shared/lib/safe";
 import { seriesUpdateSchema } from "@/modules/documents/schemas";
 import { previewNextNumber } from "@/modules/documents/series";
+import {
+  mapSeriesPaymentLinks,
+  syncSeriesPaymentMethods,
+} from "@/modules/documents/series-payments";
+import { ensurePaymentMethods } from "@/modules/payments/service";
 
 export const dynamic = "force-dynamic";
+
+const paymentInclude = {
+  paymentMethods: {
+    orderBy: [{ sortOrder: "asc" as const }, { createdAt: "asc" as const }],
+    include: {
+      paymentMethod: {
+        select: {
+          id: true,
+          code: true,
+          name: true,
+          kind: true,
+          isActive: true,
+        },
+      },
+    },
+  },
+};
 
 export async function PATCH(
   request: Request,
@@ -31,6 +53,7 @@ export async function PATCH(
 
     const body = seriesUpdateSchema.parse(await request.json());
     const kind = body.kind ?? existing.kind;
+    await ensurePaymentMethods(prisma, session.tenantId);
 
     const item = await prisma.$transaction(async (tx) => {
       if (body.isDefault) {
@@ -44,7 +67,7 @@ export async function PATCH(
           data: { isDefault: false },
         });
       }
-      return tx.documentSeries.update({
+      await tx.documentSeries.update({
         where: { id },
         data: {
           ...(body.code !== undefined ? { code: body.code } : {}),
@@ -85,6 +108,20 @@ export async function PATCH(
           ...(body.isActive !== undefined ? { isActive: body.isActive } : {}),
         },
       });
+
+      if (body.allowedPaymentMethodIds !== undefined) {
+        await syncSeriesPaymentMethods(tx, {
+          tenantId: session.tenantId,
+          seriesId: id,
+          paymentMethodIds: body.allowedPaymentMethodIds,
+          defaultPaymentMethodId: body.defaultPaymentMethodId,
+        });
+      }
+
+      return tx.documentSeries.findUniqueOrThrow({
+        where: { id },
+        include: paymentInclude,
+      });
     });
 
     await writeAuditEvent({
@@ -93,11 +130,19 @@ export async function PATCH(
       action: "series.update",
       entity: "document_series",
       entityId: item.id,
-      meta: { code: item.code },
+      meta: {
+        code: item.code,
+        paymentMethods: item.paymentMethods.length,
+      },
     });
 
+    const { paymentMethods: links, ...rest } = item;
     return NextResponse.json({
-      item: { ...item, previewNumber: previewNextNumber(item) },
+      item: {
+        ...rest,
+        previewNumber: previewNextNumber(item),
+        ...mapSeriesPaymentLinks(links),
+      },
     });
   } catch (error) {
     return NextResponse.json(

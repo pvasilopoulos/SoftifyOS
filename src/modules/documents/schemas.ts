@@ -52,6 +52,9 @@ export const seriesCreateSchema = z.object({
   glVatAccount: z.string().trim().max(40).optional().nullable(),
   isDefault: z.boolean().optional().default(false),
   isActive: z.boolean().optional().default(true),
+  /** Empty / omitted = all catalog methods allowed for this series */
+  allowedPaymentMethodIds: z.array(z.string().min(1)).max(50).optional(),
+  defaultPaymentMethodId: z.string().min(1).nullable().optional(),
 });
 
 export const seriesUpdateSchema = seriesCreateSchema.partial();

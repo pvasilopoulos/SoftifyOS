@@ -124,15 +124,29 @@ export async function POST(request: Request) {
 
     const totals = calcInvoiceTotals(body.lines);
 
+    const { resolveSeriesPaymentMethods } = await import(
+      "@/modules/documents/series-payments"
+    );
+    const seriesMethods = await resolveSeriesPaymentMethods(prisma, {
+      tenantId: session.tenantId,
+      seriesId: series.id,
+      posOnly: true,
+      activeOnly: true,
+    });
+    // Full PaymentMethod rows filtered to series allow-list (empty list = all POS methods)
     const paymentMethods = await listPaymentMethods(prisma, session.tenantId, {
       activeOnly: true,
     });
-    const methodByCode = new Map(paymentMethods.map((m) => [m.code, m]));
+    const allowedIds = new Set(seriesMethods.map((m) => m.id));
+    const allowedCatalog = paymentMethods.filter((m) => allowedIds.has(m.id));
+    const methodByCode = new Map(allowedCatalog.map((m) => [m.code, m]));
 
     for (const t of body.tenders) {
       if (!methodByCode.has(t.method)) {
         return NextResponse.json(
-          { error: `Άγνωστος τρόπος πληρωμής: ${t.method}` },
+          {
+            error: `Ο τρόπος πληρωμής «${t.method}» δεν επιτρέπεται για τη σειρά ΑΠΥ`,
+          },
           { status: 400 },
         );
       }

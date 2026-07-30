@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Ban, CheckCircle2, FileDown, Send, Wallet, X } from "lucide-react";
 import { Button } from "@/shared/ui/button";
 import { formatEUR } from "@/modules/sales/invoice-utils";
@@ -77,7 +77,11 @@ export function InvoiceActions({
     }
   }
 
-  async function collectInvoice(amount: number, note: string) {
+  async function collectInvoice(
+    amount: number,
+    note: string,
+    paymentMethodId: string | null,
+  ) {
     setBusy("collect");
     setError(null);
     setMessage(null);
@@ -85,7 +89,11 @@ export function InvoiceActions({
       const res = await fetch(`/api/invoices/${invoiceId}/collect`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ amount, note: note || null }),
+        body: JSON.stringify({
+          amount,
+          note: note || null,
+          paymentMethodId: paymentMethodId || null,
+        }),
       });
       const data = (await res.json()) as {
         item?: { paidAmount: number; balance: number; status: string };
@@ -228,31 +236,73 @@ export function InvoiceActions({
 
       {collectOpen ? (
         <CollectDialog
+          invoiceId={invoiceId}
           balance={balance}
           busy={busy === "collect"}
           onClose={() => setCollectOpen(false)}
-          onSubmit={(amount, note) => void collectInvoice(amount, note)}
+          onSubmit={(amount, note, paymentMethodId) =>
+            void collectInvoice(amount, note, paymentMethodId)
+          }
         />
       ) : null}
     </div>
   );
 }
 
+type CollectMethod = {
+  id: string;
+  code: string;
+  name: string;
+  kind: string;
+  isDefault: boolean;
+};
+
 function CollectDialog({
+  invoiceId,
   balance,
   busy,
   onClose,
   onSubmit,
 }: {
+  invoiceId: string;
   balance: number;
   busy: boolean;
   onClose: () => void;
-  onSubmit: (amount: number, note: string) => void;
+  onSubmit: (
+    amount: number,
+    note: string,
+    paymentMethodId: string | null,
+  ) => void;
 }) {
   const [amount, setAmount] = useState(
     balance > 0 ? String(balance) : "",
   );
   const [note, setNote] = useState("");
+  const [methods, setMethods] = useState<CollectMethod[]>([]);
+  const [methodId, setMethodId] = useState("");
+  const [loadingMethods, setLoadingMethods] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      setLoadingMethods(true);
+      try {
+        const res = await fetch(`/api/invoices/${invoiceId}/collect-methods`);
+        const data = (await res.json()) as { items?: CollectMethod[] };
+        if (cancelled || !res.ok) return;
+        const items = data.items ?? [];
+        setMethods(items);
+        const preferred =
+          items.find((m) => m.isDefault)?.id ?? items[0]?.id ?? "";
+        setMethodId(preferred);
+      } finally {
+        if (!cancelled) setLoadingMethods(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [invoiceId]);
 
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center bg-ink-950/40 p-4 sm:items-center">
@@ -286,7 +336,7 @@ function CollectDialog({
             e.preventDefault();
             const value = Number(amount);
             if (!Number.isFinite(value) || value <= 0) return;
-            onSubmit(value, note.trim());
+            onSubmit(value, note.trim(), methodId || null);
           }}
         >
           <label className="block">
@@ -303,16 +353,43 @@ function CollectDialog({
             />
           </label>
           <label className="block">
+            <span className="mb-1.5 block text-sm font-medium">
+              Τρόπος πληρωμής *
+            </span>
+            <select
+              required
+              value={methodId}
+              disabled={loadingMethods || methods.length === 0}
+              onChange={(e) => setMethodId(e.target.value)}
+              className="h-11 w-full rounded-xl border border-slate-200 px-3 text-sm outline-none ring-teal-500/30 focus:ring-2"
+            >
+              {loadingMethods ? (
+                <option value="">Φόρτωση…</option>
+              ) : methods.length === 0 ? (
+                <option value="">Δεν υπάρχουν τρόποι</option>
+              ) : (
+                methods.map((m) => (
+                  <option key={m.id} value={m.id}>
+                    {m.name} ({m.code})
+                  </option>
+                ))
+              )}
+            </select>
+          </label>
+          <label className="block">
             <span className="mb-1.5 block text-sm font-medium">Σημείωση</span>
             <input
               value={note}
               onChange={(e) => setNote(e.target.value)}
-              placeholder="π.χ. έμβασμα / μετρητά"
+              placeholder="π.χ. αριθμός συναλλαγής"
               className="h-11 w-full rounded-xl border border-slate-200 px-3 text-sm outline-none ring-teal-500/30 focus:ring-2"
             />
           </label>
           <div className="flex flex-wrap gap-2 pt-1">
-            <Button type="submit" disabled={busy}>
+            <Button
+              type="submit"
+              disabled={busy || loadingMethods || !methodId}
+            >
               {busy ? "Αποθήκευση..." : "Καταχώρηση"}
             </Button>
             <Button type="button" variant="secondary" onClick={onClose}>

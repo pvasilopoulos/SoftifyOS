@@ -53,11 +53,12 @@ model Tenant {
   loyaltyAccounts  LoyaltyAccount[]
   loyaltyLedgers   LoyaltyLedger[]
   loyaltyProgram   LoyaltyProgram?
-  paymentMethods   PaymentMethod[]
-  unitsOfMeasure   UnitOfMeasure[]
-  tenantSettings   TenantSettings?
-  appRoles         AppRole[]
-  userGroups       UserGroup[]
+  paymentMethods              PaymentMethod[]
+  documentSeriesPaymentMethods DocumentSeriesPaymentMethod[]
+  unitsOfMeasure              UnitOfMeasure[]
+  tenantSettings              TenantSettings?
+  appRoles                    AppRole[]
+  userGroups                  UserGroup[]
 
   @@map("tenants")
 }
@@ -563,15 +564,36 @@ model DocumentSeries {
   createdAt            DateTime          @default(now())
   updatedAt            DateTime          @updatedAt
 
-  tenant   Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  site     Site?     @relation(fields: [siteId], references: [id], onDelete: SetNull)
-  invoices Invoice[]
-  orders   Order[]
+  tenant         Tenant                        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  site           Site?                         @relation(fields: [siteId], references: [id], onDelete: SetNull)
+  invoices       Invoice[]
+  orders         Order[]
+  paymentMethods DocumentSeriesPaymentMethod[]
 
   @@unique([tenantId, code])
   @@index([tenantId, kind, isActive])
   @@index([tenantId, siteId, kind])
   @@map("document_series")
+}
+
+/// Allowed tenders for a document series (empty = all catalog methods allowed)
+model DocumentSeriesPaymentMethod {
+  id              String   @id @default(cuid())
+  tenantId        String
+  seriesId        String
+  paymentMethodId String
+  isDefault       Boolean  @default(false)
+  sortOrder       Int      @default(0)
+  createdAt       DateTime @default(now())
+
+  tenant        Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  series        DocumentSeries @relation(fields: [seriesId], references: [id], onDelete: Cascade)
+  paymentMethod PaymentMethod  @relation(fields: [paymentMethodId], references: [id], onDelete: Cascade)
+
+  @@unique([seriesId, paymentMethodId])
+  @@index([tenantId, seriesId])
+  @@index([tenantId, paymentMethodId])
+  @@map("document_series_payment_methods")
 }
 
 enum PosSessionStatus {
@@ -649,8 +671,9 @@ model PaymentMethod {
   createdAt           DateTime          @default(now())
   updatedAt           DateTime          @updatedAt
 
-  tenant   Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  payments InvoicePayment[]
+  tenant      Tenant                        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  payments    InvoicePayment[]
+  seriesLinks DocumentSeriesPaymentMethod[]
 
   @@unique([tenantId, code])
   @@index([tenantId, isActive, sortOrder])

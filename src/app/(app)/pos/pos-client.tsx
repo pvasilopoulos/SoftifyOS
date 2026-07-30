@@ -89,18 +89,26 @@ function newLine(): Line {
   };
 }
 
+type SeriesPaymentRule = {
+  seriesId: string;
+  allowedPaymentMethodIds: string[];
+  defaultPaymentMethodId: string | null;
+};
+
 export function PosClient({
   sites,
   customers,
   products,
   terminals,
   paymentMethods,
+  seriesPaymentRules = [],
 }: {
   sites: Site[];
   customers: Customer[];
   products: Product[];
   terminals: Terminal[];
   paymentMethods: PaymentMethodOption[];
+  seriesPaymentRules?: SeriesPaymentRule[];
 }) {
   const defaultTill =
     sites.find((s) => s.kind === "TILL")?.id ?? sites[0]?.id ?? "";
@@ -151,19 +159,28 @@ export function PosClient({
     [lines],
   );
 
+  const activePaymentMethods = useMemo(() => {
+    const rule = seriesPaymentRules.find((r) => r.seriesId === seriesId);
+    if (!rule || rule.allowedPaymentMethodIds.length === 0) {
+      return paymentMethods;
+    }
+    const allow = new Set(rule.allowedPaymentMethodIds);
+    return paymentMethods.filter((m) => allow.has(m.id));
+  }, [paymentMethods, seriesId, seriesPaymentRules]);
+
   const methodByCode = useMemo(() => {
-    const map = new Map(paymentMethods.map((m) => [m.code, m]));
+    const map = new Map(activePaymentMethods.map((m) => [m.code, m]));
     return map;
-  }, [paymentMethods]);
+  }, [activePaymentMethods]);
 
   const posGridMethods = useMemo(
-    () => paymentMethods.filter((m) => m.kind !== "LOYALTY"),
-    [paymentMethods],
+    () => activePaymentMethods.filter((m) => m.kind !== "LOYALTY"),
+    [activePaymentMethods],
   );
 
   const defaultCashCode =
-    paymentMethods.find((m) => m.kind === "CASH")?.code ??
-    paymentMethods[0]?.code ??
+    activePaymentMethods.find((m) => m.kind === "CASH")?.code ??
+    activePaymentMethods[0]?.code ??
     "CASH";
 
   const giftApplied = useMemo(() => {
@@ -192,10 +209,10 @@ export function PosClient({
 
   const coverMethodOptions = useMemo(
     () =>
-      paymentMethods.filter(
+      activePaymentMethods.filter(
         (m) => m.kind !== "LOYALTY" && m.kind !== "GIFT_CARD",
       ),
-    [paymentMethods],
+    [activePaymentMethods],
   );
 
   const coverLines = useMemo(
@@ -322,7 +339,8 @@ export function PosClient({
         (t) => methodByCode.get(t.method)?.kind !== "GIFT_CARD",
       );
       const giftCodeMethod =
-        paymentMethods.find((m) => m.kind === "GIFT_CARD")?.code ?? "GIFT_CARD";
+        activePaymentMethods.find((m) => m.kind === "GIFT_CARD")?.code ??
+        "GIFT_CARD";
       return [
         ...without,
         {
@@ -395,7 +413,8 @@ export function PosClient({
       );
       if (eur <= 0) return without;
       const loyaltyCode =
-        paymentMethods.find((m) => m.kind === "LOYALTY")?.code ?? "LOYALTY";
+        activePaymentMethods.find((m) => m.kind === "LOYALTY")?.code ??
+        "LOYALTY";
       return [
         ...without,
         {
@@ -500,7 +519,8 @@ export function PosClient({
     );
     if (!hasLoyalty && loyaltyApplied > 0) {
       const loyaltyCode =
-        paymentMethods.find((m) => m.kind === "LOYALTY")?.code ?? "LOYALTY";
+        activePaymentMethods.find((m) => m.kind === "LOYALTY")?.code ??
+        "LOYALTY";
       payloadTenders.push({
         method: loyaltyCode,
         amount: loyaltyApplied,

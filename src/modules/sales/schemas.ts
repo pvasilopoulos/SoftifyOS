@@ -65,10 +65,9 @@ export const invoiceUpdateSchema = z.object({
 
 export const invoiceCollectSchema = z.object({
   amount: z.coerce.number().positive().max(10_000_000),
-  method: z
-    .enum(["CASH", "TRANSFER", "CARD", "OTHER"])
-    .optional()
-    .default("OTHER"),
+  /** Catalog code preferred; legacy enum still accepted */
+  method: z.string().trim().min(1).max(40).optional(),
+  paymentMethodId: z.string().trim().min(1).optional().nullable(),
   note: z.string().trim().max(500).optional().nullable(),
 });
 

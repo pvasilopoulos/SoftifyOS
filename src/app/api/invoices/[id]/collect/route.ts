@@ -11,6 +11,7 @@ import {
   type InvoiceStatusKey,
 } from "@/modules/sales/invoice-utils";
 import { invoiceCollectSchema } from "@/modules/sales/schemas";
+import { resolveSeriesPaymentMethods } from "@/modules/documents/series-payments";
 
 export const dynamic = "force-dynamic";
 
@@ -32,6 +33,13 @@ export async function POST(
 
     const invoice = await prisma.invoice.findFirst({
       where: { id, tenantId: session.tenantId },
+      select: {
+        id: true,
+        status: true,
+        total: true,
+        paidAmount: true,
+        seriesId: true,
+      },
     });
     if (!invoice) {
       return NextResponse.json({ error: "Δεν βρέθηκε" }, { status: 404 });
@@ -57,6 +65,46 @@ export async function POST(
       );
     }
 
+    const allowed = await resolveSeriesPaymentMethods(prisma, {
+      tenantId: session.tenantId,
+      seriesId: invoice.seriesId,
+      collectOnly: true,
+      activeOnly: true,
+    });
+
+    if (allowed.length === 0) {
+      return NextResponse.json(
+        { error: "Δεν υπάρχουν διαθέσιμοι τρόποι είσπραξης" },
+        { status: 400 },
+      );
+    }
+
+    let method =
+      allowed.find((m) => m.id === body.paymentMethodId) ??
+      allowed.find((m) => m.code === body.method) ??
+      allowed.find((m) => m.isDefault) ??
+      allowed[0]!;
+
+    // Legacy enum fallback when series has no strict allow-list match
+    if (
+      !body.paymentMethodId &&
+      body.method &&
+      !allowed.some((m) => m.code === body.method)
+    ) {
+      const legacy = allowed.find((m) => m.kind === body.method);
+      if (legacy) method = legacy;
+    }
+
+    if (
+      body.paymentMethodId &&
+      !allowed.some((m) => m.id === body.paymentMethodId)
+    ) {
+      return NextResponse.json(
+        { error: "Ο τρόπος πληρωμής δεν επιτρέπεται για αυτή τη σειρά" },
+        { status: 400 },
+      );
+    }
+
     const total = toNumber(invoice.total);
     const currentPaid = toNumber(invoice.paidAmount);
     const balance = roundMoney(total - currentPaid);
@@ -78,7 +126,8 @@ export async function POST(
           tenantId: session.tenantId,
           invoiceId: invoice.id,
           amount: body.amount,
-          method: body.method ?? "OTHER",
+          method: method.code,
+          paymentMethodId: method.id,
           note: body.note || null,
         },
       });
@@ -96,7 +145,8 @@ export async function POST(
       entityId: invoice.id,
       meta: {
         amount: body.amount,
-        method: body.method ?? "OTHER",
+        method: method.code,
+        paymentMethodId: method.id,
         paidAmount,
         status: nextStatus,
         note: body.note || null,

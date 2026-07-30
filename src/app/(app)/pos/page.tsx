@@ -12,7 +12,7 @@ export default async function PosPage() {
   const session = await getSession();
   if (!session) redirect("/login");
 
-  const [sites, customers, products, terminals, paymentMethods] =
+  const [sites, customers, products, terminals, paymentMethods, retailSeries] =
     await Promise.all([
       prisma.site.findMany({
         where: { tenantId: session.tenantId, isActive: true },
@@ -50,6 +50,20 @@ export default async function PosPage() {
         },
       }),
       listPaymentMethods(prisma, session.tenantId, { posOnly: true }),
+      prisma.documentSeries.findMany({
+        where: {
+          tenantId: session.tenantId,
+          kind: "RETAIL_RECEIPT",
+          isActive: true,
+        },
+        select: {
+          id: true,
+          paymentMethods: {
+            select: { paymentMethodId: true, isDefault: true },
+            orderBy: { sortOrder: "asc" },
+          },
+        },
+      }),
     ]);
 
   return (
@@ -74,6 +88,14 @@ export default async function PosPage() {
         kind: m.kind,
         allowsChange: m.allowsChange,
         requiresExternalRef: m.requiresExternalRef,
+      }))}
+      seriesPaymentRules={retailSeries.map((s) => ({
+        seriesId: s.id,
+        allowedPaymentMethodIds: s.paymentMethods.map((p) => p.paymentMethodId),
+        defaultPaymentMethodId:
+          s.paymentMethods.find((p) => p.isDefault)?.paymentMethodId ??
+          s.paymentMethods[0]?.paymentMethodId ??
+          null,
       }))}
     />
   );
