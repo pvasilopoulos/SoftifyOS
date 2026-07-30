@@ -25,27 +25,28 @@ import {
 import {
   calcPayable,
   eurToRedeemPoints,
-  tenderMethodLabel,
-  type TenderMethod,
 } from "@/modules/pos/payable";
 import { SeriesPicker } from "@/modules/documents/series-picker";
 import { PosBarcodeScan } from "@/modules/pos/barcode-scan";
-
-const PAYMENT_GRID_METHODS = [
-  "CASH",
-  "CARD",
-  "TRANSFER",
-  "GIFT_CARD",
-  "OTHER",
-] as const satisfies readonly TenderMethod[];
+import type { PaymentMethodKind } from "@/modules/payments/labels";
 
 const paymentMethodIcon = {
   CASH: Banknote,
   CARD: CreditCard,
   TRANSFER: ArrowLeftRight,
   GIFT_CARD: Gift,
+  LOYALTY: Star,
   OTHER: MoreHorizontal,
 } as const;
+
+type PaymentMethodOption = {
+  id: string;
+  code: string;
+  name: string;
+  kind: PaymentMethodKind;
+  allowsChange: boolean;
+  requiresExternalRef: boolean;
+};
 
 type Site = { id: string; code: string; name: string; kind: string };
 type Customer = { id: string; code: string; name: string };
@@ -68,7 +69,7 @@ type Line = {
 };
 type Tender = {
   key: string;
-  method: TenderMethod;
+  method: string;
   amount: string;
   giftCardCode?: string;
   loyaltyPoints?: string;
@@ -90,11 +91,13 @@ export function PosClient({
   customers,
   products,
   terminals,
+  paymentMethods,
 }: {
   sites: Site[];
   customers: Customer[];
   products: Product[];
   terminals: Terminal[];
+  paymentMethods: PaymentMethodOption[];
 }) {
   const defaultTill =
     sites.find((s) => s.kind === "TILL")?.id ?? sites[0]?.id ?? "";
@@ -104,8 +107,15 @@ export function PosClient({
   const [customerId, setCustomerId] = useState(customers[0]?.id ?? "");
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [lines, setLines] = useState<Line[]>([newLine()]);
-  const [tenders, setTenders] = useState<Tender[]>([
-    { key: "cash", method: "CASH", amount: "" },
+  const [tenders, setTenders] = useState<Tender[]>(() => [
+    {
+      key: "cash",
+      method:
+        paymentMethods.find((m) => m.kind === "CASH")?.code ??
+        paymentMethods[0]?.code ??
+        "CASH",
+      amount: "",
+    },
   ]);
   const [discount, setDiscount] = useState("0");
   const [giftCode, setGiftCode] = useState("");
@@ -137,10 +147,26 @@ export function PosClient({
     [lines],
   );
 
+  const methodByCode = useMemo(() => {
+    const map = new Map(paymentMethods.map((m) => [m.code, m]));
+    return map;
+  }, [paymentMethods]);
+
+  const posGridMethods = useMemo(
+    () => paymentMethods.filter((m) => m.kind !== "LOYALTY"),
+    [paymentMethods],
+  );
+
+  const defaultCashCode =
+    paymentMethods.find((m) => m.kind === "CASH")?.code ??
+    paymentMethods[0]?.code ??
+    "CASH";
+
   const giftApplied = useMemo(() => {
-    const t = tenders.find((x) => x.method === "GIFT_CARD");
-    return t ? Number(t.amount) || 0 : 0;
-  }, [tenders]);
+    return tenders
+      .filter((x) => methodByCode.get(x.method)?.kind === "GIFT_CARD")
+      .reduce((s, t) => s + (Number(t.amount) || 0), 0);
+  }, [tenders, methodByCode]);
 
   const loyaltyApplied = Number(loyaltyRedeemEur) || 0;
 
@@ -229,12 +255,16 @@ export function PosClient({
     );
     const apply = Math.min(data.giftCard!.balance, afterDiscount);
     setTenders((prev) => {
-      const without = prev.filter((t) => t.method !== "GIFT_CARD");
+      const without = prev.filter(
+        (t) => methodByCode.get(t.method)?.kind !== "GIFT_CARD",
+      );
+      const giftCodeMethod =
+        paymentMethods.find((m) => m.kind === "GIFT_CARD")?.code ?? "GIFT_CARD";
       return [
         ...without,
         {
           key: `gift-${Date.now()}`,
-          method: "GIFT_CARD",
+          method: giftCodeMethod,
           amount: String(apply),
           giftCardCode: data.giftCard!.code,
         },
@@ -243,9 +273,9 @@ export function PosClient({
     setShowGiftEntry(true);
   }
 
-  function pickPaymentMethod(method: (typeof PAYMENT_GRID_METHODS)[number]) {
+  function pickPaymentMethod(pm: PaymentMethodOption) {
     setError(null);
-    if (method === "GIFT_CARD") {
+    if (pm.kind === "GIFT_CARD") {
       setShowGiftEntry(true);
       return;
     }
@@ -253,25 +283,27 @@ export function PosClient({
     const amount =
       payable.payableDue > 0 ? String(payable.payableDue) : "";
     setTenders((prev) => {
-      const special = prev.filter(
-        (t) => t.method === "GIFT_CARD" || t.method === "LOYALTY",
-      );
-      const covers = prev.filter(
-        (t) => t.method !== "GIFT_CARD" && t.method !== "LOYALTY",
-      );
+      const special = prev.filter((t) => {
+        const kind = methodByCode.get(t.method)?.kind;
+        return kind === "GIFT_CARD" || kind === "LOYALTY";
+      });
+      const covers = prev.filter((t) => {
+        const kind = methodByCode.get(t.method)?.kind;
+        return kind !== "GIFT_CARD" && kind !== "LOYALTY";
+      });
       if (covers.length <= 1) {
         return [
           ...special,
           {
             key: covers[0]?.key ?? `t-${Date.now()}`,
-            method,
+            method: pm.code,
             amount: amount || covers[0]?.amount || "",
           },
         ];
       }
       return [
         ...prev,
-        { key: `t-${Date.now()}`, method, amount },
+        { key: `t-${Date.now()}`, method: pm.code, amount },
       ];
     });
   }
@@ -285,13 +317,17 @@ export function PosClient({
     );
     setLoyaltyRedeemEur(String(eur));
     setTenders((prev) => {
-      const without = prev.filter((t) => t.method !== "LOYALTY");
+      const without = prev.filter(
+        (t) => methodByCode.get(t.method)?.kind !== "LOYALTY",
+      );
       if (eur <= 0) return without;
+      const loyaltyCode =
+        paymentMethods.find((m) => m.kind === "LOYALTY")?.code ?? "LOYALTY";
       return [
         ...without,
         {
           key: `loy-${Date.now()}`,
-          method: "LOYALTY",
+          method: loyaltyCode,
           amount: String(eur),
           loyaltyPoints: String(eurToRedeemPoints(eur)),
         },
@@ -356,11 +392,20 @@ export function PosClient({
     setLastSale(null);
 
     const payloadTenders = tenders
-      .filter((t) => t.method === "GIFT_CARD" || t.method === "LOYALTY" || Number(t.amount) > 0 || t.method === "CASH")
+      .filter((t) => {
+        const kind = methodByCode.get(t.method)?.kind;
+        return (
+          kind === "GIFT_CARD" ||
+          kind === "LOYALTY" ||
+          kind === "CASH" ||
+          Number(t.amount) > 0
+        );
+      })
       .map((t) => {
         let amount = Number(t.amount) || 0;
+        const pm = methodByCode.get(t.method);
         if (
-          t.method === "CASH" &&
+          (pm?.allowsChange || pm?.kind === "CASH") &&
           amount <= 0 &&
           payable.payableDue > 0
         ) {
@@ -377,10 +422,14 @@ export function PosClient({
       .filter((t) => t.amount > 0);
 
     // Sync loyalty tender from loyaltyRedeemEur field
-    const hasLoyalty = payloadTenders.some((t) => t.method === "LOYALTY");
+    const hasLoyalty = payloadTenders.some(
+      (t) => methodByCode.get(t.method)?.kind === "LOYALTY",
+    );
     if (!hasLoyalty && loyaltyApplied > 0) {
+      const loyaltyCode =
+        paymentMethods.find((m) => m.kind === "LOYALTY")?.code ?? "LOYALTY";
       payloadTenders.push({
-        method: "LOYALTY",
+        method: loyaltyCode,
         amount: loyaltyApplied,
         giftCardCode: null,
         loyaltyPoints: eurToRedeemPoints(loyaltyApplied),
@@ -430,7 +479,13 @@ export function PosClient({
     });
     setMessage(`Πώληση ${data.item!.number} ολοκληρώθηκε`);
     setLines([newLine()]);
-    setTenders([{ key: "cash", method: "CASH", amount: "" }]);
+    setTenders([
+      {
+        key: "cash",
+        method: defaultCashCode,
+        amount: "",
+      },
+    ]);
     setDiscount("0");
     setGiftCode("");
     setGiftBalance(null);
@@ -786,22 +841,33 @@ export function PosClient({
             </div>
 
             <div className="space-y-3">
-              <p className="flex items-center gap-1.5 text-xs font-medium text-slate-500">
-                <Wallet size={13} /> Τρόποι πληρωμής
-              </p>
+              <div className="flex items-center justify-between gap-2">
+                <p className="flex items-center gap-1.5 text-xs font-medium text-slate-500">
+                  <Wallet size={13} /> Τρόποι πληρωμής
+                </p>
+                <Link
+                  href="/settings/payment-methods"
+                  className="text-[11px] text-teal-700 hover:underline"
+                >
+                  Ρυθμίσεις
+                </Link>
+              </div>
               <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
-                {PAYMENT_GRID_METHODS.map((method) => {
-                  const Icon = paymentMethodIcon[method];
+                {posGridMethods.map((pm) => {
+                  const Icon = paymentMethodIcon[pm.kind] ?? MoreHorizontal;
                   const active =
-                    method === "GIFT_CARD"
+                    pm.kind === "GIFT_CARD"
                       ? showGiftEntry ||
-                        tenders.some((t) => t.method === "GIFT_CARD")
-                      : tenders.some((t) => t.method === method);
+                        tenders.some(
+                          (t) =>
+                            methodByCode.get(t.method)?.kind === "GIFT_CARD",
+                        )
+                      : tenders.some((t) => t.method === pm.code);
                   return (
                     <button
-                      key={method}
+                      key={pm.id}
                       type="button"
-                      onClick={() => pickPaymentMethod(method)}
+                      onClick={() => pickPaymentMethod(pm)}
                       className={cn(
                         "flex flex-col items-center justify-center gap-1.5 rounded-xl border px-2 py-3 text-center text-xs font-medium transition",
                         active
@@ -809,14 +875,20 @@ export function PosClient({
                           : "border-slate-200 bg-white text-slate-700 hover:border-teal-200 hover:bg-teal-50/40",
                       )}
                     >
-                      <Icon size={18} className={active ? "text-teal-700" : "text-slate-400"} />
-                      {tenderMethodLabel[method]}
+                      <Icon
+                        size={18}
+                        className={active ? "text-teal-700" : "text-slate-400"}
+                      />
+                      {pm.name}
                     </button>
                   );
                 })}
               </div>
 
-              {showGiftEntry || tenders.some((t) => t.method === "GIFT_CARD") ? (
+              {showGiftEntry ||
+              tenders.some(
+                (t) => methodByCode.get(t.method)?.kind === "GIFT_CARD",
+              ) ? (
                 <div className="space-y-2 rounded-xl border border-teal-100 bg-teal-50/40 p-3">
                   <p className="flex items-center gap-1.5 text-xs font-medium text-teal-800">
                     <Gift size={13} /> Κωδικός δωροκάρτας
@@ -850,12 +922,17 @@ export function PosClient({
               ) : null}
 
               {tenders
-                .filter((t) => t.method !== "LOYALTY")
-                .map((t) => (
+                .filter(
+                  (t) => methodByCode.get(t.method)?.kind !== "LOYALTY",
+                )
+                .map((t) => {
+                  const pm = methodByCode.get(t.method);
+                  const kind = pm?.kind;
+                  return (
                   <div key={t.key} className="flex items-center gap-2">
                     <span className="w-28 shrink-0 text-xs font-medium text-slate-600">
-                      {tenderMethodLabel[t.method]}
-                      {t.method === "GIFT_CARD" && t.giftCardCode
+                      {pm?.name ?? t.method}
+                      {kind === "GIFT_CARD" && t.giftCardCode
                         ? ` · ${t.giftCardCode}`
                         : ""}
                     </span>
@@ -864,7 +941,7 @@ export function PosClient({
                       min="0.01"
                       step="0.01"
                       required={
-                        t.method !== "GIFT_CARD" && payable.payableDue > 0
+                        kind !== "GIFT_CARD" && payable.payableDue > 0
                       }
                       value={t.amount}
                       onChange={(e) =>
@@ -883,12 +960,18 @@ export function PosClient({
                       className="rounded-lg p-2 text-slate-400 hover:bg-slate-100 hover:text-rose-600"
                       aria-label="Αφαίρεση"
                       onClick={() => {
-                        const removingGift = t.method === "GIFT_CARD";
+                        const removingGift = kind === "GIFT_CARD";
                         setTenders((prev) => {
                           const next = prev.filter((x) => x.key !== t.key);
                           return next.length
                             ? next
-                            : [{ key: "cash", method: "CASH", amount: "" }];
+                            : [
+                                {
+                                  key: "cash",
+                                  method: defaultCashCode,
+                                  amount: "",
+                                },
+                              ];
                         });
                         if (removingGift) {
                           setGiftBalance(null);
@@ -899,21 +982,29 @@ export function PosClient({
                       <Trash2 size={16} />
                     </button>
                   </div>
-                ))}
+                  );
+                })}
               <Button
                 type="button"
                 size="sm"
                 variant="ghost"
-                onClick={() =>
+                onClick={() => {
+                  const card =
+                    paymentMethods.find((m) => m.kind === "CARD") ??
+                    paymentMethods.find((m) => m.kind !== "LOYALTY");
+                  if (!card) return;
                   setTenders((prev) => [
                     ...prev,
                     {
                       key: `t-${Date.now()}`,
-                      method: "CARD",
-                      amount: payable.payableDue > 0 ? String(payable.payableDue) : "",
+                      method: card.code,
+                      amount:
+                        payable.payableDue > 0
+                          ? String(payable.payableDue)
+                          : "",
                     },
-                  ])
-                }
+                  ]);
+                }}
               >
                 + Επιπλέον τρόπος
               </Button>

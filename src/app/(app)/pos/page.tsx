@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import { getSession } from "@/platform/auth/session";
 import { prisma } from "@/server/db";
 import { toNumber } from "@/modules/sales/invoice-utils";
+import { listPaymentMethods } from "@/modules/payments/service";
 import { PosClient } from "./pos-client";
 
 export const metadata = { title: "POS Λιανικής" };
@@ -11,37 +12,45 @@ export default async function PosPage() {
   const session = await getSession();
   if (!session) redirect("/login");
 
-  const [sites, customers, products, terminals] = await Promise.all([
-    prisma.site.findMany({
-      where: { tenantId: session.tenantId, isActive: true },
-      orderBy: [{ kind: "asc" }, { code: "asc" }],
-      select: { id: true, code: true, name: true, kind: true },
-    }),
-    prisma.customer.findMany({
-      where: { tenantId: session.tenantId, status: "ACTIVE" },
-      orderBy: { name: "asc" },
-      take: 100,
-      select: { id: true, code: true, name: true },
-    }),
-    prisma.product.findMany({
-      where: { tenantId: session.tenantId, status: "ACTIVE" },
-      orderBy: { name: "asc" },
-      take: 200,
-      select: {
-        id: true,
-        sku: true,
-        barcode: true,
-        name: true,
-        price: true,
-        vatRate: true,
-      },
-    }),
-    prisma.posTerminal.findMany({
-      where: { tenantId: session.tenantId, isActive: true },
-      orderBy: { code: "asc" },
-      select: { id: true, code: true, name: true, provider: true, siteId: true },
-    }),
-  ]);
+  const [sites, customers, products, terminals, paymentMethods] =
+    await Promise.all([
+      prisma.site.findMany({
+        where: { tenantId: session.tenantId, isActive: true },
+        orderBy: [{ kind: "asc" }, { code: "asc" }],
+        select: { id: true, code: true, name: true, kind: true },
+      }),
+      prisma.customer.findMany({
+        where: { tenantId: session.tenantId, status: "ACTIVE" },
+        orderBy: { name: "asc" },
+        take: 100,
+        select: { id: true, code: true, name: true },
+      }),
+      prisma.product.findMany({
+        where: { tenantId: session.tenantId, status: "ACTIVE" },
+        orderBy: { name: "asc" },
+        take: 200,
+        select: {
+          id: true,
+          sku: true,
+          barcode: true,
+          name: true,
+          price: true,
+          vatRate: true,
+        },
+      }),
+      prisma.posTerminal.findMany({
+        where: { tenantId: session.tenantId, isActive: true },
+        orderBy: { code: "asc" },
+        select: {
+          id: true,
+          code: true,
+          name: true,
+          provider: true,
+          siteId: true,
+        },
+      }),
+      listPaymentMethods(prisma, session.tenantId, { posOnly: true }),
+    ]);
 
   return (
     <PosClient
@@ -57,6 +66,14 @@ export default async function PosPage() {
         code: t.code,
         name: t.name,
         provider: t.provider,
+      }))}
+      paymentMethods={paymentMethods.map((m) => ({
+        id: m.id,
+        code: m.code,
+        name: m.name,
+        kind: m.kind,
+        allowsChange: m.allowsChange,
+        requiresExternalRef: m.requiresExternalRef,
       }))}
     />
   );
