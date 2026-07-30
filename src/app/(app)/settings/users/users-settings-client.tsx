@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState, useTransition } from "react";
+import { useState, useTransition } from "react";
 import Link from "next/link";
 import { ArrowLeft } from "lucide-react";
 import { PageHeader } from "@/shared/ui/page-header";
@@ -18,51 +18,36 @@ type UserRow = {
 
 const SYSTEM_ROLES = ["OWNER", "ADMIN", "MEMBER", "VIEWER"] as const;
 
-export function UsersSettingsClient() {
-  const [items, setItems] = useState<UserRow[]>([]);
-  const [roles, setRoles] = useState<AppRole[]>([]);
+export function UsersSettingsClient({
+  initialUsers,
+  initialRoles,
+}: {
+  initialUsers: UserRow[];
+  initialRoles: AppRole[];
+}) {
+  const [items, setItems] = useState(initialUsers);
+  const [roles] = useState(initialRoles);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
 
-  const load = useCallback(async () => {
-    setError(null);
-    const [usersRes, rolesRes] = await Promise.all([
-      fetch("/api/settings/users"),
-      fetch("/api/settings/roles"),
-    ]);
-    const usersData = await usersRes.json();
-    const rolesData = await rolesRes.json();
-    if (!usersRes.ok) {
-      setError(usersData.error || "Αποτυχία φόρτωσης χρηστών");
-      return;
-    }
-    if (!rolesRes.ok) {
-      setError(rolesData.error || "Αποτυχία φόρτωσης ρόλων");
-      return;
-    }
-    setItems(usersData.items);
-    setRoles(
-      rolesData.items.map((r: AppRole & { code: string }) => ({
-        id: r.id,
-        code: r.code,
-        name: r.name,
-      })),
-    );
-  }, []);
+  const refresh = async () => {
+    const res = await fetch("/api/settings/users");
+    const data = await res.json();
+    if (res.ok) setItems(data.items);
+  };
 
-  useEffect(() => {
-    void load();
-  }, [load]);
-
-  const patch = (membershipId: string, patch: { role?: string; appRoleId?: string | null }) => {
+  const patch = (
+    membershipId: string,
+    body: { role?: string; appRoleId?: string | null },
+  ) => {
     startTransition(async () => {
       setError(null);
       setMessage(null);
       const res = await fetch("/api/settings/users", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ membershipId, ...patch }),
+        body: JSON.stringify({ membershipId, ...body }),
       });
       const data = await res.json();
       if (!res.ok) {
@@ -70,7 +55,7 @@ export function UsersSettingsClient() {
         return;
       }
       setMessage("Ενημερώθηκε.");
-      await load();
+      await refresh();
     });
   };
 

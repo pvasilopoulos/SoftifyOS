@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useCallback, useEffect, useMemo, useState, useTransition } from "react";
+import { FormEvent, useMemo, useState, useTransition } from "react";
 import Link from "next/link";
 import { ArrowLeft, Plus, Trash2 } from "lucide-react";
 import { PageHeader } from "@/shared/ui/page-header";
@@ -15,34 +15,41 @@ type Role = {
   description: string | null;
   permissions: string[];
   isSystem: boolean;
-  _count?: { memberships: number; groups: number };
+  membershipCount: number;
+  groupCount: number;
 };
 
 const groups = permissionsByGroup();
 
-export function RolesSettingsClient() {
-  const [items, setItems] = useState<Role[]>([]);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+export function RolesSettingsClient({ initialRoles }: { initialRoles: Role[] }) {
+  const [items, setItems] = useState(initialRoles);
+  const [selectedId, setSelectedId] = useState<string | null>(
+    initialRoles[0]?.id ?? null,
+  );
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
   const [creating, setCreating] = useState(false);
 
-  const load = useCallback(async () => {
-    setError(null);
+  const refresh = async () => {
     const res = await fetch("/api/settings/roles");
     const data = await res.json();
-    if (!res.ok) {
-      setError(data.error || "Αποτυχία φόρτωσης");
-      return;
-    }
-    setItems(data.items);
-    setSelectedId((prev) => prev ?? data.items[0]?.id ?? null);
-  }, []);
-
-  useEffect(() => {
-    void load();
-  }, [load]);
+    if (!res.ok) return;
+    setItems(
+      data.items.map(
+        (r: Role & { _count?: { memberships: number; groups: number } }) => ({
+          id: r.id,
+          code: r.code,
+          name: r.name,
+          description: r.description,
+          permissions: r.permissions,
+          isSystem: r.isSystem,
+          membershipCount: r._count?.memberships ?? r.membershipCount ?? 0,
+          groupCount: r._count?.groups ?? r.groupCount ?? 0,
+        }),
+      ),
+    );
+  };
 
   const selected = useMemo(
     () => items.find((r) => r.id === selectedId) ?? null,
@@ -81,7 +88,7 @@ export function RolesSettingsClient() {
         return;
       }
       setMessage("Ο ρόλος αποθηκεύτηκε.");
-      await load();
+      await refresh();
     });
   };
 
@@ -108,7 +115,7 @@ export function RolesSettingsClient() {
       }
       setCreating(false);
       setMessage("Δημιουργήθηκε νέος ρόλος.");
-      await load();
+      await refresh();
       setSelectedId(data.item.id);
     });
   };
@@ -127,7 +134,7 @@ export function RolesSettingsClient() {
         return;
       }
       setSelectedId(null);
-      await load();
+      await refresh();
     });
   };
 
@@ -233,9 +240,7 @@ export function RolesSettingsClient() {
                 />
                 <p className="text-xs text-slate-500">
                   code: <code>{selected.code}</code>
-                  {selected._count
-                    ? ` · ${selected._count.memberships} χρήστες · ${selected._count.groups} ομάδες`
-                    : null}
+                  {` · ${selected.membershipCount} χρήστες · ${selected.groupCount} ομάδες`}
                 </p>
                 <textarea
                   value={selected.description ?? ""}

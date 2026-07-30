@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState, useTransition } from "react";
+import { useState, useTransition } from "react";
 import Link from "next/link";
 import {
   ArrowDown,
@@ -145,28 +145,15 @@ function MenuNodeRow({
   );
 }
 
-export function MenuSettingsClient() {
-  const [tree, setTree] = useState<MenuNodeConfig[]>([]);
+export function MenuSettingsClient({
+  initialMenu,
+}: {
+  initialMenu: MenuNodeConfig[];
+}) {
+  const [tree, setTree] = useState(() => cloneTree(initialMenu));
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
-  const [loaded, setLoaded] = useState(false);
-
-  const load = useCallback(async () => {
-    setError(null);
-    const res = await fetch("/api/settings/menu");
-    const data = await res.json();
-    if (!res.ok) {
-      setError(data.error || "Αποτυχία φόρτωσης");
-      return;
-    }
-    setTree(cloneTree(data.menu));
-    setLoaded(true);
-  }, []);
-
-  useEffect(() => {
-    void load();
-  }, [load]);
 
   const onChange = (
     path: number[],
@@ -269,7 +256,7 @@ export function MenuSettingsClient() {
           <Button variant="secondary" size="sm" onClick={reset} disabled={pending}>
             <RotateCcw size={16} /> Επαναφορά
           </Button>
-          <Button size="sm" onClick={save} disabled={pending || !loaded}>
+          <Button size="sm" onClick={save} disabled={pending}>
             <Save size={16} /> Αποθήκευση
           </Button>
         </div>
@@ -287,20 +274,16 @@ export function MenuSettingsClient() {
       ) : null}
 
       <div className="soft-panel space-y-2 p-4">
-        {!loaded ? (
-          <p className="text-sm text-slate-500">Φόρτωση…</p>
-        ) : (
-          tree.map((node, i) => (
-            <MenuNodeRow
-              key={node.id}
-              node={node}
-              path={[i]}
-              depth={0}
-              onChange={onChange}
-              onMove={onMove}
-            />
-          ))
-        )}
+        {tree.map((node, i) => (
+          <MenuNodeRow
+            key={node.id}
+            node={node}
+            path={[i]}
+            depth={0}
+            onChange={onChange}
+            onMove={onMove}
+          />
+        ))}
       </div>
     </div>
   );

@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useCallback, useEffect, useMemo, useState, useTransition } from "react";
+import { FormEvent, useMemo, useState, useTransition } from "react";
 import Link from "next/link";
 import { ArrowLeft, Plus, Trash2 } from "lucide-react";
 import { PageHeader } from "@/shared/ui/page-header";
@@ -20,55 +20,31 @@ type Group = {
   roles: RoleOpt[];
 };
 
-export function GroupsSettingsClient() {
-  const [items, setItems] = useState<Group[]>([]);
-  const [users, setUsers] = useState<UserOpt[]>([]);
-  const [roles, setRoles] = useState<RoleOpt[]>([]);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+export function GroupsSettingsClient({
+  initialGroups,
+  initialUsers,
+  initialRoles,
+}: {
+  initialGroups: Group[];
+  initialUsers: UserOpt[];
+  initialRoles: RoleOpt[];
+}) {
+  const [items, setItems] = useState(initialGroups);
+  const [users] = useState(initialUsers);
+  const [roles] = useState(initialRoles);
+  const [selectedId, setSelectedId] = useState<string | null>(
+    initialGroups[0]?.id ?? null,
+  );
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
   const [creating, setCreating] = useState(false);
 
-  const load = useCallback(async () => {
-    setError(null);
-    const [gRes, uRes, rRes] = await Promise.all([
-      fetch("/api/settings/groups"),
-      fetch("/api/settings/users"),
-      fetch("/api/settings/roles"),
-    ]);
-    const gData = await gRes.json();
-    const uData = await uRes.json();
-    const rData = await rRes.json();
-    if (!gRes.ok) {
-      setError(gData.error || "Αποτυχία φόρτωσης ομάδων");
-      return;
-    }
-    setItems(gData.items);
-    setUsers(
-      (uData.items ?? []).map(
-        (u: {
-          membershipId: string;
-          user: { id: string; email: string; name: string };
-        }) => ({
-          membershipId: u.membershipId,
-          user: u.user,
-        }),
-      ),
-    );
-    setRoles(
-      (rData.items ?? []).map((r: RoleOpt) => ({
-        id: r.id,
-        code: r.code,
-        name: r.name,
-      })),
-    );
-    setSelectedId((prev) => prev ?? gData.items[0]?.id ?? null);
-  }, []);
-
-  useEffect(() => {
-    void load();
-  }, [load]);
+  const refresh = async () => {
+    const res = await fetch("/api/settings/groups");
+    const data = await res.json();
+    if (res.ok) setItems(data.items);
+  };
 
   const selected = useMemo(
     () => items.find((g) => g.id === selectedId) ?? null,
@@ -96,7 +72,7 @@ export function GroupsSettingsClient() {
       }
       setCreating(false);
       setMessage("Η ομάδα δημιουργήθηκε.");
-      await load();
+      await refresh();
       setSelectedId(data.item.id);
     });
   };
@@ -122,7 +98,7 @@ export function GroupsSettingsClient() {
         return;
       }
       setMessage("Η ομάδα αποθηκεύτηκε.");
-      await load();
+      await refresh();
     });
   };
 
@@ -139,7 +115,7 @@ export function GroupsSettingsClient() {
         return;
       }
       setSelectedId(null);
-      await load();
+      await refresh();
     });
   };
 
