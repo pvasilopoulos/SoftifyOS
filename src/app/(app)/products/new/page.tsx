@@ -19,6 +19,7 @@ export default function NewProductPage() {
     const form = new FormData(e.currentTarget);
     const payload = {
       sku: String(form.get("sku") || ""),
+      barcode: String(form.get("barcode") || "") || null,
       name: String(form.get("name") || ""),
       unit: String(form.get("unit") || "τεμ") || "τεμ",
       vatRate: Number(form.get("vatRate") || 24),
@@ -55,6 +56,11 @@ export default function NewProductPage() {
       />
       <form onSubmit={onSubmit} className="soft-panel space-y-4 p-5">
         <Field name="sku" label="SKU *" required placeholder="SKU-001" />
+        <Field
+          name="barcode"
+          label="Barcode / EAN"
+          placeholder="5200123456789 ή ίσο με SKU"
+        />
         <Field
           name="name"
           label="Όνομα *"

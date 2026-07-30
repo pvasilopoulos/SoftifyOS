@@ -30,6 +30,7 @@ export default async function PosPage() {
       select: {
         id: true,
         sku: true,
+        barcode: true,
         name: true,
         price: true,
         vatRate: true,

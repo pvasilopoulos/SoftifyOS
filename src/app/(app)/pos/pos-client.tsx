@@ -29,6 +29,7 @@ import {
   type TenderMethod,
 } from "@/modules/pos/payable";
 import { SeriesPicker } from "@/modules/documents/series-picker";
+import { PosBarcodeScan } from "@/modules/pos/barcode-scan";
 
 const PAYMENT_GRID_METHODS = [
   "CASH",
@@ -51,6 +52,7 @@ type Customer = { id: string; code: string; name: string };
 type Product = {
   id: string;
   sku: string;
+  barcode: string | null;
   name: string;
   price: number;
   vatRate: number;
@@ -300,17 +302,50 @@ export function PosClient({
   function addProduct(productId: string) {
     const p = products.find((x) => x.id === productId);
     if (!p) return;
-    setLines((prev) => [
-      ...prev.filter((l) => l.description || l.unitPrice),
-      {
+    setLines((prev) => {
+      const existing = prev.find((l) => l.productId === p.id);
+      if (existing) {
+        return prev.map((l) =>
+          l.key === existing.key
+            ? {
+                ...l,
+                quantity: String((Number(l.quantity) || 0) + 1),
+              }
+            : l,
+        );
+      }
+      const blankOnly =
+        prev.length === 1 &&
+        !prev[0]?.description &&
+        !prev[0]?.unitPrice &&
+        !prev[0]?.productId;
+      const nextLine: Line = {
         key: `${Date.now()}`,
         productId: p.id,
         description: p.name,
         quantity: "1",
         unitPrice: String(p.price),
         vatRate: String(p.vatRate),
-      },
-    ]);
+      };
+      if (blankOnly) return [nextLine];
+      return [...prev, nextLine];
+    });
+    setMessage(null);
+    setError(null);
+  }
+
+  function addProductByCode(code: string) {
+    const needle = code.trim().toLowerCase();
+    const p = products.find(
+      (x) =>
+        x.barcode?.toLowerCase() === needle ||
+        x.sku.toLowerCase() === needle,
+    );
+    if (!p) {
+      return { ok: false as const, error: `Δεν βρέθηκε: ${code}` };
+    }
+    addProduct(p.id);
+    return { ok: true as const };
   }
 
   async function checkout(e: FormEvent) {
@@ -534,6 +569,7 @@ export function PosClient({
                 </Button>
               </div>
             </div>
+            <PosBarcodeScan onScan={addProductByCode} />
             <ul className="space-y-2">
               {lines.map((line) => {
                 const { lineTotal } = calcLineTotals({

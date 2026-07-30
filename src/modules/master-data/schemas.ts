@@ -42,6 +42,13 @@ export const spaceTypeLabel = {
 
 export const productCreateSchema = z.object({
   sku: z.string().trim().min(1).max(40),
+  barcode: z
+    .string()
+    .trim()
+    .max(64)
+    .optional()
+    .nullable()
+    .transform((v) => (v && v.length > 0 ? v : null)),
   name: z.string().trim().min(1).max(200),
   unit: z.string().trim().min(1).max(20).optional().default("τεμ"),
   vatRate: z.coerce.number().min(0).max(100).optional().default(24),

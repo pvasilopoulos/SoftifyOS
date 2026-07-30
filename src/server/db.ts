@@ -9,7 +9,7 @@ const globalForPrisma = globalThis as unknown as {
 };
 
 /** Bump when models change so stale HMR/global clients are discarded in dev. */
-const PRISMA_SCHEMA_VERSION = "gift-loyalty-v1";
+const PRISMA_SCHEMA_VERSION = "product-barcode-v1";
 
 function createPrisma() {
   const connectionString = process.env.DATABASE_URL;

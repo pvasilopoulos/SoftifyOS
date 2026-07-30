@@ -120,6 +120,7 @@ export async function POST(request: Request) {
       data: {
         tenantId: session.tenantId,
         sku: body.sku,
+        barcode: body.barcode || null,
         name: body.name,
         unit: body.unit || "τεμ",
         vatRate: body.vatRate ?? 24,
@@ -156,7 +157,7 @@ export async function POST(request: Request) {
       error.code === "P2002"
     ) {
       return NextResponse.json(
-        { error: "Το SKU υπάρχει ήδη" },
+        { error: "Το SKU ή barcode υπάρχει ήδη" },
         { status: 409 },
       );
     }

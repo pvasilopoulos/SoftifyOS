@@ -67,10 +67,12 @@ async function main() {
         price: p.price,
         vatRate: p.vatRate,
         status: p.status ?? "ACTIVE",
+        barcode: p.sku,
       },
       create: {
         tenantId: tenant.id,
         sku: p.sku,
+        barcode: p.sku,
         name: p.name,
         unit: p.unit,
         price: p.price,
