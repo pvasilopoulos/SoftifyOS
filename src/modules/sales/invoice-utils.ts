@@ -40,3 +40,46 @@ export function toNumber(value: unknown) {
   if (typeof value === "number") return value;
   return Number(value);
 }
+
+export function roundMoney(value: number) {
+  return Math.round((value + Number.EPSILON) * 100) / 100;
+}
+
+export function calcLineTotals(input: {
+  quantity: number;
+  unitPrice: number;
+  vatRate: number;
+}) {
+  const net = input.quantity * input.unitPrice;
+  const vat = net * (input.vatRate / 100);
+  return {
+    net: roundMoney(net),
+    vat: roundMoney(vat),
+    lineTotal: roundMoney(net + vat),
+  };
+}
+
+export function calcInvoiceTotals(
+  lines: Array<{ quantity: number; unitPrice: number; vatRate: number }>,
+) {
+  let subtotal = 0;
+  let vatAmount = 0;
+  const prepared = lines.map((line, idx) => {
+    const { net, vat, lineTotal } = calcLineTotals(line);
+    subtotal += net;
+    vatAmount += vat;
+    return {
+      position: idx + 1,
+      quantity: line.quantity,
+      unitPrice: line.unitPrice,
+      vatRate: line.vatRate,
+      lineTotal,
+    };
+  });
+  return {
+    lines: prepared,
+    subtotal: roundMoney(subtotal),
+    vatAmount: roundMoney(vatAmount),
+    total: roundMoney(subtotal + vatAmount),
+  };
+}

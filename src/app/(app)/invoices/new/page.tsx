@@ -1,27 +1,443 @@
-import Link from "next/link";
-import { PageHeader } from "@/shared/ui/page-header";
-import { Badge } from "@/shared/ui/badge";
+"use client";
 
-export const metadata = { title: "Νέο τιμολόγιο" };
+import { FormEvent, useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
+import Link from "next/link";
+import { ArrowLeft, Plus, Trash2 } from "lucide-react";
+import { PageHeader } from "@/shared/ui/page-header";
+import { Button } from "@/shared/ui/button";
+import {
+  calcInvoiceTotals,
+  calcLineTotals,
+  formatEUR,
+} from "@/modules/sales/invoice-utils";
+
+type CustomerOption = { id: string; code: string; name: string };
+type BranchOption = {
+  id: string;
+  code: string;
+  name: string;
+  spaces: Array<{ id: string; code: string; name: string }>;
+};
+type LineDraft = {
+  key: string;
+  description: string;
+  quantity: string;
+  unitPrice: string;
+  vatRate: string;
+};
+
+function newLine(): LineDraft {
+  return {
+    key: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    description: "",
+    quantity: "1",
+    unitPrice: "",
+    vatRate: "24",
+  };
+}
 
 export default function NewInvoicePage() {
+  const router = useRouter();
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [customers, setCustomers] = useState<CustomerOption[]>([]);
+  const [branches, setBranches] = useState<BranchOption[]>([]);
+  const [customerId, setCustomerId] = useState("");
+  const [branchId, setBranchId] = useState("");
+  const [spaceId, setSpaceId] = useState("");
+  const [status, setStatus] = useState<"DRAFT" | "ISSUED">("DRAFT");
+  const [dueAt, setDueAt] = useState("");
+  const [notes, setNotes] = useState("");
+  const [lines, setLines] = useState<LineDraft[]>([newLine()]);
+  const [loadingCustomers, setLoadingCustomers] = useState(true);
+  const [loadingHierarchy, setLoadingHierarchy] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      setLoadingCustomers(true);
+      try {
+        const res = await fetch("/api/customers?limit=50&status=ACTIVE");
+        const data = (await res.json()) as {
+          items?: CustomerOption[];
+          error?: string;
+        };
+        if (!cancelled) {
+          setCustomers(data.items ?? []);
+          if (!res.ok) setError(data.error || "Αποτυχία φόρτωσης πελατών");
+        }
+      } catch {
+        if (!cancelled) setError("Αποτυχία φόρτωσης πελατών");
+      } finally {
+        if (!cancelled) setLoadingCustomers(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!customerId) return;
+    let cancelled = false;
+    (async () => {
+      setLoadingHierarchy(true);
+      try {
+        const res = await fetch(`/api/customers/${customerId}`);
+        const data = (await res.json()) as {
+          item?: { branches: BranchOption[] };
+          error?: string;
+        };
+        if (!cancelled) {
+          setBranches(data.item?.branches ?? []);
+          if (!res.ok) setError(data.error || "Αποτυχία φόρτωσης υποκαταστημάτων");
+        }
+      } catch {
+        if (!cancelled) setError("Αποτυχία φόρτωσης υποκαταστημάτων");
+      } finally {
+        if (!cancelled) setLoadingHierarchy(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [customerId]);
+
+  const spaces = useMemo(() => {
+    const branch = branches.find((b) => b.id === branchId);
+    return branch?.spaces ?? [];
+  }, [branches, branchId]);
+
+  const totals = useMemo(() => {
+    const parsed = lines.map((line) => ({
+      quantity: Number(line.quantity) || 0,
+      unitPrice: Number(line.unitPrice) || 0,
+      vatRate: Number(line.vatRate) || 0,
+    }));
+    return calcInvoiceTotals(parsed);
+  }, [lines]);
+
+  function updateLine(key: string, patch: Partial<LineDraft>) {
+    setLines((prev) =>
+      prev.map((line) => (line.key === key ? { ...line, ...patch } : line)),
+    );
+  }
+
+  function removeLine(key: string) {
+    setLines((prev) => (prev.length <= 1 ? prev : prev.filter((l) => l.key !== key)));
+  }
+
+  async function onSubmit(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    setPending(true);
+    setError(null);
+
+    if (!customerId) {
+      setError("Επιλέξτε πελάτη");
+      setPending(false);
+      return;
+    }
+
+    const payload = {
+      customerId,
+      branchId: branchId || null,
+      spaceId: spaceId || null,
+      status,
+      dueAt: dueAt || null,
+      notes: notes.trim() || null,
+      lines: lines.map((line) => ({
+        description: line.description.trim(),
+        quantity: Number(line.quantity),
+        unitPrice: Number(line.unitPrice),
+        vatRate: Number(line.vatRate),
+      })),
+    };
+
+    const res = await fetch("/api/invoices", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    const data = (await res.json()) as { item?: { id: string }; error?: string };
+    setPending(false);
+    if (!res.ok) {
+      setError(data.error || "Αποτυχία δημιουργίας");
+      return;
+    }
+    router.push(`/invoices/${data.item!.id}`);
+    router.refresh();
+  }
+
   return (
-    <div className="space-y-5">
+    <div className="mx-auto max-w-4xl space-y-5">
+      <Link
+        href="/invoices"
+        className="inline-flex items-center gap-1.5 text-sm text-slate-500 hover:text-ink-900"
+      >
+        <ArrowLeft size={14} />
+        Πίσω στα τιμολόγια
+      </Link>
       <PageHeader
         title="Νέο τιμολόγιο"
-        description="Η φόρμα δημιουργίας έρχεται στο επόμενο βήμα"
+        description="Πελάτης → υποκατάστημα → χώρος, μετά γραμμές παραστατικού."
       />
-      <div className="soft-panel space-y-3 p-6">
-        <Badge tone="teal">Coming next</Badge>
-        <p className="text-sm text-slate-600">
-          Θα επιλέγετε πελάτη → υποκατάστημα → χώρο και γραμμές παραστατικού.
-          Προς το παρόν χρησιμοποιήστε τα seeded τιμολόγια από{" "}
-          <Link href="/invoices" className="font-medium text-teal-700">
-            τη λίστα
-          </Link>
-          .
-        </p>
-      </div>
+
+      <form onSubmit={onSubmit} className="space-y-5">
+        <section className="soft-panel space-y-4 p-5">
+          <h2 className="text-sm font-semibold text-ink-900">Στοιχεία</h2>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <label className="block sm:col-span-2">
+              <span className="mb-1.5 block text-sm font-medium">Πελάτης *</span>
+              <select
+                required
+                value={customerId}
+                disabled={loadingCustomers}
+                onChange={(e) => {
+                  setCustomerId(e.target.value);
+                  setBranches([]);
+                  setBranchId("");
+                  setSpaceId("");
+                }}
+                className="h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm outline-none ring-teal-500/30 focus:ring-2"
+              >
+                <option value="">
+                  {loadingCustomers ? "Φόρτωση..." : "Επιλέξτε πελάτη"}
+                </option>
+                {customers.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.code} — {c.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label className="block">
+              <span className="mb-1.5 block text-sm font-medium">Υποκατάστημα</span>
+              <select
+                value={branchId}
+                disabled={!customerId || loadingHierarchy}
+                onChange={(e) => {
+                  setBranchId(e.target.value);
+                  setSpaceId("");
+                }}
+                className="h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm outline-none ring-teal-500/30 focus:ring-2 disabled:bg-slate-50"
+              >
+                <option value="">— Προαιρετικό —</option>
+                {branches.map((b) => (
+                  <option key={b.id} value={b.id}>
+                    {b.code} — {b.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label className="block">
+              <span className="mb-1.5 block text-sm font-medium">Χώρος</span>
+              <select
+                value={spaceId}
+                disabled={!branchId}
+                onChange={(e) => setSpaceId(e.target.value)}
+                className="h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm outline-none ring-teal-500/30 focus:ring-2 disabled:bg-slate-50"
+              >
+                <option value="">— Προαιρετικό —</option>
+                {spaces.map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.code} — {s.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label className="block">
+              <span className="mb-1.5 block text-sm font-medium">Κατάσταση</span>
+              <select
+                value={status}
+                onChange={(e) =>
+                  setStatus(e.target.value as "DRAFT" | "ISSUED")
+                }
+                className="h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm outline-none ring-teal-500/30 focus:ring-2"
+              >
+                <option value="DRAFT">Πρόχειρο</option>
+                <option value="ISSUED">Έκδοση τώρα</option>
+              </select>
+            </label>
+
+            <label className="block">
+              <span className="mb-1.5 block text-sm font-medium">Ημ. λήξης</span>
+              <input
+                type="date"
+                value={dueAt}
+                onChange={(e) => setDueAt(e.target.value)}
+                className="h-11 w-full rounded-xl border border-slate-200 px-3 text-sm outline-none ring-teal-500/30 focus:ring-2"
+              />
+            </label>
+
+            <label className="block sm:col-span-2">
+              <span className="mb-1.5 block text-sm font-medium">Σημειώσεις</span>
+              <textarea
+                value={notes}
+                onChange={(e) => setNotes(e.target.value)}
+                rows={2}
+                className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm outline-none ring-teal-500/30 focus:ring-2"
+              />
+            </label>
+          </div>
+        </section>
+
+        <section className="soft-panel space-y-4 p-5">
+          <div className="flex items-center justify-between gap-3">
+            <h2 className="text-sm font-semibold text-ink-900">Γραμμές</h2>
+            <Button
+              type="button"
+              variant="secondary"
+              size="sm"
+              onClick={() => setLines((prev) => [...prev, newLine()])}
+            >
+              <Plus size={14} />
+              Γραμμή
+            </Button>
+          </div>
+
+          <div className="space-y-3">
+            {lines.map((line, idx) => {
+              const { lineTotal } = calcLineTotals({
+                quantity: Number(line.quantity) || 0,
+                unitPrice: Number(line.unitPrice) || 0,
+                vatRate: Number(line.vatRate) || 0,
+              });
+              return (
+                <div
+                  key={line.key}
+                  className="grid gap-3 rounded-xl border border-slate-100 bg-slate-50/60 p-3 sm:grid-cols-12"
+                >
+                  <label className="block sm:col-span-5">
+                    <span className="mb-1 block text-xs font-medium text-slate-500">
+                      Περιγραφή {idx + 1} *
+                    </span>
+                    <input
+                      required
+                      value={line.description}
+                      onChange={(e) =>
+                        updateLine(line.key, { description: e.target.value })
+                      }
+                      placeholder="Υπηρεσία / προϊόν"
+                      className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm outline-none ring-teal-500/30 focus:ring-2"
+                    />
+                  </label>
+                  <label className="block sm:col-span-2">
+                    <span className="mb-1 block text-xs font-medium text-slate-500">
+                      Ποσότητα
+                    </span>
+                    <input
+                      required
+                      type="number"
+                      min="0.001"
+                      step="any"
+                      value={line.quantity}
+                      onChange={(e) =>
+                        updateLine(line.key, { quantity: e.target.value })
+                      }
+                      className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm outline-none ring-teal-500/30 focus:ring-2"
+                    />
+                  </label>
+                  <label className="block sm:col-span-2">
+                    <span className="mb-1 block text-xs font-medium text-slate-500">
+                      Τιμή μονάδας
+                    </span>
+                    <input
+                      required
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      value={line.unitPrice}
+                      onChange={(e) =>
+                        updateLine(line.key, { unitPrice: e.target.value })
+                      }
+                      className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm outline-none ring-teal-500/30 focus:ring-2"
+                    />
+                  </label>
+                  <label className="block sm:col-span-1">
+                    <span className="mb-1 block text-xs font-medium text-slate-500">
+                      ΦΠΑ %
+                    </span>
+                    <input
+                      required
+                      type="number"
+                      min="0"
+                      max="100"
+                      step="0.01"
+                      value={line.vatRate}
+                      onChange={(e) =>
+                        updateLine(line.key, { vatRate: e.target.value })
+                      }
+                      className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm outline-none ring-teal-500/30 focus:ring-2"
+                    />
+                  </label>
+                  <div className="flex items-end justify-between gap-2 sm:col-span-2">
+                    <div>
+                      <span className="mb-1 block text-xs font-medium text-slate-500">
+                        Σύνολο
+                      </span>
+                      <p className="h-10 content-center text-sm font-medium tabular-nums text-ink-900">
+                        {formatEUR(lineTotal)}
+                      </p>
+                    </div>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      aria-label="Διαγραφή γραμμής"
+                      disabled={lines.length <= 1}
+                      onClick={() => removeLine(line.key)}
+                    >
+                      <Trash2 size={16} className="text-slate-500" />
+                    </Button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          <div className="flex flex-col items-end gap-1 border-t border-slate-100 pt-4 text-sm">
+            <div className="flex w-full max-w-xs justify-between text-slate-600">
+              <span>Καθαρή αξία</span>
+              <span className="tabular-nums">{formatEUR(totals.subtotal)}</span>
+            </div>
+            <div className="flex w-full max-w-xs justify-between text-slate-600">
+              <span>ΦΠΑ</span>
+              <span className="tabular-nums">{formatEUR(totals.vatAmount)}</span>
+            </div>
+            <div className="flex w-full max-w-xs justify-between text-base font-semibold text-ink-900">
+              <span>Σύνολο</span>
+              <span className="tabular-nums">{formatEUR(totals.total)}</span>
+            </div>
+          </div>
+        </section>
+
+        {error ? (
+          <p className="rounded-xl bg-rose-50 px-3 py-2 text-sm text-rose-700">
+            {error}
+          </p>
+        ) : null}
+
+        <div className="flex flex-wrap gap-3">
+          <Button type="submit" disabled={pending}>
+            {pending
+              ? "Αποθήκευση..."
+              : status === "ISSUED"
+                ? "Έκδοση τιμολογίου"
+                : "Αποθήκευση πρόχειρου"}
+          </Button>
+          <Button
+            type="button"
+            variant="secondary"
+            onClick={() => router.push("/invoices")}
+          >
+            Ακύρωση
+          </Button>
+        </div>
+      </form>
     </div>
   );
 }

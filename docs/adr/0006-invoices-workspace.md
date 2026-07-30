@@ -13,6 +13,8 @@ linked to Customer → Branch → Space.
 - Status: DRAFT | ISSUED | PARTIAL | PAID | OVERDUE | CANCELLED
 - List UI: status tabs, search, selection, right preview panel, cursor pagination
 - Money fields as `Decimal(14,2)`; paid ratio = paidAmount / total
+- Create: `POST /api/invoices` with nested lines; auto number `ΤΙΜ-YYYY-#####`;
+  form at `/invoices/new` cascades customer → branch → space
 
 ## Consequences
 Orders and payments will later post into / against invoices using the same workspace patterns.

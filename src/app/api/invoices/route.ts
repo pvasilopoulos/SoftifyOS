@@ -3,13 +3,15 @@ import { z } from "zod";
 import { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/server/db";
 import { getSession } from "@/platform/auth/session";
+import { writeAuditEvent } from "@/platform/tenancy/audit";
 import {
   decodeCursor,
   encodeCursor,
   listQuerySchema,
 } from "@/shared/lib/cursor";
 import { getErrorMessage } from "@/shared/lib/safe";
-import { toNumber } from "@/modules/sales/invoice-utils";
+import { calcInvoiceTotals, toNumber } from "@/modules/sales/invoice-utils";
+import { invoiceCreateSchema } from "@/modules/sales/schemas";
 
 export const dynamic = "force-dynamic";
 
@@ -23,6 +25,29 @@ const listSchema = listQuerySchema.extend({
     .optional(),
   customerId: z.string().min(1).optional(),
 });
+
+async function nextInvoiceNumber(tenantId: string) {
+  const year = new Date().getFullYear();
+  const prefix = `ΤΙΜ-${year}-`;
+  const latest = await prisma.invoice.findFirst({
+    where: { tenantId, number: { startsWith: prefix } },
+    orderBy: { number: "desc" },
+    select: { number: true },
+  });
+  const lastSeq = latest?.number?.slice(prefix.length) ?? "0";
+  const seq = Number.parseInt(lastSeq, 10);
+  const next = Number.isFinite(seq) ? seq + 1 : 1;
+  return `${prefix}${String(next).padStart(5, "0")}`;
+}
+
+function parseDueAt(value: string | null | undefined) {
+  if (!value) return null;
+  if (/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    return new Date(`${value}T00:00:00.000Z`);
+  }
+  const d = new Date(value);
+  return Number.isNaN(d.getTime()) ? null : d;
+}
 
 export async function GET(request: NextRequest) {
   const started = Date.now();
@@ -172,6 +197,172 @@ export async function GET(request: NextRequest) {
     return NextResponse.json(
       { error: getErrorMessage(error, "List failed") },
       { status: 500 },
+    );
+  }
+}
+
+export async function POST(request: Request) {
+  try {
+    const session = await getSession();
+    if (!session) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+    if (session.role === "VIEWER") {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
+
+    const body = invoiceCreateSchema.parse(await request.json());
+    const customer = await prisma.customer.findFirst({
+      where: { id: body.customerId, tenantId: session.tenantId },
+      select: { id: true },
+    });
+    if (!customer) {
+      return NextResponse.json(
+        { error: "Ο πελάτης δεν βρέθηκε" },
+        { status: 400 },
+      );
+    }
+
+    let spaceId: string | null = body.spaceId || null;
+    const branchId: string | null = body.branchId || null;
+
+    if (branchId) {
+      const branch = await prisma.branch.findFirst({
+        where: {
+          id: branchId,
+          tenantId: session.tenantId,
+          customerId: customer.id,
+        },
+        select: { id: true },
+      });
+      if (!branch) {
+        return NextResponse.json(
+          { error: "Το υποκατάστημα δεν ανήκει στον πελάτη" },
+          { status: 400 },
+        );
+      }
+    } else {
+      spaceId = null;
+    }
+
+    if (spaceId) {
+      if (!branchId) {
+        return NextResponse.json(
+          { error: "Επιλέξτε υποκατάστημα για τον χώρο" },
+          { status: 400 },
+        );
+      }
+      const space = await prisma.space.findFirst({
+        where: {
+          id: spaceId,
+          tenantId: session.tenantId,
+          branchId,
+        },
+        select: { id: true },
+      });
+      if (!space) {
+        return NextResponse.json(
+          { error: "Ο χώρος δεν ανήκει στο υποκατάστημα" },
+          { status: 400 },
+        );
+      }
+    }
+
+    const totals = calcInvoiceTotals(body.lines);
+    const status = body.status ?? "DRAFT";
+    const issuedAt = status === "ISSUED" ? new Date() : null;
+    const dueAt = parseDueAt(body.dueAt ?? null);
+    const number =
+      (body.number && body.number.trim()) ||
+      (await nextInvoiceNumber(session.tenantId));
+
+    const invoice = await prisma.invoice.create({
+      data: {
+        tenantId: session.tenantId,
+        customerId: customer.id,
+        branchId,
+        spaceId,
+        number,
+        status,
+        issuedAt,
+        dueAt,
+        currency: "EUR",
+        subtotal: totals.subtotal,
+        vatAmount: totals.vatAmount,
+        total: totals.total,
+        paidAmount: 0,
+        notes: body.notes || null,
+        lines: {
+          create: body.lines.map((line, idx) => ({
+            tenantId: session.tenantId,
+            position: idx + 1,
+            description: line.description,
+            quantity: line.quantity,
+            unitPrice: line.unitPrice,
+            vatRate: line.vatRate,
+            lineTotal: totals.lines[idx]!.lineTotal,
+          })),
+        },
+      },
+      include: {
+        lines: { orderBy: { position: "asc" } },
+        customer: true,
+        branch: true,
+        space: true,
+      },
+    });
+
+    await writeAuditEvent({
+      tenantId: session.tenantId,
+      userId: session.sub,
+      action: "invoice.create",
+      entity: "invoice",
+      entityId: invoice.id,
+      meta: { number: invoice.number, status: invoice.status },
+    });
+
+    return NextResponse.json(
+      {
+        item: {
+          ...invoice,
+          subtotal: toNumber(invoice.subtotal),
+          vatAmount: toNumber(invoice.vatAmount),
+          total: toNumber(invoice.total),
+          paidAmount: toNumber(invoice.paidAmount),
+          issuedAt: invoice.issuedAt?.toISOString() ?? null,
+          dueAt: invoice.dueAt?.toISOString() ?? null,
+          createdAt: invoice.createdAt.toISOString(),
+          updatedAt: invoice.updatedAt.toISOString(),
+          lines: invoice.lines.map((line) => ({
+            ...line,
+            quantity: toNumber(line.quantity),
+            unitPrice: toNumber(line.unitPrice),
+            vatRate: toNumber(line.vatRate),
+            lineTotal: toNumber(line.lineTotal),
+          })),
+        },
+      },
+      { status: 201 },
+    );
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      return NextResponse.json(
+        { error: "Μη έγκυρα δεδομένα τιμολογίου" },
+        { status: 400 },
+      );
+    }
+    if (
+      error instanceof Prisma.PrismaClientKnownRequestError &&
+      error.code === "P2002"
+    ) {
+      return NextResponse.json(
+        { error: "Ο αριθμός τιμολογίου υπάρχει ήδη" },
+        { status: 409 },
+      );
+    }
+    return NextResponse.json(
+      { error: getErrorMessage(error, "Create failed") },
+      { status: 400 },
     );
   }
 }
