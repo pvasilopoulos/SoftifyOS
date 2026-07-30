@@ -53,6 +53,7 @@ model Tenant {
   loyaltyAccounts  LoyaltyAccount[]
   loyaltyLedgers   LoyaltyLedger[]
   loyaltyProgram   LoyaltyProgram?
+  paymentMethods   PaymentMethod[]
   tenantSettings   TenantSettings?
   appRoles         AppRole[]
   userGroups       UserGroup[]
@@ -319,7 +320,9 @@ model InvoicePayment {
   tenantId         String
   invoiceId        String
   amount           Decimal  @db.Decimal(14, 2)
+  /// Stable code from PaymentMethod catalog (e.g. CASH, CARD_VIVA)
   method           String   @default("OTHER")
+  paymentMethodId  String?
   note             String?
   changeAmount     Decimal  @default(0) @db.Decimal(14, 2)
   externalRef      String?
@@ -331,12 +334,14 @@ model InvoicePayment {
 
   tenant         Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   invoice        Invoice         @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  paymentMethod  PaymentMethod?  @relation(fields: [paymentMethodId], references: [id], onDelete: SetNull)
   posSession     PosSession?     @relation(fields: [posSessionId], references: [id], onDelete: SetNull)
   giftCard       GiftCard?       @relation(fields: [giftCardId], references: [id], onDelete: SetNull)
   loyaltyAccount LoyaltyAccount? @relation(fields: [loyaltyAccountId], references: [id], onDelete: SetNull)
 
   @@index([tenantId, invoiceId, paidAt(sort: Desc)])
   @@index([tenantId, posSessionId])
+  @@index([tenantId, paymentMethodId])
   @@map("invoice_payments")
 }
 
@@ -556,6 +561,56 @@ enum LoyaltyLedgerKind {
   REDEEM
   ADJUST
   VOID
+}
+
+/// Behavior contract for POS / collect — tenants add custom codes with a kind
+enum PaymentMethodKind {
+  CASH
+  CARD
+  TRANSFER
+  GIFT_CARD
+  LOYALTY
+  OTHER
+}
+
+/// Tenant catalog of payment / tender methods (POS + εισπράξεις)
+model PaymentMethod {
+  id                  String            @id @default(cuid())
+  tenantId            String
+  code                String
+  name                String
+  kind                PaymentMethodKind
+  description         String?
+  /// Κύριος λογ. λογαριασμός (ταμείο / τράπεζα / κάρτες)
+  glAccount           String?
+  /// Αντίστοιχος λογαριασμός (π.χ. πελάτες / εκκρεμείς)
+  glContraAccount     String?
+  /// Εκκαθάριση (κάρτες / ενδιάμεσος)
+  glClearingAccount   String?
+  costCenter          String?
+  accountingCode      String?
+  bankIban            String?
+  bankName            String?
+  /// Κωδικός τύπου πληρωμής myDATA (εφόσον ισχύει)
+  myDataPaymentType   String?
+  sortOrder           Int               @default(0)
+  isActive            Boolean           @default(true)
+  showInPos           Boolean           @default(true)
+  showInCollect       Boolean           @default(true)
+  requiresExternalRef Boolean           @default(false)
+  allowsChange        Boolean           @default(false)
+  affectsCashDrawer   Boolean           @default(false)
+  isSystem            Boolean           @default(false)
+  createdAt           DateTime          @default(now())
+  updatedAt           DateTime          @updatedAt
+
+  tenant   Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  payments InvoicePayment[]
+
+  @@unique([tenantId, code])
+  @@index([tenantId, isActive, sortOrder])
+  @@index([tenantId, showInPos, sortOrder])
+  @@map("payment_methods")
 }
 
 /// Ανοιχτή βάρδια ταμείου POS

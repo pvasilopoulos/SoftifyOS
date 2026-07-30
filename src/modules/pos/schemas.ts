@@ -9,6 +9,8 @@ export const tenderMethodSchema = z.enum([
   "OTHER",
 ]);
 
+/** @deprecated prefer catalog codes — kept for invoice collect */
+
 export const posLineSchema = z.object({
   productId: z.string().trim().min(1).optional().nullable(),
   description: z.string().trim().min(1).max(300),
@@ -18,7 +20,12 @@ export const posLineSchema = z.object({
 });
 
 export const posTenderSchema = z.object({
-  method: tenderMethodSchema,
+  method: z
+    .string()
+    .trim()
+    .min(1)
+    .max(40)
+    .transform((v) => v.toUpperCase()),
   amount: z.coerce.number().positive().max(10_000_000),
   giftCardCode: z.string().trim().min(1).max(64).optional().nullable(),
   loyaltyPoints: z.coerce.number().int().positive().optional().nullable(),

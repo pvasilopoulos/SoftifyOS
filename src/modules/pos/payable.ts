@@ -74,22 +74,25 @@ export function calcPayable(input: PayableInput): PayableBreakdown {
 }
 
 export type TenderLine = {
-  method: TenderMethod;
+  method: string;
+  kind?: TenderMethod | string;
   amount: number;
   changeAmount?: number;
+  allowsChange?: boolean;
 };
 
 /**
  * Ελέγχει ότι τα tenders καλύπτουν το payableDue.
- * Μετρητά μπορούν να υπερκαλύψουν (ρέστα).
+ * Μετρητά (ή allowsChange) μπορούν να υπερκαλύψουν (ρέστα).
  */
 export function validateTenders(
   payableDue: number,
   tenders: TenderLine[],
 ): { ok: true; change: number } | { ok: false; error: string } {
-  const cover = tenders.filter(
-    (t) => t.method !== "GIFT_CARD" && t.method !== "LOYALTY",
-  );
+  const cover = tenders.filter((t) => {
+    const kind = t.kind ?? t.method;
+    return kind !== "GIFT_CARD" && kind !== "LOYALTY";
+  });
   const paid = roundMoney(cover.reduce((s, t) => s + Math.max(0, t.amount), 0));
   const due = roundMoney(Math.max(0, payableDue));
 
@@ -100,11 +103,16 @@ export function validateTenders(
     };
   }
 
-  const cash = cover
-    .filter((t) => t.method === "CASH")
-    .reduce((s, t) => s + t.amount, 0);
+  const cashLike = cover.filter((t) => {
+    const kind = t.kind ?? t.method;
+    return t.allowsChange || kind === "CASH";
+  });
+  const cash = cashLike.reduce((s, t) => s + t.amount, 0);
   const nonCash = cover
-    .filter((t) => t.method !== "CASH")
+    .filter((t) => {
+      const kind = t.kind ?? t.method;
+      return !(t.allowsChange || kind === "CASH");
+    })
     .reduce((s, t) => s + t.amount, 0);
 
   if (nonCash > due + 0.001) {

@@ -37,6 +37,13 @@ const links = [
     badge: "IAM",
   },
   {
+    href: "/settings/payment-methods",
+    title: "Τρόποι πληρωμής",
+    description:
+      "Παραμετρικοί τρόποι για POS & εισπράξεις, με λογιστικούς λογαριασμούς και IBAN.",
+    badge: "Παραμετρικό",
+  },
+  {
     href: "/settings/series",
     title: "Σειρές & Τύποι",
     description:

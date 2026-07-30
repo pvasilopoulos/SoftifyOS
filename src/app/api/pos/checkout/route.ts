@@ -11,7 +11,6 @@ import {
   eurToRedeemPoints,
   pointsToEur,
   validateTenders,
-  type TenderMethod,
 } from "@/modules/pos/payable";
 import { redeemGiftCard } from "@/modules/gift-cards/service";
 import {
@@ -19,6 +18,7 @@ import {
   getLoyaltyRules,
   redeemLoyaltyPoints,
 } from "@/modules/loyalty/service";
+import { listPaymentMethods } from "@/modules/payments/service";
 import {
   allocateFromSeries,
   resolveDefaultSeries,
@@ -124,18 +124,35 @@ export async function POST(request: Request) {
 
     const totals = calcInvoiceTotals(body.lines);
 
-    // Resolve gift card / loyalty from tenders
+    const paymentMethods = await listPaymentMethods(prisma, session.tenantId, {
+      activeOnly: true,
+    });
+    const methodByCode = new Map(paymentMethods.map((m) => [m.code, m]));
+
+    for (const t of body.tenders) {
+      if (!methodByCode.has(t.method)) {
+        return NextResponse.json(
+          { error: `Άγνωστος τρόπος πληρωμής: ${t.method}` },
+          { status: 400 },
+        );
+      }
+    }
+
+    const tenderKind = (code: string) => methodByCode.get(code)!.kind;
+
+    // Resolve gift card / loyalty from tenders (by kind)
     let giftCardApplied = 0;
     let loyaltyAppliedEur = 0;
     const giftCardCodes: string[] = [];
     let loyaltyPointsRequested = 0;
 
     for (const t of body.tenders) {
-      if (t.method === "GIFT_CARD") {
+      const kind = tenderKind(t.method);
+      if (kind === "GIFT_CARD") {
         giftCardApplied = roundMoney(giftCardApplied + t.amount);
         if (t.giftCardCode) giftCardCodes.push(t.giftCardCode.trim().toUpperCase());
       }
-      if (t.method === "LOYALTY") {
+      if (kind === "LOYALTY") {
         loyaltyAppliedEur = roundMoney(loyaltyAppliedEur + t.amount);
         if (t.loyaltyPoints) loyaltyPointsRequested += t.loyaltyPoints;
       }
@@ -150,11 +167,19 @@ export async function POST(request: Request) {
 
     // Non gift/loyalty tenders cover payableDue
     const coverTenders = body.tenders
-      .filter((t) => t.method !== "GIFT_CARD" && t.method !== "LOYALTY")
-      .map((t) => ({
-        method: t.method as TenderMethod,
-        amount: t.amount,
-      }));
+      .filter((t) => {
+        const kind = tenderKind(t.method);
+        return kind !== "GIFT_CARD" && kind !== "LOYALTY";
+      })
+      .map((t) => {
+        const pm = methodByCode.get(t.method)!;
+        return {
+          method: t.method,
+          kind: pm.kind,
+          amount: t.amount,
+          allowsChange: pm.allowsChange,
+        };
+      });
 
     const tenderCheck = validateTenders(payable.payableDue, coverTenders);
     if (!tenderCheck.ok) {
@@ -209,7 +234,7 @@ export async function POST(request: Request) {
           })
         : [];
 
-    for (const t of body.tenders.filter((x) => x.method === "GIFT_CARD")) {
+    for (const t of body.tenders.filter((x) => tenderKind(x.method) === "GIFT_CARD")) {
       const code = (t.giftCardCode || "").trim().toUpperCase();
       const card = giftCards.find((g) => g.code === code);
       if (!card) {
@@ -274,11 +299,13 @@ export async function POST(request: Request) {
 
       let changeLeft = tenderCheck.change;
       for (const t of body.tenders) {
+        const pm = methodByCode.get(t.method)!;
+        const kind = pm.kind;
         let giftCardId: string | null = null;
         let loyaltyAccountId: string | null = null;
         let changeAmount = 0;
 
-        if (t.method === "GIFT_CARD") {
+        if (kind === "GIFT_CARD") {
           const code = (t.giftCardCode || "").trim().toUpperCase();
           const card = giftCards.find((g) => g.code === code)!;
           giftCardId = card.id;
@@ -294,7 +321,7 @@ export async function POST(request: Request) {
           (card as { balance: typeof card.balance }).balance = updated.balance;
         }
 
-        if (t.method === "LOYALTY") {
+        if (kind === "LOYALTY") {
           loyaltyAccountId = loyaltyAccount!.id;
           const pts =
             t.loyaltyPoints && t.loyaltyPoints > 0
@@ -310,8 +337,7 @@ export async function POST(request: Request) {
           });
         }
 
-        if (t.method === "CASH" && changeLeft > 0) {
-          // Assign change to the last/first cash tender that covers it
+        if ((pm.allowsChange || kind === "CASH") && changeLeft > 0) {
           const cashAmt = roundMoney(t.amount);
           if (cashAmt >= changeLeft) {
             changeAmount = changeLeft;
@@ -319,9 +345,8 @@ export async function POST(request: Request) {
           }
         }
 
-        // CARD via terminal: mock auth ref if missing
         let externalRef = t.externalRef || null;
-        if (t.method === "CARD" && !externalRef) {
+        if ((pm.requiresExternalRef || kind === "CARD") && !externalRef) {
           externalRef = `MOCK-${Date.now().toString(36).toUpperCase()}`;
         }
 
@@ -331,6 +356,7 @@ export async function POST(request: Request) {
             invoiceId: invoice.id,
             amount: t.amount,
             method: t.method,
+            paymentMethodId: pm.id,
             note: t.note || null,
             changeAmount,
             externalRef,
