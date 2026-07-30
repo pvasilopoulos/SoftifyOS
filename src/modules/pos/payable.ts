@@ -45,9 +45,14 @@ export type PayableInput = {
 export type PayableBreakdown = {
   saleTotal: number;
   discount: number;
+  /** Σύνολο μετά την έκπτωση (πριν gift/loyalty). */
+  afterDiscount: number;
   giftCardApplied: number;
   loyaltyAppliedEur: number;
-  /** Ποσό που πρέπει να καλυφθεί με μετρητά/κάρτα/κ.λπ. */
+  /**
+   * Υπόλοιπο που πρέπει να καλυφθεί με μετρητά/κάρτα/κ.λπ.
+   * (μετά gift card & loyalty — όχι το σύνολο της πώλησης).
+   */
   payableDue: number;
 };
 
@@ -67,10 +72,31 @@ export function calcPayable(input: PayableInput): PayableBreakdown {
   return {
     saleTotal,
     discount,
+    afterDiscount,
     giftCardApplied,
     loyaltyAppliedEur,
     payableDue,
   };
+}
+
+/** Πόσα έχουν ήδη καλύψει τα cover tenders (όχι gift/loyalty). */
+export function coverTendersPaid(tenders: TenderLine[]): number {
+  return roundMoney(
+    tenders
+      .filter((t) => {
+        const kind = t.kind ?? t.method;
+        return kind !== "GIFT_CARD" && kind !== "LOYALTY";
+      })
+      .reduce((s, t) => s + Math.max(0, t.amount), 0),
+  );
+}
+
+/** Υπόλοιπο cover μετά τα ήδη δηλωμένα ποσά μετρητών/κάρτας κ.λπ. */
+export function remainingCoverDue(
+  payableDue: number,
+  tenders: TenderLine[],
+): number {
+  return roundMoney(Math.max(0, payableDue - coverTendersPaid(tenders)));
 }
 
 export type TenderLine = {
