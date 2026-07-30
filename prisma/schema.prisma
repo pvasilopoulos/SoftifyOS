@@ -669,6 +669,14 @@ model GiftCard {
   customerId     String?
   expiresAt      DateTime?
   notes          String?
+  /// Παθητικό / υπόλοιπο δωροκαρτών (π.χ. 56.00.00)
+  glLiabilityAccount String?
+  /// Είσπραξη έκδοσης — ταμείο / τράπεζα (π.χ. 38.00.00)
+  glCashAccount      String?
+  /// Αντίστοιχος εξαργύρωσης — έσοδα / εκκαθάριση (π.χ. 70.00.00)
+  glRedeemContraAccount String?
+  costCenter     String?
+  accountingCode String?
   createdAt      DateTime       @default(now())
   updatedAt      DateTime       @updatedAt
 
@@ -693,6 +701,9 @@ model GiftCardLedger {
   balanceAfter    Decimal            @db.Decimal(14, 2)
   invoiceId       String?
   note            String?
+  /// Snapshot λογιστικής κίνησης
+  glDebitAccount  String?
+  glCreditAccount String?
   createdByUserId String?
   createdAt       DateTime           @default(now())
 

@@ -56,7 +56,7 @@ export default async function GiftCardDetailPage({
         </Link>
         <PageHeader
           title={card.code}
-          description="Υπόλοιπο, κινήσεις και ενέργειες"
+          description="Υπόλοιπο, λογιστική παρακολούθηση και κινήσεις"
           actions={
             <Badge
               tone={giftCardStatusTone(
@@ -78,6 +78,11 @@ export default async function GiftCardDetailPage({
           status: card.status,
           expiresAt: card.expiresAt?.toISOString() ?? null,
           notes: card.notes,
+          glLiabilityAccount: card.glLiabilityAccount,
+          glCashAccount: card.glCashAccount,
+          glRedeemContraAccount: card.glRedeemContraAccount,
+          costCenter: card.costCenter,
+          accountingCode: card.accountingCode,
           customer: card.customer,
           ledger: card.ledger.map((l) => ({
             id: l.id,
@@ -86,6 +91,8 @@ export default async function GiftCardDetailPage({
             balanceAfter: toNumber(l.balanceAfter),
             invoiceId: l.invoiceId,
             note: l.note,
+            glDebitAccount: l.glDebitAccount,
+            glCreditAccount: l.glCreditAccount,
             createdAt: l.createdAt.toISOString(),
           })),
         }}

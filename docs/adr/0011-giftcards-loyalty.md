@@ -22,3 +22,11 @@ configuring earn/redeem rates.
 Sidebar Πωλήσεις includes Δωροκάρτες and Loyalty. Permissions:
 `gift_cards.read/write`, `loyalty.read/write`. ADR 0010 POS foundation remains
 the cashier lane; this ADR owns the master-data / ops modules.
+
+## Addendum — Gift card accounting & balance integrity (2026-07-30)
+- Each gift card stores GL accounts: liability (παθητικό), cash (έκδοση),
+  redeem contra (εξαργύρωση), plus optional cost center / accounting code.
+- Every ledger row snapshots `glDebitAccount` / `glCreditAccount`.
+- POS redeem uses atomic `UPDATE … WHERE balance >= amount` and clamps
+  tender amounts to the payable gift application so balances stay correct
+  under concurrency and over-application.
