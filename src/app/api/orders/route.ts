@@ -21,12 +21,16 @@ export const dynamic = "force-dynamic";
 
 const listSchema = listQuerySchema.extend({
   q: z.string().trim().min(1).max(120).optional(),
-  status: z.enum(["DRAFT", "CONFIRMED", "INVOICED", "CANCELLED"]).optional(),
+  status: z
+    .enum(["DRAFT", "CONFIRMED", "PARTIAL_INVOICED", "INVOICED", "CANCELLED"])
+    .optional(),
+  kind: z.enum(["SALES_ORDER", "SALES_QUOTE"]).optional().default("SALES_ORDER"),
 });
 
-async function nextOrderNumberFallback(tenantId: string) {
+async function nextOrderNumberFallback(tenantId: string, kind: string) {
   const year = new Date().getFullYear();
-  const prefix = `ΠΑΡ-${year}-`;
+  const code = kind === "SALES_QUOTE" ? "ΠΡΟΣ" : "ΠΑΡ";
+  const prefix = `${code}-${year}-`;
   const latest = await prisma.order.findFirst({
     where: { tenantId, number: { startsWith: prefix } },
     orderBy: { number: "desc" },
@@ -92,7 +96,7 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: "Invalid query" }, { status: 400 });
     }
 
-    const { limit, cursor: cursorParam, q, status } = parsed.data;
+    const { limit, cursor: cursorParam, q, status, kind } = parsed.data;
     const cursor = cursorParam ? decodeCursor(cursorParam) : null;
     if (cursorParam && !cursor) {
       return NextResponse.json({ error: "Invalid cursor" }, { status: 400 });
@@ -103,6 +107,7 @@ export async function GET(request: NextRequest) {
         id: string;
         number: string;
         status: string;
+        kind: string;
         orderedAt: Date;
         total: Prisma.Decimal;
         createdAt: Date;
@@ -114,7 +119,7 @@ export async function GET(request: NextRequest) {
       }>
     >`
       SELECT
-        o.id, o.number, o.status, o."orderedAt", o.total, o."createdAt",
+        o.id, o.number, o.status, o.kind, o."orderedAt", o.total, o."createdAt",
         o."customerId", c.name AS "customerName", c.code AS "customerCode",
         b.name AS "branchName",
         (SELECT COUNT(*) FROM order_lines ol WHERE ol."orderId" = o.id) AS "lineCount"
@@ -122,6 +127,7 @@ export async function GET(request: NextRequest) {
       JOIN customers c ON c.id = o."customerId"
       LEFT JOIN branches b ON b.id = o."branchId"
       WHERE o."tenantId" = ${session.tenantId}
+        AND o.kind = ${kind}::"OrderKind"
         ${status ? Prisma.sql`AND o.status = ${status}::"OrderStatus"` : Prisma.empty}
         ${
           q
@@ -146,6 +152,7 @@ export async function GET(request: NextRequest) {
       id: row.id,
       number: row.number,
       status: row.status,
+      kind: row.kind,
       orderedAt: row.orderedAt.toISOString(),
       total: toNumber(row.total),
       createdAt: row.createdAt.toISOString(),
@@ -214,18 +221,29 @@ export async function POST(request: Request) {
     }
 
     const totals = calcInvoiceTotals(body.lines);
+    const docKind = body.kind ?? "SALES_ORDER";
     const series =
       (body.seriesId
         ? await prisma.documentSeries.findFirst({
             where: {
               id: body.seriesId,
               tenantId: session.tenantId,
-              kind: "SALES_ORDER",
+              kind: docKind,
               isActive: true,
             },
           })
         : null) ??
-      (await resolveDefaultSeries(prisma, session.tenantId, "SALES_ORDER"));
+      (await resolveDefaultSeries(prisma, session.tenantId, docKind));
+
+    if (!series && !body.number?.trim()) {
+      return NextResponse.json(
+        {
+          error:
+            "Δεν υπάρχει ενεργή σειρά για αυτόν τον τύπο — ρυθμίστε Σειρές & Τύποι",
+        },
+        { status: 400 },
+      );
+    }
 
     const order = await prisma.$transaction(async (tx) => {
       let number = body.number?.trim() || "";
@@ -236,13 +254,13 @@ export async function POST(request: Request) {
           const allocated = await allocateFromSeries(tx, {
             tenantId: session.tenantId,
             seriesId: series.id,
-            kind: "SALES_ORDER",
+            kind: docKind,
           });
           number = allocated.number;
           seriesId = allocated.seriesId;
           siteId = allocated.siteId;
         } else {
-          number = await nextOrderNumberFallback(session.tenantId);
+          number = await nextOrderNumberFallback(session.tenantId, docKind);
         }
       }
 
@@ -254,6 +272,7 @@ export async function POST(request: Request) {
           spaceId: hierarchy.spaceId,
           seriesId,
           siteId,
+          kind: docKind,
           number,
           status: body.status ?? "DRAFT",
           currency: "EUR",
@@ -284,10 +303,10 @@ export async function POST(request: Request) {
     await writeAuditEvent({
       tenantId: session.tenantId,
       userId: session.sub,
-      action: "order.create",
+      action: docKind === "SALES_QUOTE" ? "quote.create" : "order.create",
       entity: "order",
       entityId: order.id,
-      meta: { number: order.number, status: order.status },
+      meta: { number: order.number, status: order.status, kind: order.kind },
     });
 
     return NextResponse.json(

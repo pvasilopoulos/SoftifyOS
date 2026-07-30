@@ -5,17 +5,16 @@ import { getSession } from "@/platform/auth/session";
 import { prisma } from "@/server/db";
 import { encodeCursor } from "@/shared/lib/cursor";
 import { PageHeader } from "@/shared/ui/page-header";
-import { Badge } from "@/shared/ui/badge";
 import { toNumber } from "@/modules/sales/invoice-utils";
-import { OrdersClient } from "./orders-client";
+import { OrdersClient } from "@/app/(app)/orders/orders-client";
 
-export const metadata = { title: "Παραγγελίες" };
+export const metadata = { title: "Προσφορές" };
 export const dynamic = "force-dynamic";
 
-async function loadOrders(tenantId: string) {
+async function loadQuotes(tenantId: string) {
   const started = Date.now();
   const rows = await prisma.order.findMany({
-    where: { tenantId, kind: "SALES_ORDER" },
+    where: { tenantId, kind: "SALES_QUOTE" },
     orderBy: [{ createdAt: "desc" }, { id: "desc" }],
     take: 51,
     include: {
@@ -49,24 +48,24 @@ async function loadOrders(tenantId: string) {
   };
 }
 
-export default async function OrdersPage() {
+export default async function QuotesPage() {
   const session = await getSession();
   if (!session) redirect("/login");
 
-  const first = await loadOrders(session.tenantId);
+  const first = await loadQuotes(session.tenantId);
 
   return (
     <div className="space-y-5">
       <PageHeader
-        title="Παραγγελίες"
-        description="Παραγγελία → έκδοση τιμολογίου"
+        title="Προσφορές"
+        description="Προσφορά → μετατροπή σε παραγγελία"
         actions={
           <Link
-            href="/orders/new"
+            href="/quotes/new"
             className="inline-flex h-10 items-center gap-1.5 rounded-xl bg-teal-600 px-4 text-sm font-medium text-white hover:bg-teal-700"
           >
             <Plus size={16} />
-            Νέα παραγγελία
+            Νέα προσφορά
           </Link>
         }
       />
@@ -74,12 +73,10 @@ export default async function OrdersPage() {
         initialItems={first.items}
         initialNextCursor={first.nextCursor}
         initialMs={first.ms}
-        kind="SALES_ORDER"
+        kind="SALES_QUOTE"
+        detailBasePath="/orders"
+        emptyLabel="Δεν βρέθηκαν προσφορές"
       />
-      <p className="text-xs text-slate-500">
-        Οι γραμμές μπορούν να δεθούν με προϊόντα καταλόγου.{" "}
-        <Badge tone="teal">Phase 1 sales</Badge>
-      </p>
     </div>
   );
 }

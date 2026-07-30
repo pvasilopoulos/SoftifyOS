@@ -38,10 +38,16 @@ export function OrdersClient({
   initialItems,
   initialNextCursor,
   initialMs,
+  kind = "SALES_ORDER",
+  detailBasePath = "/orders",
+  emptyLabel = "Δεν βρέθηκαν παραγγελίες",
 }: {
   initialItems: OrderListItem[];
   initialNextCursor: string | null;
   initialMs: number;
+  kind?: "SALES_ORDER" | "SALES_QUOTE";
+  detailBasePath?: string;
+  emptyLabel?: string;
 }) {
   const [items, setItems] = useState(initialItems);
   const [nextCursor, setNextCursor] = useState(initialNextCursor);
@@ -52,7 +58,7 @@ export function OrdersClient({
 
   async function search() {
     setError(null);
-    const params = new URLSearchParams({ limit: "50" });
+    const params = new URLSearchParams({ limit: "50", kind });
     if (q.trim()) params.set("q", q.trim());
     const res = await fetch(`/api/orders?${params}`, { cache: "no-store" });
     const data = (await res.json()) as ListResponse;
@@ -69,7 +75,11 @@ export function OrdersClient({
 
   async function loadMore() {
     if (!nextCursor) return;
-    const params = new URLSearchParams({ limit: "50", cursor: nextCursor });
+    const params = new URLSearchParams({
+      limit: "50",
+      cursor: nextCursor,
+      kind,
+    });
     if (q.trim()) params.set("q", q.trim());
     const res = await fetch(`/api/orders?${params}`, { cache: "no-store" });
     const data = (await res.json()) as ListResponse;
@@ -130,7 +140,7 @@ export function OrdersClient({
             return (
               <li key={o.id} className="soft-row">
                 <div className="grid grid-cols-[1fr_auto] gap-3 px-4 py-3 md:grid-cols-[0.9fr_1.3fr_0.7fr_0.6fr_0.7fr_auto] md:items-center">
-                  <Link href={`/orders/${o.id}`} className="min-w-0">
+                  <Link href={`${detailBasePath}/${o.id}`} className="min-w-0">
                     <p className="text-sm font-semibold text-ink-950">
                       {o.number}
                     </p>
@@ -139,7 +149,7 @@ export function OrdersClient({
                     </p>
                   </Link>
                   <Link
-                    href={`/orders/${o.id}`}
+                    href={`${detailBasePath}/${o.id}`}
                     className="hidden min-w-0 md:block"
                   >
                     <p className="truncate text-sm font-medium text-ink-900">
@@ -161,7 +171,7 @@ export function OrdersClient({
                     </Badge>
                   </div>
                   <Link
-                    href={`/orders/${o.id}`}
+                    href={`${detailBasePath}/${o.id}`}
                     className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-600 hover:border-teal-200 hover:bg-teal-50 hover:text-teal-700 md:hidden"
                     aria-label={`Άνοιγμα ${o.number}`}
                   >
@@ -173,7 +183,7 @@ export function OrdersClient({
           })}
           {items.length === 0 ? (
             <li className="px-4 py-8 text-center text-sm text-slate-500">
-              Δεν βρέθηκαν παραγγελίες
+              {emptyLabel}
             </li>
           ) : null}
         </ul>

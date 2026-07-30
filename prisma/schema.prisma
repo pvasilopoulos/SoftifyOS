@@ -320,40 +320,51 @@ enum OrderStatus {
   CANCELLED
 }
 
-/// Παραγγελία πώλησης — μπορεί να εκδοθεί (και μερικώς) σε τιμολόγιο
-model Order {
-  id         String      @id @default(cuid())
-  tenantId   String
-  customerId String
-  branchId   String?
-  spaceId    String?
-  seriesId   String?
-  siteId     String?
-  number     String
-  status     OrderStatus @default(DRAFT)
-  orderedAt  DateTime    @default(now())
-  currency   String      @default("EUR")
-  subtotal   Decimal     @db.Decimal(14, 2)
-  vatAmount  Decimal     @db.Decimal(14, 2)
-  total      Decimal     @db.Decimal(14, 2)
-  notes      String?
-  createdAt  DateTime    @default(now())
-  updatedAt  DateTime    @updatedAt
+enum OrderKind {
+  SALES_ORDER
+  SALES_QUOTE
+}
 
-  tenant   Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  customer Customer        @relation(fields: [customerId], references: [id], onDelete: Restrict)
-  branch   Branch?         @relation(fields: [branchId], references: [id], onDelete: SetNull)
-  space    Space?          @relation(fields: [spaceId], references: [id], onDelete: SetNull)
-  series   DocumentSeries? @relation(fields: [seriesId], references: [id], onDelete: SetNull)
-  site     Site?           @relation(fields: [siteId], references: [id], onDelete: SetNull)
-  lines    OrderLine[]
-  invoices Invoice[]
+/// Παραγγελία / προσφορά πώλησης — προσφορά μετατρέπεται σε παραγγελία
+model Order {
+  id            String      @id @default(cuid())
+  tenantId      String
+  customerId    String
+  branchId      String?
+  spaceId       String?
+  seriesId      String?
+  siteId        String?
+  sourceQuoteId String?
+  kind          OrderKind   @default(SALES_ORDER)
+  number        String
+  status        OrderStatus @default(DRAFT)
+  orderedAt     DateTime    @default(now())
+  currency      String      @default("EUR")
+  subtotal      Decimal     @db.Decimal(14, 2)
+  vatAmount     Decimal     @db.Decimal(14, 2)
+  total         Decimal     @db.Decimal(14, 2)
+  notes         String?
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+
+  tenant      Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  customer    Customer        @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  branch      Branch?         @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  space       Space?          @relation(fields: [spaceId], references: [id], onDelete: SetNull)
+  series      DocumentSeries? @relation(fields: [seriesId], references: [id], onDelete: SetNull)
+  site        Site?           @relation(fields: [siteId], references: [id], onDelete: SetNull)
+  sourceQuote Order?          @relation("QuoteToOrder", fields: [sourceQuoteId], references: [id], onDelete: SetNull)
+  convertedOrders Order[]     @relation("QuoteToOrder")
+  lines       OrderLine[]
+  invoices    Invoice[]
 
   @@unique([tenantId, number])
   @@index([tenantId, status, orderedAt(sort: Desc)])
   @@index([tenantId, customerId, orderedAt(sort: Desc)])
   @@index([tenantId, createdAt(sort: Desc), id(sort: Desc)])
   @@index([tenantId, seriesId])
+  @@index([tenantId, kind, createdAt(sort: Desc)])
+  @@index([tenantId, sourceQuoteId])
   @@map("orders")
 }
 

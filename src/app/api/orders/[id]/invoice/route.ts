@@ -39,12 +39,21 @@ export async function POST(
     const order = await prisma.order.findFirst({
       where: { id, tenantId: session.tenantId },
       include: {
-        lines: { orderBy: { position: "asc" } },
         series: true,
+        lines: { orderBy: { position: "asc" } },
       },
     });
     if (!order) {
       return NextResponse.json({ error: "Δεν βρέθηκε" }, { status: 404 });
+    }
+    if (order.kind === "SALES_QUOTE") {
+      return NextResponse.json(
+        {
+          error:
+            "Οι προσφορές δεν τιμολογούνται απευθείας — μετατρέψτε σε παραγγελία",
+        },
+        { status: 400 },
+      );
     }
     if (order.status === "CANCELLED") {
       return NextResponse.json(

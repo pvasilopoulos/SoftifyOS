@@ -40,3 +40,7 @@ Create forms (τιμολόγιο / παραγγελία / έκδοση από π
 while sharing the same workspace and numbering engine.
 `Invoice.relatedInvoiceId` links a credit note to its source invoice;
 `POST /api/invoices/:id/credit` copies lines and allocates from a credit series.
+
+Orders share the same pattern via `Order.kind` (`SALES_ORDER` | `SALES_QUOTE`).
+Quotes use ΠΡΟΣ series; `POST /api/orders/:id/convert` creates a linked
+order (`sourceQuoteId`) without invoicing the quote directly.

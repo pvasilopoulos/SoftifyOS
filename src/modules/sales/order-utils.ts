@@ -14,4 +14,10 @@ export const orderStatusTone = {
   CANCELLED: "slate",
 } as const;
 
+export const orderKindLabel = {
+  SALES_ORDER: "Παραγγελία",
+  SALES_QUOTE: "Προσφορά",
+} as const;
+
 export type OrderStatusKey = keyof typeof orderStatusLabel;
+export type OrderKindKey = keyof typeof orderKindLabel;

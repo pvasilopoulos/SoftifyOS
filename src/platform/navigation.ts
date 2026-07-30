@@ -11,6 +11,7 @@ import {
   Truck,
   ScrollText,
   Tags,
+  ClipboardList,
   type LucideIcon,
 } from "lucide-react";
 
@@ -56,6 +57,7 @@ export const navGroups: NavGroup[] = [
         icon: FileText,
       },
       { href: "/orders", label: "Παραγγελίες", icon: ShoppingCart },
+      { href: "/quotes", label: "Προσφορές", icon: ClipboardList },
     ],
   },
   {
@@ -111,6 +113,12 @@ export const quickActions = [
     label: "Νέα παραγγελία",
     href: "/orders/new",
     shortcut: "N O",
+  },
+  {
+    id: "new-quote",
+    label: "Νέα προσφορά",
+    href: "/quotes/new",
+    shortcut: "N Q",
   },
   {
     id: "open-customer",

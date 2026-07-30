@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+export const orderKindSchema = z.enum(["SALES_ORDER", "SALES_QUOTE"]);
+
 export const orderLineCreateSchema = z.object({
   productId: z.string().trim().min(1).optional().nullable(),
   description: z.string().trim().min(1).max(300),
@@ -13,6 +15,7 @@ export const orderCreateSchema = z.object({
   branchId: z.string().trim().min(1).optional().nullable(),
   spaceId: z.string().trim().min(1).optional().nullable(),
   seriesId: z.string().trim().min(1).optional().nullable(),
+  kind: orderKindSchema.optional().default("SALES_ORDER"),
   number: z.string().trim().min(1).max(40).optional().nullable(),
   status: z.enum(["DRAFT", "CONFIRMED"]).optional().default("DRAFT"),
   notes: z.string().trim().max(2000).optional().nullable(),
@@ -29,6 +32,12 @@ export const orderInvoiceSchema = z.object({
       }),
     )
     .optional(),
+});
+
+export const quoteConvertSchema = z.object({
+  seriesId: z.string().trim().min(1).optional().nullable(),
+  status: z.enum(["DRAFT", "CONFIRMED"]).optional().default("CONFIRMED"),
+  notes: z.string().trim().max(2000).optional().nullable(),
 });
 
 export type OrderCreateInput = z.infer<typeof orderCreateSchema>;
