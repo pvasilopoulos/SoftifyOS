@@ -22,6 +22,12 @@ export const documentKindLabel = {
   CANCELLATION: "Ακυρωτικό",
 } as const;
 
+export const invoiceKindLabel = {
+  SALES_INVOICE: "Τιμολόγιο",
+  SALES_CREDIT: "Πιστωτικό",
+  RETAIL_RECEIPT: "ΑΠΥ / Λιανική",
+} as const;
+
 /** Grouping for settings filters / future menus */
 export const documentKindGroup = {
   SALES_QUOTE: "sales",

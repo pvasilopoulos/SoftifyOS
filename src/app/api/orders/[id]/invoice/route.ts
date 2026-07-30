@@ -179,6 +179,7 @@ export async function POST(
           orderId: order.id,
           seriesId: allocated.seriesId,
           siteId: allocated.siteId,
+          kind: "SALES_INVOICE",
           number: allocated.number,
           status: "ISSUED",
           issuedAt: new Date(),

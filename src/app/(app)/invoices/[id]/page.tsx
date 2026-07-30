@@ -12,6 +12,7 @@ import {
   toNumber,
   type InvoiceStatusKey,
 } from "@/modules/sales/invoice-utils";
+import { invoiceKindLabel } from "@/modules/documents/series";
 import { InvoiceActions } from "../invoice-actions";
 
 export const dynamic = "force-dynamic";
@@ -87,6 +88,18 @@ export default async function InvoiceDetailPage({
       <div className="soft-panel p-4 sm:p-5">
         <div className="mb-4 flex flex-wrap items-center gap-2">
           <Badge tone={invoiceStatusTone[status]}>{invoiceStatusLabel[status]}</Badge>
+          <Badge
+            tone={
+              invoice.kind === "SALES_CREDIT"
+                ? "amber"
+                : invoice.kind === "RETAIL_RECEIPT"
+                  ? "teal"
+                  : "slate"
+            }
+          >
+            {invoiceKindLabel[invoice.kind as keyof typeof invoiceKindLabel] ??
+              "Τιμολόγιο"}
+          </Badge>
           {invoice.series?.myDataEnabled ? (
             <Badge tone="emerald">
               myDATA {invoice.series.myDataInvoiceType ?? ""}

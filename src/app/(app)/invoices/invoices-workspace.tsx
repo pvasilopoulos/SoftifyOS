@@ -13,12 +13,14 @@ import {
   paidRatio,
   type InvoiceStatusKey,
 } from "@/modules/sales/invoice-utils";
+import { invoiceKindLabel } from "@/modules/documents/series";
 import { InvoiceActions } from "./invoice-actions";
 
 export type InvoiceListItem = {
   id: string;
   number: string;
   status: string;
+  kind?: string;
   issuedAt: string | null;
   dueAt: string | null;
   total: number;
@@ -341,6 +343,13 @@ export function InvoicesWorkspace({
                       <p className="text-sm font-semibold text-ink-950">
                         {inv.number}
                       </p>
+                      {inv.kind && inv.kind !== "SALES_INVOICE" ? (
+                        <p className="text-[11px] font-medium text-amber-800">
+                          {invoiceKindLabel[
+                            inv.kind as keyof typeof invoiceKindLabel
+                          ] ?? inv.kind}
+                        </p>
+                      ) : null}
                       <p className="text-xs text-slate-500 md:hidden">
                         {inv.customerName}
                       </p>

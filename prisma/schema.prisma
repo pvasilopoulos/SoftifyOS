@@ -216,7 +216,14 @@ enum InvoiceStatus {
   CANCELLED
 }
 
-/// Τιμολόγιο — συνδέεται με πελάτη και προαιρετικά υποκατάστημα/χώρο
+/// Sales fiscal docs that share the Invoice table / workspace
+enum InvoiceKind {
+  SALES_INVOICE
+  SALES_CREDIT
+  RETAIL_RECEIPT
+}
+
+/// Τιμολόγιο / πιστωτικό / ΑΠΥ — συνδέεται με πελάτη και προαιρετικά υποκατάστημα/χώρο
 model Invoice {
   id          String        @id @default(cuid())
   tenantId    String
@@ -226,6 +233,7 @@ model Invoice {
   orderId     String?
   seriesId    String?
   siteId      String?
+  kind        InvoiceKind   @default(SALES_INVOICE)
   number      String
   status      InvoiceStatus @default(DRAFT)
   issuedAt    DateTime?
@@ -256,6 +264,7 @@ model Invoice {
   @@index([tenantId, dueAt, status])
   @@index([tenantId, orderId])
   @@index([tenantId, seriesId])
+  @@index([tenantId, kind, createdAt(sort: Desc)])
   @@map("invoices")
 }
 

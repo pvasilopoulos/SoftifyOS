@@ -33,3 +33,8 @@ group by `documentKindGroup` (Πωλήσεις / Αγορές / Αποθήκη /
 Settings → Σειρές & Τύποι is the control plane for document behaviour.
 Demo seed (`npm run db:seed:series`) upserts metadata but never resets
 `nextNumber` / `lastYear` on existing series.
+
+Create forms (τιμολόγιο / παραγγελία / έκδοση από παραγγελία) expose a
+**Σειρά** picker; API accepts optional `seriesId` and falls back to default.
+`Invoice.kind` distinguishes `SALES_INVOICE` / `SALES_CREDIT` / `RETAIL_RECEIPT`
+while sharing the same workspace and numbering engine.

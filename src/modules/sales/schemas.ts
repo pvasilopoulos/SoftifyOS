@@ -18,11 +18,18 @@ const dueAtSchema = z
   .optional()
   .nullable();
 
+export const invoiceKindSchema = z.enum([
+  "SALES_INVOICE",
+  "SALES_CREDIT",
+  "RETAIL_RECEIPT",
+]);
+
 export const invoiceCreateSchema = z.object({
   customerId: z.string().trim().min(1),
   branchId: z.string().trim().min(1).optional().nullable(),
   spaceId: z.string().trim().min(1).optional().nullable(),
   seriesId: z.string().trim().min(1).optional().nullable(),
+  kind: invoiceKindSchema.optional().default("SALES_INVOICE"),
   number: z.string().trim().min(1).max(40).optional().nullable(),
   status: z.enum(["DRAFT", "ISSUED"]).optional().default("DRAFT"),
   dueAt: dueAtSchema,

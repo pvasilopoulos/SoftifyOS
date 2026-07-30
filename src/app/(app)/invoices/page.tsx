@@ -49,6 +49,7 @@ async function loadFirstPage(tenantId: string) {
     id: inv.id,
     number: inv.number,
     status: inv.status,
+    kind: inv.kind,
     issuedAt: inv.issuedAt?.toISOString() ?? null,
     dueAt: inv.dueAt?.toISOString() ?? null,
     total: toNumber(inv.total),
@@ -82,16 +83,24 @@ export default async function InvoicesPage() {
   return (
     <div className="space-y-5">
       <PageHeader
-        title="Τιμολόγια"
-        description="Workspace παραστατικών · πελάτης / υποκατάστημα / χώρος"
+        title="Παραστατικά"
+        description="Τιμολόγια · πιστωτικά · ΑΠΥ · πελάτης / υποκατάστημα / χώρος"
         actions={
-          <Link
-            href="/invoices/new"
-            className="inline-flex h-10 items-center gap-1.5 rounded-xl bg-teal-600 px-4 text-sm font-medium text-white hover:bg-teal-700"
-          >
-            <Plus size={16} />
-            Νέο τιμολόγιο
-          </Link>
+          <div className="flex flex-wrap gap-2">
+            <Link
+              href="/invoices/new?kind=SALES_CREDIT"
+              className="inline-flex h-10 items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-4 text-sm font-medium text-ink-900 hover:bg-slate-50"
+            >
+              Πιστωτικό
+            </Link>
+            <Link
+              href="/invoices/new"
+              className="inline-flex h-10 items-center gap-1.5 rounded-xl bg-teal-600 px-4 text-sm font-medium text-white hover:bg-teal-700"
+            >
+              <Plus size={16} />
+              Νέο τιμολόγιο
+            </Link>
+          </div>
         }
       />
       <InvoicesWorkspace

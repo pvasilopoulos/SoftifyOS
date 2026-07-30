@@ -29,11 +29,14 @@ const listSchema = listQuerySchema.extend({
     .enum(["all", "pending", "issued", "overdue", "paid", "draft"])
     .optional(),
   customerId: z.string().min(1).optional(),
+  kind: z.enum(["SALES_INVOICE", "SALES_CREDIT", "RETAIL_RECEIPT"]).optional(),
 });
 
-async function nextInvoiceNumberFallback(tenantId: string) {
+async function nextInvoiceNumberFallback(tenantId: string, kind: string) {
   const year = new Date().getFullYear();
-  const prefix = `ΤΙΜ-${year}-`;
+  const code =
+    kind === "SALES_CREDIT" ? "ΠΙΣ" : kind === "RETAIL_RECEIPT" ? "ΑΠΥ" : "ΤΙΜ";
+  const prefix = `${code}-${year}-`;
   const latest = await prisma.invoice.findFirst({
     where: { tenantId, number: { startsWith: prefix } },
     orderBy: { number: "desc" },
@@ -71,7 +74,7 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: "Invalid query" }, { status: 400 });
     }
 
-    const { limit, cursor: cursorParam, q, status, tab, customerId } =
+    const { limit, cursor: cursorParam, q, status, tab, customerId, kind } =
       parsed.data;
     const cursor = cursorParam ? decodeCursor(cursorParam) : null;
     if (cursorParam && !cursor) {
@@ -97,6 +100,7 @@ export async function GET(request: NextRequest) {
         id: string;
         number: string;
         status: string;
+        kind: string;
         issuedAt: Date | null;
         dueAt: Date | null;
         total: Prisma.Decimal;
@@ -110,7 +114,7 @@ export async function GET(request: NextRequest) {
       }>
     >`
       SELECT
-        i.id, i.number, i.status, i."issuedAt", i."dueAt",
+        i.id, i.number, i.status, i.kind, i."issuedAt", i."dueAt",
         i.total, i."paidAmount", i."createdAt",
         i."customerId", c.name AS "customerName", c.code AS "customerCode",
         b.name AS "branchName", s.name AS "spaceName"
@@ -120,6 +124,7 @@ export async function GET(request: NextRequest) {
       LEFT JOIN spaces s ON s.id = i."spaceId"
       WHERE i."tenantId" = ${session.tenantId}
         ${statusFilter}
+        ${kind ? Prisma.sql`AND i.kind = ${kind}::"InvoiceKind"` : Prisma.empty}
         ${customerId ? Prisma.sql`AND i."customerId" = ${customerId}` : Prisma.empty}
         ${
           q
@@ -168,6 +173,7 @@ export async function GET(request: NextRequest) {
         id: row.id,
         number: row.number,
         status: row.status,
+        kind: row.kind,
         issuedAt: row.issuedAt?.toISOString() ?? null,
         dueAt: row.dueAt?.toISOString() ?? null,
         total,
@@ -277,6 +283,7 @@ export async function POST(request: Request) {
 
     const totals = calcInvoiceTotals(body.lines);
     const status = body.status ?? "DRAFT";
+    const docKind = body.kind ?? "SALES_INVOICE";
     const issuedAt = status === "ISSUED" ? new Date() : null;
     const dueAt = parseDueAt(body.dueAt ?? null);
 
@@ -286,12 +293,22 @@ export async function POST(request: Request) {
             where: {
               id: body.seriesId,
               tenantId: session.tenantId,
-              kind: "SALES_INVOICE",
+              kind: docKind,
               isActive: true,
             },
           })
         : null) ??
-      (await resolveDefaultSeries(prisma, session.tenantId, "SALES_INVOICE"));
+      (await resolveDefaultSeries(prisma, session.tenantId, docKind));
+
+    if (!series && !body.number?.trim()) {
+      return NextResponse.json(
+        {
+          error:
+            "Δεν υπάρχει ενεργή σειρά για αυτόν τον τύπο — ρυθμίστε Σειρές & Τύποι",
+        },
+        { status: 400 },
+      );
+    }
 
     const invoice = await prisma.$transaction(async (tx) => {
       let number = body.number?.trim() || "";
@@ -302,13 +319,13 @@ export async function POST(request: Request) {
           const allocated = await allocateFromSeries(tx, {
             tenantId: session.tenantId,
             seriesId: series.id,
-            kind: "SALES_INVOICE",
+            kind: docKind,
           });
           number = allocated.number;
           seriesId = allocated.seriesId;
           siteId = allocated.siteId;
         } else {
-          number = await nextInvoiceNumberFallback(session.tenantId);
+          number = await nextInvoiceNumberFallback(session.tenantId, docKind);
         }
       }
 
@@ -320,6 +337,7 @@ export async function POST(request: Request) {
           spaceId,
           seriesId,
           siteId,
+          kind: docKind,
           number,
           status,
           issuedAt,
@@ -348,6 +366,7 @@ export async function POST(request: Request) {
           customer: true,
           branch: true,
           space: true,
+          series: true,
         },
       });
     });
@@ -358,7 +377,12 @@ export async function POST(request: Request) {
       action: "invoice.create",
       entity: "invoice",
       entityId: invoice.id,
-      meta: { number: invoice.number, status: invoice.status },
+      meta: {
+        number: invoice.number,
+        status: invoice.status,
+        kind: invoice.kind,
+        seriesId: invoice.seriesId,
+      },
     });
 
     return NextResponse.json(
