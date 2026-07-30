@@ -4,6 +4,7 @@ const nextConfig: NextConfig = {
   poweredByHeader: false,
   compress: true,
   reactStrictMode: true,
+  serverExternalPackages: ["pg", "@prisma/adapter-pg", "@prisma/client"],
   experimental: {
     optimizePackageImports: ["lucide-react"],
   },

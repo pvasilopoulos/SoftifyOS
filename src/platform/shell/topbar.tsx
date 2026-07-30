@@ -1,15 +1,36 @@
 "use client";
 
-import { Bell, Building2, ChevronDown, Search, Zap } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { Bell, Building2, ChevronDown, LogOut, Search, Zap } from "lucide-react";
 import { Button } from "@/shared/ui/button";
+import type { SessionPayload } from "@/platform/auth/session";
+
+function initials(name: string) {
+  return name
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((p) => p[0]?.toUpperCase() ?? "")
+    .join("");
+}
 
 export function Topbar({
+  session,
   onOpenCommand,
   onOpenQuickActions,
 }: {
+  session: SessionPayload;
   onOpenCommand: () => void;
   onOpenQuickActions: () => void;
 }) {
+  const router = useRouter();
+
+  async function logout() {
+    await fetch("/api/auth/logout", { method: "POST" });
+    router.replace("/login");
+    router.refresh();
+  }
+
   return (
     <header className="sticky top-0 z-30 flex h-14 items-center gap-2 border-b border-slate-200/80 bg-[#F1F4F7]/90 px-3 backdrop-blur sm:h-16 sm:px-5">
       <div className="flex min-w-0 flex-1 items-center gap-2 lg:hidden">
@@ -18,7 +39,7 @@ export function Topbar({
         </span>
         <div className="min-w-0">
           <p className="truncate text-sm font-semibold text-ink-950">SoftifyOS</p>
-          <p className="truncate text-[11px] text-slate-500">Ακρόπολις ΑΕ</p>
+          <p className="truncate text-[11px] text-slate-500">{session.tenantName}</p>
         </div>
       </div>
 
@@ -58,18 +79,32 @@ export function Topbar({
         <button
           type="button"
           className="hidden items-center gap-2 rounded-2xl border border-slate-200 bg-white px-2.5 py-1.5 text-sm shadow-sm hover:bg-slate-50 md:flex"
+          title={`${session.tenantName} · ${session.role}`}
         >
           <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-teal-50 text-teal-800">
             <Building2 size={14} />
           </span>
           <span className="max-w-[140px] truncate font-medium text-ink-900">
-            Ακρόπολις ΑΕ
+            {session.tenantName}
           </span>
           <ChevronDown size={14} className="text-slate-400" />
         </button>
-        <div className="flex h-9 w-9 items-center justify-center rounded-full bg-ink-950 text-xs font-semibold text-white">
-          ΜΚ
+        <div
+          className="flex h-9 w-9 items-center justify-center rounded-full bg-ink-950 text-xs font-semibold text-white"
+          title={session.name}
+        >
+          {initials(session.name) || "U"}
         </div>
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          onClick={logout}
+          aria-label="Αποσύνδεση"
+          title="Αποσύνδεση"
+        >
+          <LogOut size={18} />
+        </Button>
       </div>
     </header>
   );

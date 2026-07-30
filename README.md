@@ -15,17 +15,26 @@ Enterprise ERP platform — **Template v2 (Desktop + Mobile)** locked.
 ## Quick start
 
 ```bash
+cp .env.example .env
+# start Postgres (docker compose up -d  OR local Postgres)
 npm install
+npm run db:migrate
+npm run db:seed
+npm run db:rls
 npm run dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) · login UI at `/login`.
+Open [http://localhost:3000/login](http://localhost:3000/login)
 
-Postgres (for next milestone):
+Demo: `maria@akropolis.gr` / `SoftifyOS!2026`
 
-```bash
-docker compose up -d
-```
+## Phase 0 platform
+
+- Tenants + memberships (OWNER/ADMIN/MEMBER/VIEWER)
+- Cookie JWT sessions (`jose`) + protected app routes
+- Audit events on login/logout
+- Postgres RLS policies (`prisma/sql/rls.sql`)
+- ADR: [`docs/adr/0003-phase0-platform.md`](docs/adr/0003-phase0-platform.md)
 
 ## Stack
 

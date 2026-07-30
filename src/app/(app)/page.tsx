@@ -15,6 +15,8 @@ import {
   statusLabel,
   statusTone,
 } from "@/modules/sales/demo-data";
+import { getSession } from "@/platform/auth/session";
+import { prisma } from "@/server/db";
 
 export const metadata = { title: "Πίνακας ελέγχου" };
 
@@ -49,14 +51,23 @@ const workQueue = [
   },
 ];
 
-export default function DashboardPage() {
+export default async function DashboardPage() {
+  const session = await getSession();
+  const firstName = session?.name?.split(/\s+/)[0] ?? "εκεί";
+  const recentAudits = session
+    ? await prisma.auditEvent.findMany({
+        where: { tenantId: session.tenantId },
+        orderBy: { createdAt: "desc" },
+        take: 5,
+      })
+    : [];
   const recent = demoInvoices.slice(0, 5);
 
   return (
     <div className="space-y-6">
       <PageHeader
-        title="Καλημέρα, Μαρία"
-        description="Τι χρειάζεται ενέργεια σήμερα στην Ακρόπολις ΑΕ."
+        title={`Καλημέρα, ${firstName}`}
+        description={`Τι χρειάζεται ενέργεια σήμερα στην ${session?.tenantName ?? "οργανισμό"}.`}
         actions={
           <Link
             href="/invoices?new=1"
@@ -177,15 +188,16 @@ export default function DashboardPage() {
             <CheckCircle2 size={18} />
           </span>
           <div>
-            <p className="font-medium text-ink-950">Template v2 ενεργό</p>
+            <p className="font-medium text-ink-950">Phase 0 platform ενεργό</p>
             <p className="text-sm text-slate-500">
-              Desktop shell + mobile tabs · multi-tenant ready foundation
+              Auth + tenant session · audit events: {recentAudits.length} πρόσφατα · role{" "}
+              {session?.role}
             </p>
           </div>
         </div>
         <div className="flex items-center gap-2 text-xs text-slate-500">
           <AlertTriangle size={14} className="text-amber-500" />
-          Demo data — χωρίς σύνδεση βάσης ακόμη
+          ERP modules ακόμα με demo data
         </div>
       </section>
     </div>

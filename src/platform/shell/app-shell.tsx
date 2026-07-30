@@ -6,8 +6,15 @@ import { Topbar } from "@/platform/shell/topbar";
 import { MobileTabBar } from "@/platform/shell/mobile-tab-bar";
 import { CommandPalette } from "@/platform/shell/command-palette";
 import { QuickActionsSheet } from "@/platform/shell/quick-actions-sheet";
+import type { SessionPayload } from "@/platform/auth/session";
 
-export function AppShell({ children }: { children: React.ReactNode }) {
+export function AppShell({
+  session,
+  children,
+}: {
+  session: SessionPayload;
+  children: React.ReactNode;
+}) {
   const [collapsed, setCollapsed] = useState(false);
   const [commandOpen, setCommandOpen] = useState(false);
   const [quickOpen, setQuickOpen] = useState(false);
@@ -30,6 +37,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       />
       <div className="flex min-w-0 flex-1 flex-col">
         <Topbar
+          session={session}
           onOpenCommand={() => startTransition(() => setCommandOpen(true))}
           onOpenQuickActions={() => startTransition(() => setQuickOpen(true))}
         />
