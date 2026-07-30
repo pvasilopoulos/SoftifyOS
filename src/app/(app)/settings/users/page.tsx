@@ -46,6 +46,8 @@ export default async function UsersSettingsPage() {
         groups: m.groups.map((g) => g.group),
       }))}
       initialRoles={roles}
+      currentUserId={session.sub}
+      currentRole={session.role}
     />
   );
 }

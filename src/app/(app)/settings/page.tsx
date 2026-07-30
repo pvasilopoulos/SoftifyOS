@@ -15,7 +15,7 @@ const links = [
   {
     href: "/settings/users",
     title: "Χρήστες",
-    description: "Μέλη tenant, ρόλος συστήματος και σύνδεση με custom ρόλο.",
+    description: "Δημιουργία, επεξεργασία και αφαίρεση μελών · ρόλοι και App Role.",
     badge: "IAM",
   },
   {
