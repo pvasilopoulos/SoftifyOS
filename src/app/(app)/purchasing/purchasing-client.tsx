@@ -2,7 +2,6 @@
 
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { toast } from "sonner";
 
 type Supplier = {
   id: string;
@@ -100,6 +99,8 @@ export function PurchasingClient({
     initialOrders[0]?.id ?? null,
   );
   const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [message, setMessage] = useState<string | null>(null);
 
   const [newSupplier, setNewSupplier] = useState({
     code: "",
@@ -161,6 +162,8 @@ export function PurchasingClient({
   async function createSupplier(e: FormEvent) {
     e.preventDefault();
     setBusy(true);
+    setError(null);
+    setMessage(null);
     try {
       const res = await fetch("/api/suppliers", {
         method: "POST",
@@ -175,7 +178,7 @@ export function PurchasingClient({
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || "Αποτυχία");
-      toast.success("Ο προμηθευτής δημιουργήθηκε");
+      setMessage("Ο προμηθευτής δημιουργήθηκε");
       setNewSupplier({
         code: "",
         name: "",
@@ -188,7 +191,7 @@ export function PurchasingClient({
       }
       refresh();
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Σφάλμα");
+      setError(err instanceof Error ? err.message : "Σφάλμα");
     } finally {
       setBusy(false);
     }
@@ -196,8 +199,10 @@ export function PurchasingClient({
 
   async function createOrder(e: FormEvent) {
     e.preventDefault();
+    setError(null);
+    setMessage(null);
     if (!newPo.supplierId) {
-      toast.error("Επιλέξτε προμηθευτή");
+      setError("Επιλέξτε προμηθευτή");
       return;
     }
     const lines = draftLines
@@ -213,7 +218,7 @@ export function PurchasingClient({
         vatRate: Number(l.vatRate) || 0,
       }));
     if (lines.length === 0) {
-      toast.error("Προσθέστε τουλάχιστον μία γραμμή");
+      setError("Προσθέστε τουλάχιστον μία γραμμή");
       return;
     }
     setBusy(true);
@@ -231,7 +236,7 @@ export function PurchasingClient({
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || "Αποτυχία");
-      toast.success(`Δημιουργήθηκε ${data.item?.number ?? "παραγγελία"}`);
+      setMessage(`Δημιουργήθηκε ${data.item?.number ?? "παραγγελία"}`);
       setDraftLines([
         {
           key: String(Date.now()),
@@ -246,7 +251,7 @@ export function PurchasingClient({
       setTab("orders");
       refresh();
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Σφάλμα");
+      setError(err instanceof Error ? err.message : "Σφάλμα");
     } finally {
       setBusy(false);
     }
@@ -255,6 +260,8 @@ export function PurchasingClient({
   async function setStatus(status: string) {
     if (!selected) return;
     setBusy(true);
+    setError(null);
+    setMessage(null);
     try {
       const res = await fetch(`/api/purchase-orders/${selected.id}`, {
         method: "PATCH",
@@ -263,10 +270,10 @@ export function PurchasingClient({
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || "Αποτυχία");
-      toast.success(`Κατάσταση: ${STATUS_LABEL[status] ?? status}`);
+      setMessage(`Κατάσταση: ${STATUS_LABEL[status] ?? status}`);
       refresh();
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Σφάλμα");
+      setError(err instanceof Error ? err.message : "Σφάλμα");
     } finally {
       setBusy(false);
     }
@@ -274,6 +281,8 @@ export function PurchasingClient({
 
   async function receive() {
     if (!selected) return;
+    setError(null);
+    setMessage(null);
     const items = selected.lines
       .map((line) => ({
         lineId: line.id,
@@ -281,7 +290,7 @@ export function PurchasingClient({
       }))
       .filter((l) => l.qty > 0);
     if (items.length === 0) {
-      toast.error("Δώστε ποσότητες παραλαβής");
+      setError("Δώστε ποσότητες παραλαβής");
       return;
     }
     setBusy(true);
@@ -293,10 +302,10 @@ export function PurchasingClient({
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || "Αποτυχία");
-      toast.success("Παραλαβή καταχωρήθηκε — ενημερώθηκε το απόθεμα");
+      setMessage("Παραλαβή καταχωρήθηκε — ενημερώθηκε το απόθεμα");
       refresh();
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Σφάλμα");
+      setError(err instanceof Error ? err.message : "Σφάλμα");
     } finally {
       setBusy(false);
     }
@@ -304,6 +313,16 @@ export function PurchasingClient({
 
   return (
     <div className="space-y-4">
+      {error ? (
+        <div className="rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-800">
+          {error}
+        </div>
+      ) : null}
+      {message ? (
+        <div className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-800">
+          {message}
+        </div>
+      ) : null}
       <div className="flex flex-wrap gap-2 border-b border-slate-200 pb-2">
         <button
           type="button"
