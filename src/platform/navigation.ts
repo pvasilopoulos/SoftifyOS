@@ -75,6 +75,19 @@ export type MenuNodeConfig = {
   children?: MenuNodeConfig[];
   /** Roles that can see this node; empty/undefined = all */
   roles?: Array<"OWNER" | "ADMIN" | "MEMBER" | "VIEWER">;
+  /**
+   * UserGroup ids that can see this node.
+   * Empty/undefined = no group restriction.
+   * Combined with userIds: visible if in any listed group OR any listed user.
+   */
+  groupIds?: string[];
+  /**
+   * User ids (User.id) that can see this node.
+   * Empty/undefined = no user allowlist.
+   */
+  userIds?: string[];
+  /** Folder default open/closed in sidebar (overrides tenant default) */
+  defaultExpanded?: boolean;
   mobileTab?: boolean;
   /** Order among mobile footer tabs (0-based). Lower first. */
   mobileOrder?: number;
@@ -93,7 +106,37 @@ export type NavGroup = {
   id: string;
   label: string;
   items: NavItem[];
+  /** Initial expand state before localStorage override */
+  defaultExpanded?: boolean;
 };
+
+/** Audience used when resolving menu for a logged-in membership */
+export type MenuAudience = {
+  role?: string;
+  userId?: string;
+  groupIds?: string[];
+};
+
+export function nodeVisibleToAudience(
+  node: MenuNodeConfig,
+  audience?: MenuAudience,
+): boolean {
+  if (node.visible === false) return false;
+  if (!roleAllowed(node, audience?.role)) return false;
+
+  const groupIds = node.groupIds?.filter(Boolean) ?? [];
+  const userIds = node.userIds?.filter(Boolean) ?? [];
+  if (groupIds.length === 0 && userIds.length === 0) return true;
+
+  const inGroup =
+    groupIds.length > 0 &&
+    Boolean(audience?.groupIds?.some((id) => groupIds.includes(id)));
+  const inUser =
+    userIds.length > 0 &&
+    Boolean(audience?.userId && userIds.includes(audience.userId));
+
+  return inGroup || inUser;
+}
 
 /** Default SoftifyOS menu — source of truth when tenant has no overrides */
 export const defaultMenuTree: MenuNodeConfig[] = [
@@ -272,21 +315,25 @@ function roleAllowed(
 /** Flatten configurable tree → sidebar groups (folders → groups, nested folders recurse) */
 export function menuTreeToNavGroups(
   tree: MenuNodeConfig[],
-  role?: string,
+  roleOrAudience?: string | MenuAudience,
+  tenantDefaultExpanded = true,
 ): NavGroup[] {
+  const audience: MenuAudience =
+    typeof roleOrAudience === "string" || roleOrAudience == null
+      ? { role: roleOrAudience }
+      : roleOrAudience;
+
   const groups: NavGroup[] = [];
 
   function walk(nodes: MenuNodeConfig[]) {
     for (const node of nodes) {
-      if (node.visible === false) continue;
-      if (!roleAllowed(node, role)) continue;
+      if (!nodeVisibleToAudience(node, audience)) continue;
 
       if (node.type === "folder") {
         const items: NavItem[] = [];
         const nested: MenuNodeConfig[] = [];
         for (const child of node.children ?? []) {
-          if (child.visible === false) continue;
-          if (!roleAllowed(child, role)) continue;
+          if (!nodeVisibleToAudience(child, audience)) continue;
           if (child.type === "folder") {
             nested.push(child);
             continue;
@@ -302,7 +349,12 @@ export function menuTreeToNavGroups(
           });
         }
         if (items.length > 0) {
-          groups.push({ id: node.id, label: node.label, items });
+          groups.push({
+            id: node.id,
+            label: node.label,
+            items,
+            defaultExpanded: node.defaultExpanded ?? tenantDefaultExpanded,
+          });
         }
         if (nested.length > 0) walk(nested);
       } else if (node.type === "link" && node.href) {
@@ -319,6 +371,7 @@ export function menuTreeToNavGroups(
               mobileOrder: node.mobileOrder,
             },
           ],
+          defaultExpanded: tenantDefaultExpanded,
         });
       }
     }

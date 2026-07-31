@@ -9,6 +9,7 @@ import { QuickActionsSheet } from "@/platform/shell/quick-actions-sheet";
 import { NavProvider } from "@/platform/navigation/nav-context";
 import {
   menuTreeToNavGroups,
+  type MenuAudience,
   type MenuNodeConfig,
 } from "@/platform/navigation";
 import { resolveMobileTabsFromGroups } from "@/platform/navigation/menu-tree";
@@ -17,10 +18,14 @@ import type { SessionPayload } from "@/platform/auth/session";
 export function AppShell({
   session,
   menuTree,
+  menuAudience,
+  navGroupsDefaultExpanded = true,
   children,
 }: {
   session: SessionPayload;
   menuTree: MenuNodeConfig[];
+  menuAudience?: MenuAudience;
+  navGroupsDefaultExpanded?: boolean;
   children: React.ReactNode;
 }) {
   const [collapsed, setCollapsed] = useState(false);
@@ -32,9 +37,19 @@ export function AppShell({
     setCollapsed(readSidebarCollapsed());
   }, []);
 
+  const audience = useMemo<MenuAudience>(
+    () =>
+      menuAudience ?? {
+        role: session.role,
+        userId: session.sub,
+        groupIds: [],
+      },
+    [menuAudience, session.role, session.sub],
+  );
+
   const groups = useMemo(
-    () => menuTreeToNavGroups(menuTree, session.role),
-    [menuTree, session.role],
+    () => menuTreeToNavGroups(menuTree, audience, navGroupsDefaultExpanded),
+    [menuTree, audience, navGroupsDefaultExpanded],
   );
 
   const mobileTabs = useMemo(

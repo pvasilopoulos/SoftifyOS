@@ -863,6 +863,8 @@ model TenantSettings {
   tenantId  String   @unique
   /// JSON MenuNodeConfig[]
   menuJson  Json?
+  /// Default expand state for sidebar nav folders (user localStorage can override)
+  navGroupsDefaultExpanded Boolean @default(true)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 

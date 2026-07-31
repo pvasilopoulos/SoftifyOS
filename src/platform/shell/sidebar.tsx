@@ -27,14 +27,26 @@ function writeCollapsed(collapsed: boolean) {
   }
 }
 
-function readGroupExpanded(groupIds: string[]): Record<string, boolean> {
-  const defaults = Object.fromEntries(groupIds.map((id) => [id, true]));
+function groupDefaults(groups: NavGroup[]): Record<string, boolean> {
+  return Object.fromEntries(
+    groups.map((g) => [g.id, g.defaultExpanded ?? true]),
+  );
+}
+
+function readGroupExpanded(groups: NavGroup[]): Record<string, boolean> {
+  const defaults = groupDefaults(groups);
   if (typeof window === "undefined") return defaults;
   try {
     const raw = window.localStorage.getItem(GROUP_EXPANDED_KEY);
     if (!raw) return defaults;
     const parsed = JSON.parse(raw) as Record<string, boolean>;
-    return { ...defaults, ...parsed };
+    const next = { ...defaults };
+    for (const g of groups) {
+      if (Object.prototype.hasOwnProperty.call(parsed, g.id)) {
+        next[g.id] = Boolean(parsed[g.id]);
+      }
+    }
+    return next;
   } catch {
     return defaults;
   }
@@ -58,18 +70,28 @@ export function Sidebar({
   groups: NavGroup[];
 }) {
   const pathname = usePathname();
-  const groupIds = useMemo(() => groups.map((g) => g.id), [groups]);
+  const groupsKey = useMemo(
+    () =>
+      groups
+        .map((g) => `${g.id}:${g.defaultExpanded === false ? "0" : "1"}`)
+        .join("|"),
+    [groups],
+  );
   const [expanded, setExpanded] = useState<Record<string, boolean>>(() =>
-    Object.fromEntries(groupIds.map((id) => [id, true])),
+    groupDefaults(groups),
   );
 
   useEffect(() => {
-    setExpanded(readGroupExpanded(groupIds));
-  }, [groupIds]);
+    setExpanded(readGroupExpanded(groups));
+    // groupsKey captures id + defaultExpanded changes
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [groupsKey]);
 
   function toggleGroup(id: string) {
     setExpanded((prev) => {
-      const next = { ...prev, [id]: !(prev[id] ?? true) };
+      const fallback =
+        groups.find((g) => g.id === id)?.defaultExpanded ?? true;
+      const next = { ...prev, [id]: !(prev[id] ?? fallback) };
       writeGroupExpanded(next);
       return next;
     });
@@ -112,7 +134,8 @@ export function Sidebar({
 
       <nav className="flex-1 overflow-y-auto px-2 py-4" aria-label="Κύρια πλοήγηση">
         {groups.map((group) => {
-          const isOpen = collapsed ? true : (expanded[group.id] ?? true);
+          const fallback = group.defaultExpanded ?? true;
+          const isOpen = collapsed ? true : (expanded[group.id] ?? fallback);
           const hasActive = group.items.some((item) =>
             item.href === "/"
               ? pathname === "/"
