@@ -4,6 +4,7 @@ import { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/server/db";
 import { getSession } from "@/platform/auth/session";
 import { writeAuditEvent } from "@/platform/tenancy/audit";
+import { buildChangeMeta } from "@/platform/tenancy/audit-diff";
 import { getErrorMessage } from "@/shared/lib/safe";
 import { customerUpdateSchema } from "@/modules/master-data/schemas";
 import {
@@ -187,30 +188,36 @@ export async function PATCH(
       },
     });
 
+    const afterRecord: Record<string, unknown> = {
+      id: customer.id,
+      code: customer.code,
+      name: customer.name,
+      vatNumber: customer.vatNumber,
+      email: customer.email,
+      phone: customer.phone,
+      notes: customer.notes,
+      status: customer.status,
+      customFields: customer.customFields,
+    };
+
     await writeAuditEvent({
       tenantId: session.tenantId,
       userId: session.sub,
       action: "customer.update",
       entity: "customer",
       entityId: customer.id,
-      meta: { code: customer.code },
+      meta: buildChangeMeta({
+        before: previous,
+        after: afterRecord,
+        extra: { code: customer.code },
+      }),
     });
 
     const after = await dispatchScriptEvent(prisma, {
       tenantId: session.tenantId,
       module: "CUSTOMERS",
       eventKey: "after.update",
-      record: {
-        id: customer.id,
-        code: customer.code,
-        name: customer.name,
-        vatNumber: customer.vatNumber,
-        email: customer.email,
-        phone: customer.phone,
-        notes: customer.notes,
-        status: customer.status,
-        customFields: customer.customFields,
-      },
+      record: afterRecord,
       previous,
       user: {
         id: session.sub,

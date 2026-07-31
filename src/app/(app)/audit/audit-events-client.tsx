@@ -18,6 +18,10 @@ import { PageHeader } from "@/shared/ui/page-header";
 import { Badge } from "@/shared/ui/badge";
 import { Button } from "@/shared/ui/button";
 import { cn } from "@/shared/lib/cn";
+import {
+  parseAuditMeta,
+  type AuditChange,
+} from "@/platform/tenancy/audit-diff";
 
 type AuditUser = {
   id: string;
@@ -580,6 +584,73 @@ export function AuditEventsClient({
   );
 }
 
+const FIELD_LABELS: Record<string, string> = {
+  code: "Κωδικός",
+  name: "Όνομα",
+  sku: "SKU",
+  barcode: "Barcode",
+  vatNumber: "ΑΦΜ",
+  email: "Email",
+  phone: "Τηλέφωνο",
+  notes: "Σημειώσεις",
+  status: "Κατάσταση",
+  unit: "Μονάδα",
+  unitId: "Μονάδα (id)",
+  vatRate: "ΦΠΑ %",
+  price: "Τιμή",
+  trackInventory: "Παρακολούθηση αποθέματος",
+  customFields: "Προσαρμοσμένα πεδία",
+  legalName: "Επωνυμία",
+  tradeName: "Διακριτικός τίτλος",
+  taxOffice: "ΔΟΥ",
+  address: "Διεύθυνση",
+  city: "Πόλη",
+  postalCode: "Τ.Κ.",
+  country: "Χώρα",
+  website: "Ιστότοπος",
+  logoUrl: "Logo URL",
+  currency: "Νόμισμα",
+  locale: "Γλώσσα",
+  timezone: "Ζώνη ώρας",
+  maintenanceMode: "Λειτουργία συντήρησης",
+  number: "Αριθμός",
+  dueAt: "Λήξη",
+  branchId: "Υποκατάστημα",
+  spaceId: "Χώρος",
+  total: "Σύνολο",
+  subtotal: "Καθαρή",
+  vatAmount: "ΦΠΑ",
+  lineCount: "Γραμμές",
+};
+
+function fieldLabel(path: string) {
+  if (FIELD_LABELS[path]) return FIELD_LABELS[path];
+  const root = path.split(".")[0] ?? path;
+  if (FIELD_LABELS[root] && path.includes(".")) {
+    return `${FIELD_LABELS[root]} · ${path.slice(root.length + 1)}`;
+  }
+  return path;
+}
+
+function formatMetaValue(value: unknown): string {
+  if (value === null || value === undefined) return "—";
+  if (typeof value === "boolean") return value ? "Ναι" : "Όχι";
+  if (typeof value === "number") return value.toLocaleString("el-GR");
+  if (typeof value === "string") {
+    if (!value) return "(κενό)";
+    if (/^\d{4}-\d{2}-\d{2}T/.test(value)) {
+      const d = new Date(value);
+      if (!Number.isNaN(d.getTime())) return d.toLocaleString("el-GR");
+    }
+    return value;
+  }
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return String(value);
+  }
+}
+
 function DetailDrawer({
   item,
   onClose,
@@ -588,6 +659,13 @@ function DetailDrawer({
   onClose: () => void;
 }) {
   const when = formatWhen(item.createdAt);
+  const parsed = parseAuditMeta(item.meta);
+  const hasChangeView =
+    parsed.changes.length > 0 || parsed.before != null || parsed.after != null;
+  const [jsonTab, setJsonTab] = useState<"diff" | "before" | "after" | "raw">(
+    hasChangeView ? "diff" : "raw",
+  );
+
   return (
     <div className="fixed inset-0 z-50 flex justify-end bg-ink-950/30 backdrop-blur-[2px]">
       <button
@@ -596,7 +674,7 @@ function DetailDrawer({
         aria-label="Κλείσιμο"
         onClick={onClose}
       />
-      <aside className="relative flex h-full w-full max-w-md flex-col border-l border-slate-200 bg-white shadow-2xl animate-fade-in">
+      <aside className="relative flex h-full w-full max-w-xl flex-col border-l border-slate-200 bg-white shadow-2xl animate-fade-in">
         <div className="flex items-start justify-between gap-3 border-b border-slate-100 px-5 py-4">
           <div className="min-w-0">
             <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">
@@ -656,18 +734,166 @@ function DetailDrawer({
             )}
           </Field>
 
-          <Field label="Meta">
-            {item.meta == null ? (
-              <p className="text-slate-400">Χωρίς επιπλέον δεδομένα</p>
-            ) : (
-              <pre className="max-h-72 overflow-auto rounded-xl bg-slate-950 p-3 font-mono text-[11px] leading-relaxed text-slate-200">
-                {JSON.stringify(item.meta, null, 2)}
-              </pre>
-            )}
-          </Field>
+          {hasChangeView ? (
+            <Field
+              label={`Αλλαγή${
+                parsed.changes.length
+                  ? ` · ${parsed.changes.length} πεδί${parsed.changes.length === 1 ? "ο" : "α"}`
+                  : ""
+              }`}
+            >
+              <div className="mb-3 flex flex-wrap gap-1.5">
+                {(
+                  [
+                    ["diff", "Διαφορές"],
+                    ["before", "Πριν"],
+                    ["after", "Μετά"],
+                    ["raw", "Raw"],
+                  ] as const
+                ).map(([key, label]) => (
+                  <button
+                    key={key}
+                    type="button"
+                    onClick={() => setJsonTab(key)}
+                    className={cn(
+                      "rounded-lg px-2.5 py-1 text-xs font-medium transition",
+                      jsonTab === key
+                        ? "bg-ink-900 text-white"
+                        : "bg-slate-100 text-slate-600 hover:bg-slate-200",
+                    )}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+
+              {jsonTab === "diff" ? (
+                <ChangeDiffTable changes={parsed.changes} />
+              ) : null}
+
+              {jsonTab === "before" ? (
+                <JsonBlock
+                  value={parsed.before}
+                  empty="Δεν υπάρχει αποθηκευμένη κατάσταση πριν"
+                  tone="rose"
+                />
+              ) : null}
+
+              {jsonTab === "after" ? (
+                <JsonBlock
+                  value={parsed.after}
+                  empty="Δεν υπάρχει αποθηκευμένη κατάσταση μετά"
+                  tone="emerald"
+                />
+              ) : null}
+
+              {jsonTab === "raw" ? (
+                <JsonBlock value={item.meta} empty="Χωρίς meta" />
+              ) : null}
+            </Field>
+          ) : (
+            <Field label="Meta">
+              {item.meta == null ? (
+                <p className="text-slate-400">
+                  Χωρίς πριν/μετά — παλαιότερη καταγραφή χωρίς snapshot.
+                </p>
+              ) : (
+                <>
+                  <p className="mb-2 text-xs text-amber-700">
+                    Η καταγραφή δεν περιλαμβάνει πλήρες πριν/μετά. Νέες
+                    ενημερώσεις αποθηκεύουν λεπτομερή diff.
+                  </p>
+                  <JsonBlock value={item.meta} empty="Χωρίς meta" />
+                </>
+              )}
+            </Field>
+          )}
+
+          {parsed.rest ? (
+            <Field label="Επιπλέον">
+              <JsonBlock value={parsed.rest} empty="—" />
+            </Field>
+          ) : null}
         </div>
       </aside>
     </div>
+  );
+}
+
+function ChangeDiffTable({ changes }: { changes: AuditChange[] }) {
+  if (changes.length === 0) {
+    return (
+      <p className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-4 text-center text-xs text-slate-500">
+        Δεν εντοπίστηκαν αλλαγές πεδίων (ίδια τιμή πριν και μετά).
+      </p>
+    );
+  }
+
+  return (
+    <div className="overflow-hidden rounded-xl border border-slate-200">
+      <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)] gap-px bg-slate-200 text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+        <div className="bg-slate-50 px-2.5 py-2">Πεδίο</div>
+        <div className="bg-rose-50 px-2.5 py-2 text-rose-700">Πριν</div>
+        <div className="bg-emerald-50 px-2.5 py-2 text-emerald-800">Μετά</div>
+      </div>
+      <ul className="divide-y divide-slate-100">
+        {changes.map((change) => (
+          <li
+            key={change.path}
+            className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)] gap-0 text-xs"
+          >
+            <div className="bg-white px-2.5 py-2.5">
+              <p className="font-medium text-ink-900">
+                {fieldLabel(change.path)}
+              </p>
+              <p className="mt-0.5 font-mono text-[10px] text-slate-400">
+                {change.path}
+              </p>
+            </div>
+            <div className="bg-rose-50/40 px-2.5 py-2.5">
+              <p className="break-words font-mono text-[11px] leading-relaxed text-rose-900">
+                {formatMetaValue(change.before)}
+              </p>
+            </div>
+            <div className="bg-emerald-50/40 px-2.5 py-2.5">
+              <p className="break-words font-mono text-[11px] leading-relaxed text-emerald-950">
+                {formatMetaValue(change.after)}
+              </p>
+            </div>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+function JsonBlock({
+  value,
+  empty,
+  tone,
+}: {
+  value: unknown;
+  empty: string;
+  tone?: "rose" | "emerald";
+}) {
+  if (value == null) {
+    return <p className="text-xs text-slate-400">{empty}</p>;
+  }
+  const ring =
+    tone === "rose"
+      ? "ring-1 ring-rose-200"
+      : tone === "emerald"
+        ? "ring-1 ring-emerald-200"
+        : "";
+  return (
+    <pre
+      className={cn(
+        "max-h-96 overflow-auto rounded-xl bg-slate-950 p-3 font-mono text-[11px] leading-relaxed text-slate-200",
+        ring,
+      )}
+    >
+      {JSON.stringify(value, null, 2)}
+    </pre>
   );
 }
 

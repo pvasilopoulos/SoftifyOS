@@ -4,6 +4,7 @@ import { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/server/db";
 import { getSession } from "@/platform/auth/session";
 import { writeAuditEvent } from "@/platform/tenancy/audit";
+import { buildChangeMeta } from "@/platform/tenancy/audit-diff";
 import { getErrorMessage } from "@/shared/lib/safe";
 import { toNumber } from "@/modules/sales/invoice-utils";
 import { productUpdateSchema } from "@/modules/master-data/schemas";
@@ -222,13 +223,32 @@ export async function PATCH(
       },
     });
 
+    const afterRecord: Record<string, unknown> = {
+      id: updated.id,
+      sku: updated.sku,
+      barcode: updated.barcode,
+      name: updated.name,
+      unit: updated.unit,
+      unitId: updated.unitId,
+      vatRate: toNumber(updated.vatRate),
+      price: toNumber(updated.price),
+      notes: updated.notes,
+      status: updated.status,
+      trackInventory: updated.trackInventory,
+      customFields: updated.customFields,
+    };
+
     await writeAuditEvent({
       tenantId: session.tenantId,
       userId: session.sub,
       action: "product.update",
       entity: "product",
       entityId: updated.id,
-      meta: { sku: updated.sku },
+      meta: buildChangeMeta({
+        before: previous,
+        after: afterRecord,
+        extra: { sku: updated.sku },
+      }),
     });
 
     await dispatchScriptEvent(prisma, {
