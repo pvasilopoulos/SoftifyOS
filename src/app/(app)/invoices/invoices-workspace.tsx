@@ -23,8 +23,8 @@ import {
 } from "@/modules/entity-views/dynamic-ui";
 import { ENTITY_REGISTRY } from "@/modules/entity-views/registry";
 import {
-  matchesFilters,
-  sortRows,
+  applyListConfig,
+  normalizeListConfig,
   type ListViewConfig,
 } from "@/modules/entity-views/types";
 
@@ -142,22 +142,17 @@ export function InvoicesWorkspace({
 
   const selectedSet = useMemo(() => new Set(selectedIds), [selectedIds]);
   const activeView = listViews.find((v) => v.id === viewId) ?? defaultView;
-  const config = activeView?.config;
-  const useDynamic = Boolean(config?.columns?.length);
+  const config = useMemo(
+    () => normalizeListConfig(activeView?.config),
+    [activeView],
+  );
+  const useDynamic = Boolean(config.columns?.length);
   const builtins = ENTITY_REGISTRY.INVOICES.builtins;
 
   const visibleItems = useMemo(() => {
-    const filtered = !config?.filters?.length
-      ? items
-      : items.filter((row) =>
-          matchesFilters(
-            row as unknown as Record<string, unknown>,
-            config.filters,
-          ),
-        );
-    return sortRows(
-      filtered as unknown as Array<Record<string, unknown>>,
-      config?.sort,
+    return applyListConfig(
+      items as unknown as Array<Record<string, unknown>>,
+      config,
     ) as unknown as InvoiceListItem[];
   }, [items, config]);
 

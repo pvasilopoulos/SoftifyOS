@@ -2,17 +2,86 @@ import type { EntityModule, Prisma } from "@/generated/prisma/client";
 import { ENTITY_REGISTRY } from "./registry";
 import type { FormViewConfig, ListViewConfig } from "./types";
 import { fxId } from "./form-experience-types";
+import { emptyListConfig, lxId } from "./list-experience-types";
 
 export type { FormViewConfig, ListViewConfig };
 
 function defaultListConfig(entity: EntityModule): ListViewConfig {
   const builtins = ENTITY_REGISTRY[entity].builtins.filter((b) => b.listable);
   const preferred = builtins.slice(0, 6);
+  const base = emptyListConfig();
   return {
-    columns: preferred.map((b) => ({ key: b.key, source: "system" as const })),
-    filters: [],
-    sort: { key: "createdAt", source: "system", dir: "desc" },
+    ...base,
+    mode: entity === "PRODUCTS" || entity === "GIFT_CARDS" ? "cards" : "browse",
+    page: {
+      ...base.page,
+      density: "comfortable",
+      rowClick: "navigate",
+      peekFormCode: entity === "CUSTOMERS" ? "quick" : null,
+      emptyTitle: `Δεν βρέθηκαν ${ENTITY_REGISTRY[entity].label.toLowerCase()}`,
+      emptyCta: "navigate_new",
+    },
+    columns: preferred.map((b, i) => ({
+      id: lxId("col"),
+      key: b.key,
+      source: "system" as const,
+      pin: i === 0 ? ("left" as const) : ("none" as const),
+      align:
+        b.type === "money" || b.type === "number"
+          ? ("end" as const)
+          : ("start" as const),
+      format:
+        b.type === "money"
+          ? ("money" as const)
+          : b.type === "date"
+            ? ("date" as const)
+            : b.type === "badge" || b.type === "select"
+              ? ("badge" as const)
+              : b.type === "boolean"
+                ? ("boolean" as const)
+                : ("default" as const),
+      sortable: true,
+      filterable: b.filterable !== false,
+      truncate: true,
+    })),
+    sort: { id: "sort_primary", key: "createdAt", source: "system", dir: "desc" },
     pageSize: 50,
+    rowActions: [
+      { id: "open", label: "Άνοιγμα", type: "navigate" },
+      ...(entity === "CUSTOMERS"
+        ? [
+            {
+              id: "peek",
+              label: "Γρήγορη προβολή",
+              type: "form_peek" as const,
+              formCode: "quick",
+            },
+          ]
+        : []),
+    ],
+    bulkActions:
+      entity === "CUSTOMERS" || entity === "PRODUCTS"
+        ? [{ id: "export", label: "Εξαγωγή CSV", type: "export_csv" as const }]
+        : [],
+    rules:
+      entity === "CUSTOMERS"
+        ? [
+            {
+              id: lxId("rule"),
+              when: {
+                source: "system",
+                key: "status",
+                op: "eq",
+                value: "INACTIVE",
+              },
+              then: {
+                action: "row_tone",
+                tone: "muted",
+                badge: "Ανενεργός",
+              },
+            },
+          ]
+        : [],
   };
 }
 

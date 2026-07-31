@@ -1,23 +1,25 @@
-export type ListViewConfig = {
-  columns: Array<{
-    key: string;
-    source: "system" | "custom";
-    /** Optional display override */
-    label?: string;
-  }>;
-  filters: Array<{
-    key: string;
-    source: "system" | "custom";
-    op: "eq" | "neq" | "contains" | "gt" | "gte" | "lt" | "lte" | "empty" | "not_empty";
-    value: string | number | boolean | null;
-  }>;
-  sort?: {
-    key: string;
-    source: "system" | "custom";
-    dir: "asc" | "desc";
-  };
-  pageSize?: number;
-};
+export type {
+  ListViewConfig,
+  ListViewConfigV1,
+  ListColumn,
+  ListFilter,
+  ListSort,
+  ListMode,
+  ListLifecycle,
+  ListDensity,
+  ListRowAction,
+  ListBulkAction,
+  ListRule,
+} from "./list-experience-types";
+
+export {
+  emptyListConfig,
+  normalizeListConfig,
+  migrateListV1ToV2,
+  visibleColumns,
+  primarySort,
+  lxId,
+} from "./list-experience-types";
 
 export type {
   FormViewConfig,
@@ -39,7 +41,9 @@ export {
 } from "./form-experience-types";
 
 import type { FormViewConfig } from "./form-experience-types";
+import type { ListViewConfig } from "./list-experience-types";
 import { normalizeFormConfig, walkFormFields } from "./form-experience-types";
+import { normalizeListConfig, primarySort } from "./list-experience-types";
 import { collectFormRequiredErrors } from "./form-rules";
 
 export const FILTER_OP_LABELS: Record<
@@ -72,13 +76,7 @@ export function parseCustomFields(raw: unknown): CustomFieldsMap {
 }
 
 export function parseListConfig(raw: unknown): ListViewConfig {
-  const c = raw as Partial<ListViewConfig>;
-  return {
-    columns: Array.isArray(c.columns) ? c.columns : [],
-    filters: Array.isArray(c.filters) ? c.filters : [],
-    sort: c.sort,
-    pageSize: c.pageSize ?? 50,
-  };
+  return normalizeListConfig(raw);
 }
 
 export function parseFormConfig(raw: unknown): FormViewConfig {
@@ -175,11 +173,12 @@ export function sortRows<T extends Record<string, unknown>>(
   rows: T[],
   sort?: ListViewConfig["sort"],
 ): T[] {
-  if (!sort?.key) return rows;
-  const dir = sort.dir === "asc" ? 1 : -1;
+  const s = sort ?? undefined;
+  if (!s?.key) return rows;
+  const dir = s.dir === "asc" ? 1 : -1;
   return [...rows].sort((a, b) => {
-    const av = readRowValue(a, sort.key, sort.source);
-    const bv = readRowValue(b, sort.key, sort.source);
+    const av = readRowValue(a, s.key, s.source);
+    const bv = readRowValue(b, s.key, s.source);
     if (av == null && bv == null) return 0;
     if (av == null) return 1;
     if (bv == null) return -1;
@@ -190,6 +189,17 @@ export function sortRows<T extends Record<string, unknown>>(
     }
     return String(av).localeCompare(String(bv), "el") * dir;
   });
+}
+
+/** Apply list config filters + primary sort */
+export function applyListConfig<T extends Record<string, unknown>>(
+  rows: T[],
+  config: ListViewConfig,
+): T[] {
+  const filtered = !config.filters?.length
+    ? rows
+    : rows.filter((row) => matchesFilters(row, config.filters));
+  return sortRows(filtered, primarySort(config));
 }
 
 export function collectRequiredErrors(

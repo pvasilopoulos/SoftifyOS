@@ -1,29 +1,18 @@
 "use client";
 
-import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useMemo, useState, useTransition } from "react";
-import { Pencil, Search } from "lucide-react";
+import { Search } from "lucide-react";
 import { Badge } from "@/shared/ui/badge";
 import { Button } from "@/shared/ui/button";
-import { cn } from "@/shared/lib/cn";
-import { formatEUR } from "@/modules/sales/invoice-utils";
-import {
-  orderStatusLabel,
-  orderStatusTone,
-  type OrderStatusKey,
-} from "@/modules/sales/order-utils";
 import { ENTITY_REGISTRY } from "@/modules/entity-views/registry";
-import {
-  DynamicListCells,
-  DynamicListHeader,
-  type CustomFieldDef,
-} from "@/modules/entity-views/dynamic-ui";
+import type { CustomFieldDef } from "@/modules/entity-views/dynamic-ui";
 import { ViewSwitcher } from "@/modules/entity-views/view-switcher";
 import {
-  matchesFilters,
-  sortRows,
+  normalizeListConfig,
   type ListViewConfig,
 } from "@/modules/entity-views/types";
+import { ListExperienceRenderer } from "@/modules/entity-views/list-experience-renderer";
 
 export type OrderListItem = {
   id: string;
@@ -76,6 +65,7 @@ export function OrdersClient({
   listViews?: ListViewOpt[];
   customFields?: CustomFieldDef[];
 }) {
+  const router = useRouter();
   const defaultView =
     listViews.find((v) => v.isDefault) ?? listViews[0] ?? null;
   const [viewId, setViewId] = useState(defaultView?.id ?? "");
@@ -87,28 +77,24 @@ export function OrdersClient({
   const [isPending, startTransition] = useTransition();
 
   const activeView = listViews.find((v) => v.id === viewId) ?? defaultView;
-  const config = activeView?.config;
-  const useDynamic = Boolean(config?.columns?.length);
+  const config = useMemo(() => {
+    const normalized = normalizeListConfig(activeView?.config);
+    if (!normalized.page?.emptyTitle) {
+      return {
+        ...normalized,
+        page: { ...normalized.page, emptyTitle: emptyLabel },
+      };
+    }
+    return normalized;
+  }, [activeView, emptyLabel]);
   const builtins = ENTITY_REGISTRY[entity].builtins;
-
-  const visibleItems = useMemo(() => {
-    const filtered = !config?.filters?.length
-      ? items
-      : items.filter((row) =>
-          matchesFilters(
-            row as unknown as Record<string, unknown>,
-            config.filters,
-          ),
-        );
-    return sortRows(
-      filtered as unknown as Array<Record<string, unknown>>,
-      config?.sort,
-    ) as unknown as OrderListItem[];
-  }, [items, config]);
 
   async function search() {
     setError(null);
-    const params = new URLSearchParams({ limit: "50", kind });
+    const params = new URLSearchParams({
+      limit: String(config.pageSize ?? 50),
+      kind,
+    });
     if (q.trim()) params.set("q", q.trim());
     const res = await fetch(`/api/orders?${params}`, { cache: "no-store" });
     const data = (await res.json()) as ListResponse;
@@ -126,7 +112,7 @@ export function OrdersClient({
   async function loadMore() {
     if (!nextCursor) return;
     const params = new URLSearchParams({
-      limit: "50",
+      limit: String(config.pageSize ?? 50),
       cursor: nextCursor,
       kind,
     });
@@ -159,11 +145,16 @@ export function OrdersClient({
             className="w-full bg-transparent text-sm outline-none"
           />
         </label>
-        <ViewSwitcher
-          views={listViews}
-          value={viewId}
-          onChange={setViewId}
-        />
+        {listViews.length > 0 ? (
+          <ViewSwitcher
+            views={listViews}
+            value={viewId}
+            onChange={(id) => {
+              setViewId(id);
+              void search();
+            }}
+          />
+        ) : null}
         <Button
           variant="secondary"
           onClick={() => void search()}
@@ -180,99 +171,20 @@ export function OrdersClient({
         </p>
       ) : null}
 
-      <section className="soft-panel overflow-hidden">
-        {useDynamic && config ? (
-          <DynamicListHeader
-            columns={config.columns}
-            builtins={builtins}
-            customDefs={customFields}
-          />
-        ) : (
-          <div className="hidden border-b border-slate-100 px-4 py-2.5 text-xs font-medium uppercase tracking-wide text-slate-400 md:grid md:grid-cols-[0.9fr_1.3fr_0.7fr_0.6fr_0.7fr_auto] md:gap-3">
-            <span>Αριθμός</span>
-            <span>Πελάτης</span>
-            <span className="text-right">Ποσό</span>
-            <span>Γραμμές</span>
-            <span>Κατάσταση</span>
-            <span />
-          </div>
-        )}
-        <ul className="divide-y divide-slate-100">
-          {visibleItems.map((o) => {
-            const status = o.status as OrderStatusKey;
-            if (useDynamic && config) {
-              return (
-                <li key={o.id} className="soft-row">
-                  <Link
-                    href={`${detailBasePath}/${o.id}`}
-                    className="flex w-full items-center gap-3 px-4 py-3 hover:bg-slate-50/80"
-                  >
-                    <DynamicListCells
-                      columns={config.columns}
-                      builtins={builtins}
-                      customDefs={customFields}
-                      row={o as unknown as Record<string, unknown>}
-                    />
-                  </Link>
-                </li>
-              );
-            }
-            return (
-              <li key={o.id} className="soft-row">
-                <div className="grid grid-cols-[1fr_auto] gap-3 px-4 py-3 md:grid-cols-[0.9fr_1.3fr_0.7fr_0.6fr_0.7fr_auto] md:items-center">
-                  <Link href={`${detailBasePath}/${o.id}`} className="min-w-0">
-                    <p className="text-sm font-semibold text-ink-950">
-                      {o.number}
-                    </p>
-                    <p className="text-xs text-slate-500 md:hidden">
-                      {o.customerName}
-                    </p>
-                  </Link>
-                  <Link
-                    href={`${detailBasePath}/${o.id}`}
-                    className="hidden min-w-0 md:block"
-                  >
-                    <p className="truncate text-sm font-medium text-ink-900">
-                      {o.customerName}
-                    </p>
-                    <p className="truncate text-xs text-slate-500">
-                      {o.branchName || o.customerCode}
-                    </p>
-                  </Link>
-                  <p className="text-sm font-medium md:text-right">
-                    {formatEUR(o.total)}
-                  </p>
-                  <p className="hidden text-sm text-slate-500 md:block">
-                    {o.lineCount}
-                  </p>
-                  <div>
-                    <Badge tone={orderStatusTone[status] ?? "slate"}>
-                      {orderStatusLabel[status] ?? o.status}
-                    </Badge>
-                  </div>
-                  <Link
-                    href={`${detailBasePath}/${o.id}`}
-                    className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-600 hover:border-teal-200 hover:bg-teal-50 hover:text-teal-700 md:hidden"
-                    aria-label={`Άνοιγμα ${o.number}`}
-                  >
-                    <Pencil size={15} />
-                  </Link>
-                </div>
-              </li>
-            );
-          })}
-          {visibleItems.length === 0 ? (
-            <li className="px-4 py-8 text-center text-sm text-slate-500">
-              {emptyLabel}
-            </li>
-          ) : null}
-        </ul>
-      </section>
+      <ListExperienceRenderer
+        config={config}
+        builtins={builtins}
+        customDefs={customFields}
+        rows={items as unknown as Array<Record<string, unknown> & { id: string }>}
+        hrefForRow={(row) => `${detailBasePath}/${row.id}`}
+        onNavigateNew={() => router.push(`${detailBasePath}/new`)}
+        emptyActionLabel="Νέα εγγραφή"
+      />
 
       {nextCursor ? (
         <Button
           variant="secondary"
-          className={cn("w-full sm:w-auto")}
+          className="w-full sm:w-auto"
           disabled={isPending}
           onClick={() => void loadMore()}
         >

@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { normalizeFormConfig } from "./form-experience-types";
+import { normalizeListConfig } from "./list-experience-types";
 
 export const entityModuleSchema = z.enum([
   "CUSTOMERS",
@@ -48,28 +49,36 @@ const fieldRefSchema = z.object({
   label: z.string().trim().max(120).optional(),
 });
 
-export const listViewConfigSchema = z.object({
-  columns: z.array(fieldRefSchema).min(1).max(30),
-  filters: z
-    .array(
-      z.object({
-        key: z.string().min(1).max(60),
-        source: z.enum(["system", "custom"]),
-        op: z.enum(["eq", "neq", "contains", "gt", "gte", "lt", "lte", "empty", "not_empty"]).default("eq"),
-        value: z.union([z.string(), z.number(), z.boolean(), z.null()]),
-      }),
-    )
-    .max(20)
-    .default([]),
-  sort: z
-    .object({
-      key: z.string().min(1),
-      source: z.enum(["system", "custom"]).default("system"),
-      dir: z.enum(["asc", "desc"]).default("desc"),
-    })
-    .optional(),
-  pageSize: z.coerce.number().int().min(10).max(100).optional().default(50),
-});
+export const listViewConfigSchema = z.preprocess(
+  (val) => normalizeListConfig(val),
+  z.object({
+    schemaVersion: z.literal(2),
+    mode: z
+      .enum(["browse", "select", "compact", "peek", "cards"])
+      .optional()
+      .default("browse"),
+    lifecycle: z.enum(["draft", "published"]).optional().default("published"),
+    page: z
+      .object({
+        density: z.enum(["compact", "comfortable", "detailed"]).optional(),
+        peekFormCode: z.string().nullable().optional(),
+        rowClick: z.enum(["navigate", "peek", "none"]).optional(),
+        emptyTitle: z.string().optional(),
+        emptyDescription: z.string().optional(),
+        emptyCta: z.enum(["form_quick", "navigate_new", "none"]).optional(),
+        showSearch: z.boolean().optional(),
+      })
+      .optional(),
+    columns: z.array(z.record(z.string(), z.unknown())).min(1).max(30),
+    filters: z.array(z.record(z.string(), z.unknown())).max(20).default([]),
+    sort: z.record(z.string(), z.unknown()).optional(),
+    sorts: z.array(z.record(z.string(), z.unknown())).max(5).optional(),
+    pageSize: z.coerce.number().int().min(10).max(100).optional().default(50),
+    rowActions: z.array(z.record(z.string(), z.unknown())).max(20).optional(),
+    bulkActions: z.array(z.record(z.string(), z.unknown())).max(20).optional(),
+    rules: z.array(z.record(z.string(), z.unknown())).max(80).optional(),
+  }),
+);
 
 /** Accepts v1 sections or v2 page blocks; normalizes to Form Experience v2 */
 export const formViewConfigSchema = z.preprocess(

@@ -1,23 +1,18 @@
 "use client";
 
-import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useMemo, useState, useTransition } from "react";
 import { Search } from "lucide-react";
 import { Badge } from "@/shared/ui/badge";
 import { Button } from "@/shared/ui/button";
-import { cn } from "@/shared/lib/cn";
 import { ENTITY_REGISTRY } from "@/modules/entity-views/registry";
-import {
-  DynamicListCells,
-  DynamicListHeader,
-  type CustomFieldDef,
-} from "@/modules/entity-views/dynamic-ui";
+import type { CustomFieldDef } from "@/modules/entity-views/dynamic-ui";
 import { ViewSwitcher } from "@/modules/entity-views/view-switcher";
 import {
-  matchesFilters,
-  sortRows,
+  normalizeListConfig,
   type ListViewConfig,
 } from "@/modules/entity-views/types";
+import { ListExperienceRenderer } from "@/modules/entity-views/list-experience-renderer";
 
 export type ProductListItem = {
   id: string;
@@ -59,6 +54,7 @@ export function ProductsClient({
   listViews: ListViewOpt[];
   customFields: CustomFieldDef[];
 }) {
+  const router = useRouter();
   const defaultView =
     listViews.find((v) => v.isDefault) ?? listViews[0] ?? null;
   const [viewId, setViewId] = useState(defaultView?.id ?? "");
@@ -70,32 +66,21 @@ export function ProductsClient({
   const [isPending, startTransition] = useTransition();
 
   const activeView = listViews.find((v) => v.id === viewId) ?? defaultView;
-  const config = activeView?.config;
+  const config = useMemo(
+    () => normalizeListConfig(activeView?.config),
+    [activeView],
+  );
   const builtins = ENTITY_REGISTRY.PRODUCTS.builtins;
-
-  const visibleItems = useMemo(() => {
-    const filtered = !config?.filters?.length
-      ? items
-      : items.filter((row) =>
-          matchesFilters(
-            row as unknown as Record<string, unknown>,
-            config.filters,
-          ),
-        );
-    return sortRows(
-      filtered as unknown as Array<Record<string, unknown>>,
-      config?.sort,
-    ) as unknown as ProductListItem[];
-  }, [items, config]);
 
   async function search(nextViewId = viewId) {
     setError(null);
     const view = listViews.find((v) => v.id === nextViewId);
-    const statusFilter = view?.config.filters.find(
+    const cfg = normalizeListConfig(view?.config);
+    const statusFilter = cfg.filters.find(
       (f) => f.source === "system" && f.key === "status" && f.op === "eq",
     );
     const params = new URLSearchParams({
-      limit: String(view?.config.pageSize ?? config?.pageSize ?? 50),
+      limit: String(cfg.pageSize ?? 50),
     });
     if (q.trim()) params.set("q", q.trim());
     if (statusFilter?.value) params.set("status", String(statusFilter.value));
@@ -114,13 +99,11 @@ export function ProductsClient({
 
   async function loadMore() {
     if (!nextCursor) return;
-    const view = listViews.find((v) => v.id === viewId);
-    const statusFilter = view?.config.filters.find(
-      (f) => f.source === "system" && f.key === "status" && f.op === "eq",
-    );
-    const params = new URLSearchParams({ limit: "50", cursor: nextCursor });
+    const params = new URLSearchParams({
+      limit: String(config.pageSize ?? 50),
+      cursor: nextCursor,
+    });
     if (q.trim()) params.set("q", q.trim());
-    if (statusFilter?.value) params.set("status", String(statusFilter.value));
     const res = await fetch(`/api/products?${params}`, { cache: "no-store" });
     const data = (await res.json()) as ListResponse;
     if (!res.ok) {
@@ -134,15 +117,6 @@ export function ProductsClient({
     });
   }
 
-  const columns = config?.columns?.length
-    ? config.columns
-    : [
-        { key: "sku", source: "system" as const },
-        { key: "name", source: "system" as const },
-        { key: "price", source: "system" as const },
-        { key: "status", source: "system" as const },
-      ];
-
   return (
     <div className="space-y-3">
       <div className="flex flex-col gap-2 lg:flex-row lg:items-center">
@@ -154,7 +128,7 @@ export function ProductsClient({
             onKeyDown={(e) => {
               if (e.key === "Enter") void search();
             }}
-            placeholder="Αναζήτηση ονόματος ή SKU..."
+            placeholder="Αναζήτηση SKU ή ονόματος..."
             className="w-full bg-transparent text-sm outline-none"
           />
         </label>
@@ -182,45 +156,26 @@ export function ProductsClient({
         </p>
       ) : null}
 
-      <section className="soft-panel overflow-hidden">
-        <DynamicListHeader
-          columns={columns}
-          builtins={builtins}
-          customDefs={customFields}
-        />
-        <ul className="divide-y divide-slate-100">
-          {visibleItems.map((p) => (
-            <li key={p.id} className="soft-row">
-              <Link
-                href={`/products/${p.id}`}
-                className="flex w-full items-center gap-3 px-4 py-3 hover:bg-slate-50/80"
-              >
-                <DynamicListCells
-                  columns={columns}
-                  builtins={builtins}
-                  customDefs={customFields}
-                  row={p as unknown as Record<string, unknown>}
-                />
-              </Link>
-            </li>
-          ))}
-          {visibleItems.length === 0 ? (
-            <li className="px-4 py-8 text-center text-sm text-slate-500">
-              Δεν βρέθηκαν προϊόντα
-            </li>
-          ) : null}
-        </ul>
-      </section>
+      <ListExperienceRenderer
+        config={config}
+        builtins={builtins}
+        customDefs={customFields}
+        rows={items as unknown as Array<Record<string, unknown> & { id: string }>}
+        hrefForRow={(row) => `/products/${row.id}`}
+        onNavigateNew={() => router.push("/products/new")}
+        emptyActionLabel="Νέο προϊόν"
+      />
 
       {nextCursor ? (
-        <Button
-          variant="secondary"
-          className={cn("w-full sm:w-auto")}
-          disabled={isPending}
-          onClick={() => void loadMore()}
-        >
-          Περισσότερα
-        </Button>
+        <div className="flex justify-center">
+          <Button
+            variant="secondary"
+            disabled={isPending}
+            onClick={() => void loadMore()}
+          >
+            Περισσότερα
+          </Button>
+        </div>
       ) : null}
     </div>
   );

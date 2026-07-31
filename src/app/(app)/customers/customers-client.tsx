@@ -1,23 +1,20 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useMemo, useState, useTransition } from "react";
 import { Plus, Search } from "lucide-react";
 import { Badge } from "@/shared/ui/badge";
 import { Button } from "@/shared/ui/button";
 import { ENTITY_REGISTRY } from "@/modules/entity-views/registry";
-import {
-  DynamicListCells,
-  DynamicListHeader,
-  type CustomFieldDef,
-} from "@/modules/entity-views/dynamic-ui";
+import type { CustomFieldDef } from "@/modules/entity-views/dynamic-ui";
 import { ViewSwitcher } from "@/modules/entity-views/view-switcher";
 import {
-  matchesFilters,
-  sortRows,
+  normalizeListConfig,
   type FormViewConfig,
   type ListViewConfig,
 } from "@/modules/entity-views/types";
+import { ListExperienceRenderer } from "@/modules/entity-views/list-experience-renderer";
 import { CustomerQuickDrawer } from "./customer-quick-drawer";
 
 export type CustomerListItem = {
@@ -71,6 +68,7 @@ export function CustomersClient({
   customFields: CustomFieldDef[];
   formViews?: FormViewOpt[];
 }) {
+  const router = useRouter();
   const defaultView =
     listViews.find((v) => v.isDefault) ?? listViews[0] ?? null;
   const [viewId, setViewId] = useState(defaultView?.id ?? "");
@@ -83,32 +81,21 @@ export function CustomersClient({
   const [quickOpen, setQuickOpen] = useState(false);
 
   const activeView = listViews.find((v) => v.id === viewId) ?? defaultView;
-  const config = activeView?.config;
+  const config = useMemo(
+    () => normalizeListConfig(activeView?.config),
+    [activeView],
+  );
   const builtins = ENTITY_REGISTRY.CUSTOMERS.builtins;
-
-  const visibleItems = useMemo(() => {
-    const filtered = !config?.filters?.length
-      ? items
-      : items.filter((row) =>
-          matchesFilters(
-            row as unknown as Record<string, unknown>,
-            config.filters,
-          ),
-        );
-    return sortRows(
-      filtered as unknown as Array<Record<string, unknown>>,
-      config?.sort,
-    ) as unknown as CustomerListItem[];
-  }, [items, config]);
 
   async function search(nextViewId = viewId) {
     setError(null);
     const view = listViews.find((v) => v.id === nextViewId);
-    const statusFilter = view?.config.filters.find(
+    const cfg = normalizeListConfig(view?.config);
+    const statusFilter = cfg.filters.find(
       (f) => f.source === "system" && f.key === "status" && f.op === "eq",
     );
     const params = new URLSearchParams({
-      limit: String(view?.config.pageSize ?? config?.pageSize ?? 50),
+      limit: String(cfg.pageSize ?? 50),
     });
     if (q.trim()) params.set("q", q.trim());
     if (statusFilter?.value) params.set("status", String(statusFilter.value));
@@ -127,16 +114,11 @@ export function CustomersClient({
 
   async function loadMore() {
     if (!nextCursor) return;
-    const view = listViews.find((v) => v.id === viewId);
-    const statusFilter = view?.config.filters.find(
-      (f) => f.source === "system" && f.key === "status" && f.op === "eq",
-    );
     const params = new URLSearchParams({
-      limit: String(view?.config.pageSize ?? config?.pageSize ?? 50),
+      limit: String(config.pageSize ?? 50),
       cursor: nextCursor,
     });
     if (q.trim()) params.set("q", q.trim());
-    if (statusFilter?.value) params.set("status", String(statusFilter.value));
     const res = await fetch(`/api/customers?${params}`, { cache: "no-store" });
     const data = (await res.json()) as ListResponse;
     if (!res.ok) {
@@ -150,30 +132,29 @@ export function CustomersClient({
     });
   }
 
-  const columns = config?.columns?.length
-    ? config.columns
-    : [
-        { key: "code", source: "system" as const },
-        { key: "name", source: "system" as const },
-        { key: "vatNumber", source: "system" as const },
-        { key: "status", source: "system" as const },
-      ];
+  const rows = items as unknown as Array<
+    Record<string, unknown> & { id: string }
+  >;
 
   return (
     <div className="space-y-3">
       <div className="flex flex-col gap-2 lg:flex-row lg:items-center">
-        <label className="soft-surface flex flex-1 items-center gap-2 px-3 py-2.5">
-          <Search size={16} className="text-slate-400" />
-          <input
-            value={q}
-            onChange={(e) => setQ(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") void search();
-            }}
-            placeholder="Αναζήτηση ονόματος, κωδικού ή ΑΦΜ..."
-            className="w-full bg-transparent text-sm outline-none"
-          />
-        </label>
+        {config.page?.showSearch !== false ? (
+          <label className="soft-surface flex flex-1 items-center gap-2 px-3 py-2.5">
+            <Search size={16} className="text-slate-400" />
+            <input
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") void search();
+              }}
+              placeholder="Αναζήτηση ονόματος, κωδικού ή ΑΦΜ..."
+              className="w-full bg-transparent text-sm outline-none"
+            />
+          </label>
+        ) : (
+          <div className="flex-1" />
+        )}
         <ViewSwitcher
           views={listViews}
           value={viewId}
@@ -203,35 +184,17 @@ export function CustomersClient({
         </p>
       ) : null}
 
-      <section className="soft-panel overflow-hidden">
-        <DynamicListHeader
-          columns={columns}
-          builtins={builtins}
-          customDefs={customFields}
-        />
-        <ul className="divide-y divide-slate-100">
-          {visibleItems.map((c) => (
-            <li key={c.id} className="soft-row">
-              <Link
-                href={`/customers/${c.id}`}
-                className="flex w-full items-center gap-3 px-4 py-3 hover:bg-slate-50/80"
-              >
-                <DynamicListCells
-                  columns={columns}
-                  builtins={builtins}
-                  customDefs={customFields}
-                  row={c as unknown as Record<string, unknown>}
-                />
-              </Link>
-            </li>
-          ))}
-          {visibleItems.length === 0 ? (
-            <li className="px-4 py-10 text-center text-sm text-slate-500">
-              Δεν βρέθηκαν πελάτες για αυτή την προβολή.
-            </li>
-          ) : null}
-        </ul>
-      </section>
+      <ListExperienceRenderer
+        config={config}
+        builtins={builtins}
+        customDefs={customFields}
+        rows={rows}
+        hrefForRow={(row) => `/customers/${row.id}`}
+        onPeek={() => setQuickOpen(true)}
+        onQuickCreate={() => setQuickOpen(true)}
+        onNavigateNew={() => router.push("/customers/new")}
+        emptyActionLabel="Νέος πελάτης"
+      />
 
       {nextCursor ? (
         <div className="flex justify-center">
