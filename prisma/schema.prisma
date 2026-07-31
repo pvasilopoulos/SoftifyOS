@@ -1157,6 +1157,28 @@ model TenantSettings {
   menuJson  Json?
   /// Default expand state for sidebar nav folders (user localStorage can override)
   navGroupsDefaultExpanded Boolean @default(true)
+
+  /// Επωνυμία / εμπορική επωνυμία (override του Tenant.name για παραστατικά)
+  legalName   String?
+  tradeName   String?
+  vatNumber   String?
+  taxOffice   String?
+  address     String?
+  city        String?
+  postalCode  String?
+  country     String  @default("GR")
+  phone       String?
+  email       String?
+  website     String?
+  logoUrl     String?
+  currency    String  @default("EUR")
+  locale      String  @default("el-GR")
+  timezone    String  @default("Europe/Athens")
+  /// Όταν true, μη-OWNER βλέπουν banner συντήρησης
+  maintenanceMode Boolean @default(false)
+  /// Ελεύθερο JSON για integrations (webhooks, keys metadata)
+  integrationsJson Json?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 

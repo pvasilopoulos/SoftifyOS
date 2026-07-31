@@ -20,12 +20,14 @@ export function AppShell({
   menuTree,
   menuAudience,
   navGroupsDefaultExpanded = true,
+  maintenanceMode = false,
   children,
 }: {
   session: SessionPayload;
   menuTree: MenuNodeConfig[];
   menuAudience?: MenuAudience;
   navGroupsDefaultExpanded?: boolean;
+  maintenanceMode?: boolean;
   children: React.ReactNode;
 }) {
   const [collapsed, setCollapsed] = useState(false);
@@ -75,6 +77,14 @@ export function AppShell({
           groups={groups}
         />
         <div className="flex min-w-0 flex-1 flex-col">
+          {maintenanceMode &&
+          session.role !== "OWNER" &&
+          session.role !== "ADMIN" ? (
+            <div className="border-b border-amber-200 bg-amber-50 px-4 py-2 text-center text-sm text-amber-900">
+              Το σύστημα βρίσκεται σε κατάσταση συντήρησης. Ορισμένες ενέργειες
+              μπορεί να είναι περιορισμένες.
+            </div>
+          ) : null}
           <Topbar
             session={session}
             onOpenCommand={() => startTransition(() => setCommandOpen(true))}
