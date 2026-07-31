@@ -948,7 +948,10 @@ model UserGroupRole {
 enum PrintPaperSize {
   A4
   A5
+  A3
+  LETTER
   RECEIPT_80
+  CUSTOM
 }
 
 enum PrintOrientation {

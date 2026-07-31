@@ -1,4 +1,6 @@
 /** Safe-ish HTML sanitize for admin-authored print templates */
+import { buildPageCss } from "./page-geometry";
+
 export function sanitizePrintHtml(input: string): string {
   let html = input;
   html = html.replace(/<\s*script[^>]*>[\s\S]*?<\s*\/\s*script\s*>/gi, "");
@@ -139,13 +141,27 @@ export function renderPrintTemplate(
   return out;
 }
 
-export function buildPrintDocument(html: string, css: string): string {
+export function buildPrintDocument(
+  html: string,
+  css: string,
+  page?: {
+    widthMm: number;
+    heightMm: number;
+    marginTopMm: number;
+    marginRightMm: number;
+    marginBottomMm: number;
+    marginLeftMm: number;
+  },
+): string {
   const safeHtml = sanitizePrintHtml(html);
   const safeCss = sanitizePrintCss(css);
-  return `<!DOCTYPE html><html lang="el"><head><meta charset="utf-8"/><style>
-@page { margin: 12mm; }
+  const pageCss = page
+    ? buildPageCss(page)
+    : `@page { margin: 12mm; }
 html, body { margin: 0; padding: 0; font-family: "Segoe UI", "Helvetica Neue", Arial, sans-serif; color: #0f172a; font-size: 12px; }
-* { box-sizing: border-box; }
+* { box-sizing: border-box; }`;
+  return `<!DOCTYPE html><html lang="el"><head><meta charset="utf-8"/><style>
+${pageCss}
 ${safeCss}
 </style></head><body>${safeHtml}</body></html>`;
 }

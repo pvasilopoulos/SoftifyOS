@@ -5,6 +5,13 @@ import {
   DEFAULT_RECEIPT_CSS,
   DEFAULT_RECEIPT_HTML,
 } from "./html-presets";
+import {
+  DEFAULT_PAGE_SETTINGS,
+  normalizePageSettings,
+  type PrintPageSettings,
+} from "./page-geometry";
+
+export type { PrintPageSettings };
 
 export type PrintBlockType =
   | "header"
@@ -37,6 +44,8 @@ export type PrintFormBodyV2 = {
   engine: "html" | "blocks";
   html: string;
   css: string;
+  /** Page box (mm) — drives @page + preview */
+  page?: PrintPageSettings;
   /** Optional fallback / co-edit blocks */
   blocks?: PrintBlock[];
 };
@@ -62,6 +71,7 @@ export const DEFAULT_INVOICE_PRINT_BODY: PrintFormBodyV2 = {
   engine: "html",
   html: DEFAULT_INVOICE_HTML,
   css: DEFAULT_INVOICE_CSS,
+  page: { ...DEFAULT_PAGE_SETTINGS },
   blocks: DEFAULT_BLOCKS,
 };
 
@@ -70,6 +80,14 @@ export const DEFAULT_RECEIPT_PRINT_BODY: PrintFormBodyV2 = {
   engine: "html",
   html: DEFAULT_RECEIPT_HTML,
   css: DEFAULT_RECEIPT_CSS,
+  page: {
+    widthMm: 80,
+    heightMm: 297,
+    marginTopMm: 4,
+    marginRightMm: 4,
+    marginBottomMm: 4,
+    marginLeftMm: 4,
+  },
   blocks: [
     { id: "hdr", type: "header" },
     { id: "meta", type: "meta" },
@@ -82,6 +100,11 @@ export const DEFAULT_RECEIPT_PRINT_BODY: PrintFormBodyV2 = {
     },
   ],
 };
+
+function parsePage(raw: unknown): PrintPageSettings | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  return normalizePageSettings(raw as Partial<PrintPageSettings>);
+}
 
 export function isHtmlBody(
   body: PrintFormBody,
@@ -102,6 +125,7 @@ export function parseBodyJson(raw: unknown): PrintFormBody {
   if (body.version === 2) {
     const engine = body.engine === "blocks" ? "blocks" : "html";
     const blocks = Array.isArray(body.blocks) ? (body.blocks as PrintBlock[]) : [];
+    const page = parsePage(body.page);
     return {
       version: 2,
       engine,
@@ -110,6 +134,7 @@ export function parseBodyJson(raw: unknown): PrintFormBody {
           ? body.html
           : DEFAULT_INVOICE_HTML,
       css: typeof body.css === "string" ? body.css : DEFAULT_INVOICE_CSS,
+      ...(page ? { page } : {}),
       blocks: blocks.length ? blocks : DEFAULT_BLOCKS,
     };
   }
@@ -129,6 +154,7 @@ export function upgradeBodyToHtml(body: PrintFormBody): PrintFormBodyV2 {
       engine: "html",
       html: body.html || DEFAULT_INVOICE_HTML,
       css: body.css || DEFAULT_INVOICE_CSS,
+      page: body.page ? normalizePageSettings(body.page) : { ...DEFAULT_PAGE_SETTINGS },
       blocks: body.blocks?.length ? body.blocks : DEFAULT_BLOCKS,
     };
   }
@@ -143,6 +169,7 @@ export function upgradeBodyToHtml(body: PrintFormBody): PrintFormBodyV2 {
     engine: "html",
     html: DEFAULT_INVOICE_HTML,
     css: DEFAULT_INVOICE_CSS,
+    page: { ...DEFAULT_PAGE_SETTINGS },
     blocks,
   };
 }

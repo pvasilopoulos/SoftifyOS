@@ -3,12 +3,17 @@ import {
   isHtmlBody,
   type PrintFormBody,
   type PrintBlock,
+  type PrintPageSettings,
 } from "@/modules/print-forms/defaults";
 import {
   renderPrintTemplate,
   sanitizePrintCss,
   sanitizePrintHtml,
 } from "@/modules/print-forms/template-engine";
+import {
+  buildPageCss,
+  resolvePageSettings,
+} from "@/modules/print-forms/page-geometry";
 import {
   formatEUR,
   invoiceStatusLabel,
@@ -260,22 +265,40 @@ function HtmlPrintArticle({
   invoice,
   html,
   css,
+  paper = "A4",
+  orientation = "PORTRAIT",
+  page,
 }: {
   invoice: InvoicePrintModel;
   html: string;
   css: string;
+  paper?: string;
+  orientation?: string;
+  page?: PrintPageSettings;
 }) {
   const rendered = renderPrintTemplate(html, invoiceToTemplateContext(invoice));
   const safeHtml = sanitizePrintHtml(rendered);
   const safeCss = sanitizePrintCss(css);
+  const pageBox = resolvePageSettings({
+    paper,
+    orientation,
+    page,
+  });
+  const pageCss = buildPageCss(pageBox);
   return (
-    <div className="mx-auto max-w-4xl bg-white px-6 py-8 shadow-sm print:max-w-none print:px-0 print:py-0 print:shadow-none">
-      <style dangerouslySetInnerHTML={{ __html: safeCss }} />
+    <div className="mx-auto bg-transparent print:max-w-none">
+      <style
+        dangerouslySetInnerHTML={{
+          __html: `${pageCss}\n${safeCss}`,
+        }}
+      />
       <div dangerouslySetInnerHTML={{ __html: safeHtml }} />
-      <p className="mt-8 text-xs text-slate-400 print:hidden">
+      <p className="mt-8 text-center text-xs text-slate-400 print:hidden">
         <Link href={`/invoices/${invoice.id}`} className="text-teal-700">
           Επιστροφή στην καρτέλα
         </Link>
+        <span className="mx-2">·</span>
+        {pageBox.widthMm}×{pageBox.heightMm} mm
       </p>
     </div>
   );
@@ -284,13 +307,24 @@ function HtmlPrintArticle({
 export function InvoicePrintArticle({
   invoice,
   body,
+  paper = "A4",
+  orientation = "PORTRAIT",
 }: {
   invoice: InvoicePrintModel;
   body: PrintFormBody;
+  paper?: string;
+  orientation?: string;
 }) {
   if (isHtmlBody(body)) {
     return (
-      <HtmlPrintArticle invoice={invoice} html={body.html} css={body.css} />
+      <HtmlPrintArticle
+        invoice={invoice}
+        html={body.html}
+        css={body.css}
+        paper={paper}
+        orientation={orientation}
+        page={body.page}
+      />
     );
   }
 
