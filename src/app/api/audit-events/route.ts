@@ -139,7 +139,7 @@ export async function GET(request: NextRequest) {
     const cw = cursorWhere(cursor);
     if (cw) listAnd.push(cw);
 
-    const [rows, total, authCount, settingsCount, dataCount] = await Promise.all([
+    const [rows, total] = await Promise.all([
       prisma.auditEvent.findMany({
         where: { AND: listAnd },
         orderBy: [{ createdAt: "desc" }, { id: "desc" }],
@@ -156,27 +156,6 @@ export async function GET(request: NextRequest) {
         },
       }),
       prisma.auditEvent.count({ where: { AND: baseAnd } }),
-      prisma.auditEvent.count({
-        where: {
-          tenantId: session.tenantId,
-          action: { startsWith: "auth." },
-        },
-      }),
-      prisma.auditEvent.count({
-        where: {
-          tenantId: session.tenantId,
-          action: { startsWith: "settings." },
-        },
-      }),
-      prisma.auditEvent.count({
-        where: {
-          tenantId: session.tenantId,
-          NOT: [
-            { action: { startsWith: "auth." } },
-            { action: { startsWith: "settings." } },
-          ],
-        },
-      }),
     ]);
 
     const hasMore = rows.length > limit;
@@ -203,11 +182,6 @@ export async function GET(request: NextRequest) {
           count: page.length,
           hasMore,
           total,
-          stats: {
-            auth: authCount,
-            settings: settingsCount,
-            data: dataCount,
-          },
         },
       },
       {

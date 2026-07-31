@@ -13,10 +13,6 @@ import {
   Check,
   UserRound,
   Clock3,
-  Activity,
-  Settings2,
-  KeyRound,
-  Database,
 } from "lucide-react";
 import { PageHeader } from "@/shared/ui/page-header";
 import { Badge } from "@/shared/ui/badge";
@@ -40,19 +36,12 @@ type AuditItem = {
   user?: AuditUser | null;
 };
 
-type AuditStats = {
-  auth: number;
-  settings: number;
-  data: number;
-};
-
 type ListResponse = {
   items: AuditItem[];
   nextCursor: string | null;
   meta: {
     ms: number;
     total: number;
-    stats: AuditStats;
     hasMore?: boolean;
   };
   error?: string;
@@ -202,19 +191,16 @@ export function AuditEventsClient({
   initialNextCursor,
   initialMs,
   initialTotal,
-  initialStats,
 }: {
   initialItems: AuditItem[];
   initialNextCursor: string | null;
   initialMs: number;
   initialTotal: number;
-  initialStats: AuditStats;
 }) {
   const [items, setItems] = useState(initialItems);
   const [nextCursor, setNextCursor] = useState(initialNextCursor);
   const [ms, setMs] = useState(initialMs);
   const [total, setTotal] = useState(initialTotal);
-  const [stats, setStats] = useState(initialStats);
   const [filters, setFilters] = useState<Filters>(EMPTY_FILTERS);
   const [draft, setDraft] = useState<Filters>(EMPTY_FILTERS);
   const [error, setError] = useState<string | null>(null);
@@ -254,7 +240,6 @@ export function AuditEventsClient({
       setNextCursor(data.nextCursor);
       setMs(data.meta.ms);
       setTotal(data.meta.total);
-      setStats(data.meta.stats);
     });
   }
 
@@ -359,33 +344,6 @@ export function AuditEventsClient({
           </div>
         }
       />
-
-      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-        <StatCard
-          icon={<Activity size={16} />}
-          label="Σύνολο (φίλτρο)"
-          value={total.toLocaleString("el-GR")}
-          hint={`${items.length} στη λίστα`}
-        />
-        <StatCard
-          icon={<KeyRound size={16} />}
-          label="Auth"
-          value={stats.auth.toLocaleString("el-GR")}
-          tone="slate"
-        />
-        <StatCard
-          icon={<Settings2 size={16} />}
-          label="Ρυθμίσεις"
-          value={stats.settings.toLocaleString("el-GR")}
-          tone="amber"
-        />
-        <StatCard
-          icon={<Database size={16} />}
-          label="Δεδομένα / άλλο"
-          value={stats.data.toLocaleString("el-GR")}
-          tone="teal"
-        />
-      </div>
 
       {filtersOpen ? (
         <section className="soft-panel space-y-3 p-4">
@@ -493,13 +451,14 @@ export function AuditEventsClient({
           <div className="flex items-center gap-2">
             <Shield size={15} className="text-slate-400" />
             <p className="text-sm font-semibold text-ink-900">Γεγονότα</p>
-            <span className="text-xs text-slate-400">
-              {items.length.toLocaleString("el-GR")} /{" "}
-              {total.toLocaleString("el-GR")}
-            </span>
           </div>
-          <p className="hidden text-xs text-slate-400 sm:block">
-            Κλικ σε γραμμή για λεπτομέρειες · meta JSON
+          <p className="text-xs text-slate-400">
+            {items.length.toLocaleString("el-GR")} από{" "}
+            {total.toLocaleString("el-GR")}
+            <span className="mx-2 hidden text-slate-300 sm:inline">·</span>
+            <span className="hidden sm:inline">
+              κλικ για λεπτομέρειες
+            </span>
           </p>
         </div>
 
@@ -601,11 +560,7 @@ export function AuditEventsClient({
           ) : null}
         </ul>
 
-        <div className="flex items-center justify-between gap-3 border-t border-slate-100 px-4 py-3">
-          <p className="text-xs text-slate-500">
-            Εμφανίζονται {items.length.toLocaleString("el-GR")} από{" "}
-            {total.toLocaleString("el-GR")}
-          </p>
+        <div className="flex items-center justify-end gap-3 border-t border-slate-100 px-4 py-3">
           <Button
             variant="secondary"
             size="sm"
@@ -621,45 +576,6 @@ export function AuditEventsClient({
       {detail ? (
         <DetailDrawer item={detail} onClose={() => setDetail(null)} />
       ) : null}
-    </div>
-  );
-}
-
-function StatCard({
-  icon,
-  label,
-  value,
-  hint,
-  tone = "slate",
-}: {
-  icon: React.ReactNode;
-  label: string;
-  value: string;
-  hint?: string;
-  tone?: "slate" | "amber" | "teal";
-}) {
-  const tones = {
-    slate: "bg-slate-50 text-slate-600",
-    amber: "bg-amber-50 text-amber-700",
-    teal: "bg-teal-50 text-teal-700",
-  };
-  return (
-    <div className="soft-panel flex items-start gap-3 p-4">
-      <span
-        className={cn(
-          "flex h-9 w-9 shrink-0 items-center justify-center rounded-xl",
-          tones[tone],
-        )}
-      >
-        {icon}
-      </span>
-      <div className="min-w-0">
-        <p className="text-xs font-medium text-slate-500">{label}</p>
-        <p className="mt-0.5 text-xl font-semibold tracking-tight text-ink-950">
-          {value}
-        </p>
-        {hint ? <p className="text-[11px] text-slate-400">{hint}</p> : null}
-      </div>
     </div>
   );
 }

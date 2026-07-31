@@ -9,7 +9,7 @@ export const dynamic = "force-dynamic";
 
 async function loadFirstPage(tenantId: string) {
   const started = Date.now();
-  const [rows, total, authCount, settingsCount, dataCount] = await Promise.all([
+  const [rows, total] = await Promise.all([
     prisma.auditEvent.findMany({
       where: { tenantId },
       orderBy: [{ createdAt: "desc" }, { id: "desc" }],
@@ -26,21 +26,6 @@ async function loadFirstPage(tenantId: string) {
       },
     }),
     prisma.auditEvent.count({ where: { tenantId } }),
-    prisma.auditEvent.count({
-      where: { tenantId, action: { startsWith: "auth." } },
-    }),
-    prisma.auditEvent.count({
-      where: { tenantId, action: { startsWith: "settings." } },
-    }),
-    prisma.auditEvent.count({
-      where: {
-        tenantId,
-        NOT: [
-          { action: { startsWith: "auth." } },
-          { action: { startsWith: "settings." } },
-        ],
-      },
-    }),
   ]);
 
   const ms = Date.now() - started;
@@ -67,7 +52,6 @@ async function loadFirstPage(tenantId: string) {
     nextCursor,
     ms,
     total,
-    stats: { auth: authCount, settings: settingsCount, data: dataCount },
   };
 }
 
@@ -86,7 +70,6 @@ export default async function AuditPage() {
       initialNextCursor={first.nextCursor}
       initialMs={first.ms}
       initialTotal={first.total}
-      initialStats={first.stats}
     />
   );
 }
