@@ -7,7 +7,11 @@ import {
   type NavGroup,
   type NavItem,
 } from "@/platform/navigation";
-import { resolveMobileTabsFromGroups } from "@/platform/navigation/menu-tree";
+import {
+  parseMobileFooterOverrides,
+  resolveMobileTabsForAudience,
+  type MobileFooterOverrides,
+} from "@/platform/navigation/menu-tree";
 
 function parseMenuJson(raw: unknown): MenuNodeConfig[] | null {
   if (!raw) return null;
@@ -18,6 +22,7 @@ function parseMenuJson(raw: unknown): MenuNodeConfig[] | null {
 export type TenantMenuSettings = {
   menuTree: MenuNodeConfig[];
   navGroupsDefaultExpanded: boolean;
+  mobileFooterOverrides: MobileFooterOverrides;
 };
 
 export async function getTenantMenuSettings(
@@ -25,11 +30,18 @@ export async function getTenantMenuSettings(
 ): Promise<TenantMenuSettings> {
   const settings = await prisma.tenantSettings.findUnique({
     where: { tenantId },
-    select: { menuJson: true, navGroupsDefaultExpanded: true },
+    select: {
+      menuJson: true,
+      navGroupsDefaultExpanded: true,
+      mobileFooterOverrides: true,
+    },
   });
   return {
     menuTree: parseMenuJson(settings?.menuJson) ?? defaultMenuTree,
     navGroupsDefaultExpanded: settings?.navGroupsDefaultExpanded ?? true,
+    mobileFooterOverrides: parseMobileFooterOverrides(
+      settings?.mobileFooterOverrides,
+    ),
   };
 }
 
@@ -74,11 +86,11 @@ export async function getNavForSession(input: {
   mobileTabs: NavItem[];
   menuTree: MenuNodeConfig[];
   navGroupsDefaultExpanded: boolean;
+  mobileFooterOverrides: MobileFooterOverrides;
   audience: MenuAudience;
 }> {
-  const { menuTree, navGroupsDefaultExpanded } = await getTenantMenuSettings(
-    input.tenantId,
-  );
+  const { menuTree, navGroupsDefaultExpanded, mobileFooterOverrides } =
+    await getTenantMenuSettings(input.tenantId);
   const audience: MenuAudience = input.userId
     ? await getMenuAudienceForSession({
         tenantId: input.tenantId,
@@ -92,12 +104,17 @@ export async function getNavForSession(input: {
     audience,
     navGroupsDefaultExpanded,
   );
-  const mobileTabs: NavItem[] = resolveMobileTabsFromGroups(groups);
+  const mobileTabs: NavItem[] = resolveMobileTabsForAudience(
+    groups,
+    audience,
+    mobileFooterOverrides,
+  );
   return {
     groups,
     mobileTabs,
     menuTree,
     navGroupsDefaultExpanded,
+    mobileFooterOverrides,
     audience,
   };
 }

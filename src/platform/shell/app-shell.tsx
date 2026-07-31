@@ -12,7 +12,10 @@ import {
   type MenuAudience,
   type MenuNodeConfig,
 } from "@/platform/navigation";
-import { resolveMobileTabsFromGroups } from "@/platform/navigation/menu-tree";
+import {
+  resolveMobileTabsForAudience,
+  type MobileFooterOverrides,
+} from "@/platform/navigation/menu-tree";
 import type { SessionPayload } from "@/platform/auth/session";
 
 export function AppShell({
@@ -20,6 +23,7 @@ export function AppShell({
   menuTree,
   menuAudience,
   navGroupsDefaultExpanded = true,
+  mobileFooterOverrides,
   maintenanceMode = false,
   children,
 }: {
@@ -27,6 +31,7 @@ export function AppShell({
   menuTree: MenuNodeConfig[];
   menuAudience?: MenuAudience;
   navGroupsDefaultExpanded?: boolean;
+  mobileFooterOverrides?: MobileFooterOverrides | null;
   maintenanceMode?: boolean;
   children: React.ReactNode;
 }) {
@@ -55,8 +60,9 @@ export function AppShell({
   );
 
   const mobileTabs = useMemo(
-    () => resolveMobileTabsFromGroups(groups),
-    [groups],
+    () =>
+      resolveMobileTabsForAudience(groups, audience, mobileFooterOverrides),
+    [groups, audience, mobileFooterOverrides],
   );
 
   useEffect(() => {

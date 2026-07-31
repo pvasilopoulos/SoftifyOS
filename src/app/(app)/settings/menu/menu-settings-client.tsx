@@ -58,6 +58,7 @@ import {
   getMobileFooterIds,
   insertNodeAt,
   moveNodeInTree,
+  type MobileFooterOverrides,
 } from "@/platform/navigation/menu-tree";
 
 type AudienceGroup = { id: string; code: string; name: string };
@@ -510,16 +511,73 @@ function TreeBranch({
   );
 }
 
+type FooterScope =
+  | { kind: "default" }
+  | { kind: "group"; id: string }
+  | { kind: "user"; id: string };
+
 function MobileFooterEditor({
   tree,
-  onChangeFooter,
+  overrides,
+  audienceOptions,
+  onChangeDefaultFooter,
+  onChangeOverrides,
 }: {
   tree: MenuNodeConfig[];
-  onChangeFooter: (ids: string[]) => void;
+  overrides: MobileFooterOverrides;
+  audienceOptions: AudienceOptions;
+  onChangeDefaultFooter: (ids: string[]) => void;
+  onChangeOverrides: (next: MobileFooterOverrides) => void;
 }) {
-  const footerIds = getMobileFooterIds(tree);
+  const [scopeKind, setScopeKind] = useState<"default" | "group" | "user">(
+    "default",
+  );
+  const [scopeId, setScopeId] = useState("");
+
+  const defaultFooterIds = getMobileFooterIds(tree);
   const links = collectLinkNodes(tree).filter((n) => n.visible !== false);
   const byId = new Map(links.map((n) => [n.id, n]));
+
+  const scope: FooterScope =
+    scopeKind === "default"
+      ? { kind: "default" }
+      : scopeKind === "group" && scopeId
+        ? { kind: "group", id: scopeId }
+        : scopeKind === "user" && scopeId
+          ? { kind: "user", id: scopeId }
+          : { kind: "default" };
+
+  const hasOverride =
+    (scope.kind === "group" &&
+      Boolean(overrides.byGroupId?.[scope.id]?.length)) ||
+    (scope.kind === "user" && Boolean(overrides.byUserId?.[scope.id]?.length));
+
+  const footerIds =
+    scope.kind === "group"
+      ? (overrides.byGroupId?.[scope.id] ?? [])
+      : scope.kind === "user"
+        ? (overrides.byUserId?.[scope.id] ?? [])
+        : defaultFooterIds;
+
+  const commitIds = (ids: string[]) => {
+    const clean = ids.filter(Boolean).slice(0, MOBILE_FOOTER_SLOT_COUNT);
+    if (scope.kind === "default") {
+      onChangeDefaultFooter(clean);
+      return;
+    }
+    const next: MobileFooterOverrides = {
+      byUserId: { ...(overrides.byUserId ?? {}) },
+      byGroupId: { ...(overrides.byGroupId ?? {}) },
+    };
+    if (scope.kind === "group") {
+      if (clean.length) next.byGroupId![scope.id] = clean;
+      else delete next.byGroupId![scope.id];
+    } else {
+      if (clean.length) next.byUserId![scope.id] = clean;
+      else delete next.byUserId![scope.id];
+    }
+    onChangeOverrides(next);
+  };
 
   const setSlot = (index: number, linkId: string) => {
     const slots = Array.from(
@@ -530,7 +588,7 @@ function MobileFooterEditor({
       if (slots[i] === linkId) slots[i] = "";
     }
     slots[index] = linkId;
-    onChangeFooter(slots.filter(Boolean));
+    commitIds(slots.filter(Boolean));
   };
 
   const moveSlot = (index: number, dir: -1 | 1) => {
@@ -540,7 +598,16 @@ function MobileFooterEditor({
     const tmp = next[index];
     next[index] = next[target]!;
     next[target] = tmp!;
-    onChangeFooter(next);
+    commitIds(next);
+  };
+
+  const clearOverride = () => {
+    if (scope.kind === "default") return;
+    commitIds([]);
+  };
+
+  const copyFromDefault = () => {
+    commitIds(defaultFooterIds);
   };
 
   const previewItems: Array<{
@@ -564,6 +631,9 @@ function MobileFooterEditor({
     },
   ].slice(0, 4);
 
+  const userCount = Object.keys(overrides.byUserId ?? {}).length;
+  const groupCount = Object.keys(overrides.byGroupId ?? {}).length;
+
   return (
     <div className="space-y-3">
       <div className="flex items-center gap-2">
@@ -571,13 +641,104 @@ function MobileFooterEditor({
         <h2 className="text-sm font-semibold text-ink-900">Footer κινητού</h2>
       </div>
       <p className="text-xs leading-relaxed text-slate-500">
-        Έως {MOBILE_FOOTER_SLOT_COUNT} συντομεύσεις· η θέση «Περισσότερα» μένει
-        πάντα τελευταία.
+        Έως {MOBILE_FOOTER_SLOT_COUNT} συντομεύσεις· προτεραιότητα: χρήστης →
+        ομάδα → προεπιλογή. «Περισσότερα» πάντα τελευταίο.
       </p>
+
+      <div className="space-y-2 rounded-xl border border-slate-200 bg-slate-50/80 p-2.5">
+        <label className="block text-[11px] font-medium uppercase tracking-wide text-slate-500">
+          Ισχύει για
+        </label>
+        <select
+          value={scopeKind}
+          onChange={(e) => {
+            const kind = e.target.value as "default" | "group" | "user";
+            setScopeKind(kind);
+            if (kind === "group") {
+              setScopeId(audienceOptions.groups[0]?.id ?? "");
+            } else if (kind === "user") {
+              setScopeId(audienceOptions.users[0]?.id ?? "");
+            } else {
+              setScopeId("");
+            }
+          }}
+          className="h-9 w-full rounded-lg border border-slate-200 bg-white px-2 text-sm outline-none focus:border-teal-300"
+        >
+          <option value="default">Προεπιλογή tenant</option>
+          <option value="group">Ομάδα χρηστών</option>
+          <option value="user">Συγκεκριμένος χρήστης</option>
+        </select>
+        {scopeKind === "group" ? (
+          <select
+            value={scopeId}
+            onChange={(e) => setScopeId(e.target.value)}
+            className="h-9 w-full rounded-lg border border-slate-200 bg-white px-2 text-sm outline-none focus:border-teal-300"
+          >
+            {audienceOptions.groups.length === 0 ? (
+              <option value="">— Δεν υπάρχουν ομάδες —</option>
+            ) : null}
+            {audienceOptions.groups.map((g) => (
+              <option key={g.id} value={g.id}>
+                {g.name} ({g.code})
+                {overrides.byGroupId?.[g.id]?.length ? " · override" : ""}
+              </option>
+            ))}
+          </select>
+        ) : null}
+        {scopeKind === "user" ? (
+          <select
+            value={scopeId}
+            onChange={(e) => setScopeId(e.target.value)}
+            className="h-9 w-full rounded-lg border border-slate-200 bg-white px-2 text-sm outline-none focus:border-teal-300"
+          >
+            {audienceOptions.users.length === 0 ? (
+              <option value="">— Δεν υπάρχουν χρήστες —</option>
+            ) : null}
+            {audienceOptions.users.map((u) => (
+              <option key={u.id} value={u.id}>
+                {u.name}
+                {overrides.byUserId?.[u.id]?.length ? " · override" : ""}
+              </option>
+            ))}
+          </select>
+        ) : null}
+        <p className="text-[11px] text-slate-500">
+          {scope.kind === "default"
+            ? "Ορίζεται στα nodes του μενού (mobileTab)."
+            : hasOverride
+              ? "Ενεργό override για αυτή την επιλογή."
+              : "Δεν υπάρχει override — χρησιμοποιείται η προεπιλογή μέχρι να ορίσεις slots."}
+          {(userCount > 0 || groupCount > 0) && scope.kind === "default"
+            ? ` · Overrides: ${groupCount} ομάδες, ${userCount} χρήστες.`
+            : null}
+        </p>
+        {scope.kind !== "default" ? (
+          <div className="flex flex-wrap gap-1.5">
+            <button
+              type="button"
+              onClick={copyFromDefault}
+              className="rounded-md border border-slate-200 bg-white px-2 py-1 text-[11px] font-medium text-slate-700 hover:bg-slate-50"
+            >
+              Αντιγραφή από προεπιλογή
+            </button>
+            {hasOverride ? (
+              <button
+                type="button"
+                onClick={clearOverride}
+                className="rounded-md border border-rose-200 bg-white px-2 py-1 text-[11px] font-medium text-rose-700 hover:bg-rose-50"
+              >
+                Καθαρισμός override
+              </button>
+            ) : null}
+          </div>
+        ) : null}
+      </div>
 
       <div className="space-y-2">
         {Array.from({ length: MOBILE_FOOTER_SLOT_COUNT }).map((_, index) => {
           const selected = footerIds[index] ?? "";
+          const disabledEditor =
+            (scopeKind === "group" || scopeKind === "user") && !scopeId;
           return (
             <div
               key={index}
@@ -588,8 +749,9 @@ function MobileFooterEditor({
               </span>
               <select
                 value={selected}
+                disabled={disabledEditor}
                 onChange={(e) => setSlot(index, e.target.value)}
-                className="min-w-0 flex-1 rounded-lg border border-slate-200 bg-slate-50 px-2 py-1.5 text-sm outline-none focus:border-teal-300 focus:bg-white"
+                className="min-w-0 flex-1 rounded-lg border border-slate-200 bg-slate-50 px-2 py-1.5 text-sm outline-none focus:border-teal-300 focus:bg-white disabled:opacity-50"
               >
                 <option value="">— Κενό —</option>
                 {links.map((link) => (
@@ -606,7 +768,7 @@ function MobileFooterEditor({
               </select>
               <button
                 type="button"
-                disabled={index === 0}
+                disabled={disabledEditor || index === 0}
                 onClick={() => moveSlot(index, -1)}
                 className="rounded-lg px-1.5 py-1 text-xs text-slate-500 hover:bg-slate-100 disabled:opacity-30"
               >
@@ -614,7 +776,7 @@ function MobileFooterEditor({
               </button>
               <button
                 type="button"
-                disabled={index >= footerIds.length - 1}
+                disabled={disabledEditor || index >= footerIds.length - 1}
                 onClick={() => moveSlot(index, 1)}
                 className="rounded-lg px-1.5 py-1 text-xs text-slate-500 hover:bg-slate-100 disabled:opacity-30"
               >
@@ -660,15 +822,23 @@ function MobileFooterEditor({
 export function MenuSettingsClient({
   initialMenu,
   initialNavGroupsDefaultExpanded = true,
+  initialMobileFooterOverrides,
   audienceOptions,
 }: {
   initialMenu: MenuNodeConfig[];
   initialNavGroupsDefaultExpanded?: boolean;
+  initialMobileFooterOverrides?: MobileFooterOverrides;
   audienceOptions: AudienceOptions;
 }) {
   const [tree, setTree] = useState(() => cloneMenuTree(initialMenu));
   const [navGroupsDefaultExpanded, setNavGroupsDefaultExpanded] = useState(
     initialNavGroupsDefaultExpanded,
+  );
+  const [footerOverrides, setFooterOverrides] = useState<MobileFooterOverrides>(
+    () => ({
+      byUserId: { ...(initialMobileFooterOverrides?.byUserId ?? {}) },
+      byGroupId: { ...(initialMobileFooterOverrides?.byGroupId ?? {}) },
+    }),
   );
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
@@ -893,6 +1063,7 @@ export function MenuSettingsClient({
         body: JSON.stringify({
           menu: tree,
           navGroupsDefaultExpanded,
+          mobileFooterOverrides: footerOverrides,
         }),
       });
       const data = await res.json();
@@ -903,6 +1074,12 @@ export function MenuSettingsClient({
       setTree(cloneMenuTree(data.menu));
       if (typeof data.navGroupsDefaultExpanded === "boolean") {
         setNavGroupsDefaultExpanded(data.navGroupsDefaultExpanded);
+      }
+      if (data.mobileFooterOverrides) {
+        setFooterOverrides({
+          byUserId: { ...(data.mobileFooterOverrides.byUserId ?? {}) },
+          byGroupId: { ...(data.mobileFooterOverrides.byGroupId ?? {}) },
+        });
       }
       setMessage("Το μενού αποθηκεύτηκε. Ανανεώστε τη σελίδα για το sidebar.");
     });
@@ -928,6 +1105,7 @@ export function MenuSettingsClient({
           ? data.navGroupsDefaultExpanded
           : true,
       );
+      setFooterOverrides({ byUserId: {}, byGroupId: {} });
       setMessage("Επαναφορά στο προεπιλεγμένο μενού.");
     });
   };
@@ -1149,8 +1327,14 @@ export function MenuSettingsClient({
             <div className="soft-panel p-4">
               <MobileFooterEditor
                 tree={tree}
-                onChangeFooter={(ids) => {
+                overrides={footerOverrides}
+                audienceOptions={audienceOptions}
+                onChangeDefaultFooter={(ids) => {
                   setTree((prev) => applyMobileFooterIds(prev, ids));
+                  setMessage(null);
+                }}
+                onChangeOverrides={(next) => {
+                  setFooterOverrides(next);
                   setMessage(null);
                 }}
               />

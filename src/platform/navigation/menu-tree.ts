@@ -248,3 +248,69 @@ export function resolveMobileTabsFromGroups(groups: NavGroup[]): NavItem[] {
     .slice(0, MOBILE_FOOTER_SLOT_COUNT);
   return [...custom, MORE_NAV_ITEM];
 }
+
+export type MobileFooterOverrides = {
+  byUserId?: Record<string, string[]>;
+  byGroupId?: Record<string, string[]>;
+};
+
+export function parseMobileFooterOverrides(
+  raw: unknown,
+): MobileFooterOverrides {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
+  const obj = raw as Record<string, unknown>;
+  const cleanMap = (value: unknown): Record<string, string[]> => {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+    const out: Record<string, string[]> = {};
+    for (const [key, ids] of Object.entries(value as Record<string, unknown>)) {
+      if (!key || !Array.isArray(ids)) continue;
+      const list = ids
+        .filter((id): id is string => typeof id === "string" && id.length > 0)
+        .slice(0, MOBILE_FOOTER_SLOT_COUNT);
+      if (list.length) out[key] = list;
+    }
+    return out;
+  };
+  return {
+    byUserId: cleanMap(obj.byUserId),
+    byGroupId: cleanMap(obj.byGroupId),
+  };
+}
+
+/** Pick override link ids: user wins, then first matching group. */
+export function pickMobileFooterOverrideIds(
+  audience: { userId?: string; groupIds?: string[] } | undefined,
+  overrides: MobileFooterOverrides | null | undefined,
+): string[] | null {
+  if (!overrides) return null;
+  if (audience?.userId) {
+    const userIds = overrides.byUserId?.[audience.userId];
+    if (userIds?.length) return userIds.slice(0, MOBILE_FOOTER_SLOT_COUNT);
+  }
+  if (audience?.groupIds?.length && overrides.byGroupId) {
+    for (const groupId of audience.groupIds) {
+      const ids = overrides.byGroupId[groupId];
+      if (ids?.length) return ids.slice(0, MOBILE_FOOTER_SLOT_COUNT);
+    }
+  }
+  return null;
+}
+
+export function resolveMobileTabsForAudience(
+  groups: NavGroup[],
+  audience?: { userId?: string; groupIds?: string[] },
+  overrides?: MobileFooterOverrides | null,
+): NavItem[] {
+  const visibleById = new Map(
+    groups.flatMap((g) => g.items).map((item) => [item.id, item]),
+  );
+  const overrideIds = pickMobileFooterOverrideIds(audience, overrides);
+  if (overrideIds?.length) {
+    const tabs = overrideIds
+      .map((id) => visibleById.get(id))
+      .filter((item): item is NavItem => Boolean(item))
+      .slice(0, MOBILE_FOOTER_SLOT_COUNT);
+    if (tabs.length > 0) return [...tabs, MORE_NAV_ITEM];
+  }
+  return resolveMobileTabsFromGroups(groups);
+}

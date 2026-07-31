@@ -1157,6 +1157,9 @@ model TenantSettings {
   menuJson  Json?
   /// Default expand state for sidebar nav folders (user localStorage can override)
   navGroupsDefaultExpanded Boolean @default(true)
+  /// Mobile footer shortcuts per user / group:
+  /// { byUserId?: Record<userId, linkId[]>, byGroupId?: Record<groupId, linkId[]> }
+  mobileFooterOverrides Json?
 
   /// Επωνυμία / εμπορική επωνυμία (override του Tenant.name για παραστατικά)
   legalName   String?
