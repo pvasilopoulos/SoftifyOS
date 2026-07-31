@@ -22,15 +22,18 @@ import {
 import { CSS } from "@dnd-kit/utilities";
 import {
   ArrowLeft,
+  Check,
   ChevronDown,
   Eye,
   EyeOff,
   FolderPlus,
   GripVertical,
+  Link2,
   MoreHorizontal,
   Plus,
   RotateCcw,
   Save,
+  Search,
   Smartphone,
   Trash2,
   Users,
@@ -49,8 +52,9 @@ import {
   applyMobileFooterIds,
   cloneMenuTree,
   collectLinkNodes,
-  getAvailableCatalogLinks,
+  collectNodeIds,
   getChildrenOf,
+  getMenuCatalog,
   getMobileFooterIds,
   insertNodeAt,
   moveNodeInTree,
@@ -386,9 +390,11 @@ function FolderDropZone({
 
 function CatalogItem({
   node,
+  inMenu,
   onAdd,
 }: {
   node: MenuNodeConfig;
+  inMenu: boolean;
   onAdd: (node: MenuNodeConfig) => void;
 }) {
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
@@ -400,7 +406,10 @@ function CatalogItem({
     <div
       ref={setNodeRef}
       className={cn(
-        "flex items-center gap-2 rounded-xl border border-slate-200/80 bg-white px-2 py-2",
+        "flex items-center gap-2 rounded-xl border bg-white px-2 py-2",
+        inMenu
+          ? "border-slate-100 bg-slate-50/80"
+          : "border-slate-200/80 shadow-sm shadow-slate-900/5",
         isDragging && "opacity-40",
       )}
     >
@@ -413,18 +422,37 @@ function CatalogItem({
       >
         <GripVertical size={14} />
       </button>
-      <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-slate-100 text-slate-600">
+      <span
+        className={cn(
+          "flex h-7 w-7 items-center justify-center rounded-lg",
+          inMenu ? "bg-slate-200/70 text-slate-500" : "bg-teal-50 text-teal-700",
+        )}
+      >
         {createElement(resolveIcon(node.icon), { size: 14 })}
       </span>
       <div className="min-w-0 flex-1">
         <p className="truncate text-sm font-medium text-ink-900">{node.label}</p>
         <p className="truncate text-[11px] text-slate-400">{node.href}</p>
+        {inMenu ? (
+          <p className="mt-0.5 inline-flex items-center gap-1 text-[10px] font-medium text-slate-500">
+            <Check size={10} /> ήδη στο μενού
+          </p>
+        ) : (
+          <p className="mt-0.5 text-[10px] font-medium text-teal-700">
+            διαθέσιμο για προσθήκη
+          </p>
+        )}
       </div>
       <button
         type="button"
-        title="Προσθήκη"
+        title={inMenu ? "Προσθήκη αντιγράφου" : "Προσθήκη στο μενού"}
         onClick={() => onAdd(node)}
-        className="rounded-lg p-1.5 text-teal-700 hover:bg-teal-50"
+        className={cn(
+          "rounded-lg p-1.5",
+          inMenu
+            ? "text-slate-600 hover:bg-slate-200/70"
+            : "text-teal-700 hover:bg-teal-50",
+        )}
       >
         <Plus size={16} />
       </button>
@@ -646,11 +674,25 @@ export function MenuSettingsClient({
   const [message, setMessage] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
   const [activeDrag, setActiveDrag] = useState<DragData | null>(null);
+  const [catalogQuery, setCatalogQuery] = useState("");
+  const [customLabel, setCustomLabel] = useState("");
+  const [customHref, setCustomHref] = useState("");
 
   const catalog = useMemo(
-    () => getAvailableCatalogLinks(tree, defaultMenuTree),
+    () => getMenuCatalog(tree, defaultMenuTree),
     [tree],
   );
+
+  const filteredCatalog = useMemo(() => {
+    const q = catalogQuery.trim().toLowerCase();
+    if (!q) return catalog;
+    return catalog.filter((entry) => {
+      const hay = `${entry.node.label} ${entry.node.href ?? ""}`.toLowerCase();
+      return hay.includes(q);
+    });
+  }, [catalog, catalogQuery]);
+
+  const missingCount = catalog.filter((e) => !e.inMenu).length;
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
@@ -710,20 +752,55 @@ export function MenuSettingsClient({
       defaultFolderId ??
       tree.find((n) => n.type === "folder")?.id ??
       null;
-    const clean: MenuNodeConfig = {
-      ...cloneMenuTree([node])[0]!,
-      mobileTab: false,
-      visible: true,
-    };
-    delete clean.mobileOrder;
     setTree((prev) => {
+      const used = collectNodeIds(prev);
+      const baseId = node.id || "custom";
+      const id = used.has(baseId)
+        ? `${baseId}-${Math.random().toString(36).slice(2, 8)}`
+        : baseId;
+      const clean: MenuNodeConfig = {
+        ...cloneMenuTree([node])[0]!,
+        id,
+        mobileTab: false,
+        visible: true,
+      };
+      delete clean.mobileOrder;
       if (target) {
         const kids = getChildrenOf(prev, target);
         return insertNodeAt(prev, target, kids.length, clean);
       }
       return [...cloneMenuTree(prev), clean];
     });
-    setMessage(null);
+    setMessage(
+      `Προστέθηκε «${node.label}» στο μενού. Πάτα Αποθήκευση για οριστικοποίηση.`,
+    );
+  };
+
+  const addCustomLink = () => {
+    const label = customLabel.trim();
+    let href = customHref.trim();
+    if (!label || !href) {
+      setError("Συμπλήρωσε ετικέτα και διαδρομή για custom link.");
+      return;
+    }
+    if (!href.startsWith("/")) href = `/${href}`;
+    const id = `custom-${label
+      .toLowerCase()
+      .replace(/[^a-z0-9α-ωάέήίόύώϊϋΐΰ]+/gi, "-")
+      .replace(/^-|-$/g, "")
+      .slice(0, 40) || "link"}`;
+    addCatalogNode({
+      id,
+      type: "link",
+      label,
+      href,
+      icon: "FileText",
+      visible: true,
+      mobileTab: false,
+    });
+    setCustomLabel("");
+    setCustomHref("");
+    setError(null);
   };
 
   const addFolder = () => {
@@ -759,29 +836,32 @@ export function MenuSettingsClient({
         addCatalogNode(activeData.node, overId.replace("folder-drop:", ""));
         return;
       }
-      // Dropped on a tree node — insert into parent folder or after item
+      // Dropped on a tree node — insert after that item (unique id if duplicate)
       const overData = over.data.current as { kind?: string; id?: string } | undefined;
       if (overData?.kind === "tree" && overData.id) {
         setTree((prev) => {
+          const used = collectNodeIds(prev);
+          const baseId = activeData.node.id || "custom";
+          const id = used.has(baseId)
+            ? `${baseId}-${Math.random().toString(36).slice(2, 8)}`
+            : baseId;
           const clean = {
             ...cloneMenuTree([activeData.node])[0]!,
+            id,
             mobileTab: false,
             visible: true,
           };
           delete clean.mobileOrder;
-          // Insert after the over node in its parent
-          const moved = insertNodeAt(
-            prev,
-            null,
-            prev.length,
-            clean,
-          );
-          // Prefer placing next to over via move trick: add then move
+          const moved = insertNodeAt(prev, null, prev.length, clean);
           return moveNodeInTree(moved, clean.id, overData.id!, "after");
         });
-        setMessage(null);
+        setMessage(
+          `Προστέθηκε «${activeData.node.label}». Πάτα Αποθήκευση για οριστικοποίηση.`,
+        );
       } else if (defaultFolderId) {
         addCatalogNode(activeData.node, defaultFolderId);
+      } else {
+        addCatalogNode(activeData.node, null);
       }
       return;
     }
@@ -993,27 +1073,76 @@ export function MenuSettingsClient({
           </div>
 
           <aside className="space-y-4">
-            <div className="soft-panel space-y-2 p-4">
-              <h2 className="text-sm font-semibold text-ink-900">
-                Διαθέσιμες επιλογές
-              </h2>
-              <p className="text-xs text-slate-500">
-                Σύρε στο δέντρο ή πάτα + για προσθήκη.
-              </p>
-              <div className="max-h-[420px] space-y-1.5 overflow-y-auto pr-1">
-                {catalog.length === 0 ? (
+            <div className="soft-panel space-y-3 p-4">
+              <div>
+                <h2 className="text-sm font-semibold text-ink-900">
+                  Διαθέσιμες επιλογές
+                </h2>
+                <p className="mt-0.5 text-xs text-slate-500">
+                  Σύρε στο δέντρο ή πάτα{" "}
+                  <span className="font-semibold text-teal-700">+</span> για
+                  προσθήκη.
+                  {missingCount > 0
+                    ? ` ${missingCount} δεν είναι ακόμη στο μενού.`
+                    : " Όλα τα defaults υπάρχουν ήδη — μπορείς να προσθέσεις αντίγραφο ή custom link."}
+                </p>
+              </div>
+
+              <div className="relative">
+                <Search
+                  size={14}
+                  className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400"
+                />
+                <input
+                  value={catalogQuery}
+                  onChange={(e) => setCatalogQuery(e.target.value)}
+                  placeholder="Αναζήτηση…"
+                  className="h-9 w-full rounded-lg border border-slate-200 bg-white pl-8 pr-2 text-sm outline-none focus:border-teal-300 focus:ring-2 focus:ring-teal-500/20"
+                />
+              </div>
+
+              <div className="max-h-[360px] space-y-1.5 overflow-y-auto pr-1">
+                {filteredCatalog.length === 0 ? (
                   <p className="rounded-xl bg-slate-50 px-3 py-4 text-center text-xs text-slate-500">
-                    Όλες οι προεπιλεγμένες επιλογές είναι ήδη στο μενού.
+                    Καμία επιλογή δεν ταιριάζει.
                   </p>
                 ) : (
-                  catalog.map((node) => (
+                  filteredCatalog.map((entry) => (
                     <CatalogItem
-                      key={node.id}
-                      node={node}
+                      key={entry.node.id}
+                      node={entry.node}
+                      inMenu={entry.inMenu}
                       onAdd={(n) => addCatalogNode(n)}
                     />
                   ))
                 )}
+              </div>
+
+              <div className="space-y-2 border-t border-slate-100 pt-3">
+                <div className="flex items-center gap-1.5 text-xs font-semibold text-ink-900">
+                  <Link2 size={13} className="text-teal-700" />
+                  Custom link
+                </div>
+                <input
+                  value={customLabel}
+                  onChange={(e) => setCustomLabel(e.target.value)}
+                  placeholder="Ετικέτα (π.χ. Αποθήκη Β)"
+                  className="h-9 w-full rounded-lg border border-slate-200 px-2.5 text-sm outline-none focus:border-teal-300"
+                />
+                <input
+                  value={customHref}
+                  onChange={(e) => setCustomHref(e.target.value)}
+                  placeholder="Διαδρομή (π.χ. /inventory)"
+                  className="h-9 w-full rounded-lg border border-slate-200 px-2.5 font-mono text-sm outline-none focus:border-teal-300"
+                />
+                <button
+                  type="button"
+                  onClick={addCustomLink}
+                  className="inline-flex h-9 w-full items-center justify-center gap-1.5 rounded-lg bg-slate-900 text-sm font-medium text-white hover:bg-slate-800"
+                >
+                  <Plus size={14} />
+                  Προσθήκη στο μενού
+                </button>
               </div>
             </div>
 

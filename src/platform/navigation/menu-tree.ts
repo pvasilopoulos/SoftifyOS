@@ -46,28 +46,58 @@ export function collectNodeIds(tree: MenuNodeConfig[]): Set<string> {
   return ids;
 }
 
+export type MenuCatalogEntry = {
+  node: MenuNodeConfig;
+  /** True when a node with the same id (or same href) already exists in the tree. */
+  inMenu: boolean;
+};
+
+function catalogLinkTemplate(node: MenuNodeConfig): MenuNodeConfig {
+  return {
+    id: node.id,
+    type: "link",
+    label: node.label,
+    href: node.href,
+    icon: node.icon,
+    roles: node.roles ? [...node.roles] : undefined,
+    visible: true,
+    mobileTab: false,
+  };
+}
+
+/** All link templates from the default menu, with in-menu status. */
+export function getMenuCatalog(
+  tree: MenuNodeConfig[],
+  catalogSource: MenuNodeConfig[] = defaultMenuTree,
+): MenuCatalogEntry[] {
+  const usedIds = collectNodeIds(tree);
+  const usedHrefs = new Set(
+    collectLinkNodes(tree)
+      .map((n) => n.href)
+      .filter((h): h is string => Boolean(h)),
+  );
+  const entries: MenuCatalogEntry[] = [];
+  walkMenuNodes(catalogSource, (node) => {
+    if (node.type === "link" && node.href) {
+      entries.push({
+        node: catalogLinkTemplate(node),
+        inMenu: usedIds.has(node.id) || usedHrefs.has(node.href),
+      });
+    }
+  });
+  return entries.sort((a, b) =>
+    a.node.label.localeCompare(b.node.label, "el"),
+  );
+}
+
 /** Link templates from the default menu that are not currently in the tree. */
 export function getAvailableCatalogLinks(
   tree: MenuNodeConfig[],
   catalogSource: MenuNodeConfig[] = defaultMenuTree,
 ): MenuNodeConfig[] {
-  const used = collectNodeIds(tree);
-  const available: MenuNodeConfig[] = [];
-  walkMenuNodes(catalogSource, (node) => {
-    if (node.type === "link" && node.href && !used.has(node.id)) {
-      available.push({
-        id: node.id,
-        type: "link",
-        label: node.label,
-        href: node.href,
-        icon: node.icon,
-        roles: node.roles ? [...node.roles] : undefined,
-        visible: true,
-        mobileTab: false,
-      });
-    }
-  });
-  return available.sort((a, b) => a.label.localeCompare(b.label, "el"));
+  return getMenuCatalog(tree, catalogSource)
+    .filter((e) => !e.inMenu)
+    .map((e) => e.node);
 }
 
 export function findNodeLocation(
