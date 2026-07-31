@@ -61,7 +61,14 @@ export async function applyStockDelta(
     delta?: number;
     adjustTo?: number;
     type: "IN" | "OUT" | "ADJUST";
-    source: "MANUAL" | "INVOICE" | "CREDIT" | "ADJUSTMENT" | "OPENING";
+    source:
+      | "MANUAL"
+      | "INVOICE"
+      | "CREDIT"
+      | "ADJUSTMENT"
+      | "OPENING"
+      | "PURCHASE"
+      | "RECEIPT";
     note?: string | null;
     refType?: string | null;
     refId?: string | null;

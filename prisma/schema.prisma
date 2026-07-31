@@ -74,6 +74,8 @@ model Tenant {
   scriptSettings               ScriptSettings?
   stockBalances                StockBalance[]
   stockMovements               StockMovement[]
+  suppliers                    Supplier[]
+  purchaseOrders               PurchaseOrder[]
 
   @@map("tenants")
 }
@@ -245,6 +247,7 @@ model Product {
   invoiceLines  InvoiceLine[]
   stockBalances StockBalance[]
   stockMovements StockMovement[]
+  purchaseOrderLines PurchaseOrderLine[]
 
   @@unique([tenantId, sku])
   @@unique([tenantId, barcode])
@@ -267,6 +270,8 @@ enum StockMovementSource {
   CREDIT
   ADJUSTMENT
   OPENING
+  PURCHASE
+  RECEIPT
 }
 
 /// Υπόλοιπο αποθέματος ανά προϊόν × υποκατάστημα (Site)
@@ -315,6 +320,94 @@ model StockMovement {
   @@index([tenantId, siteId, createdAt(sort: Desc)])
   @@index([tenantId, refType, refId])
   @@map("stock_movements")
+}
+
+enum SupplierStatus {
+  ACTIVE
+  INACTIVE
+}
+
+enum PurchaseOrderStatus {
+  DRAFT
+  ORDERED
+  PARTIAL
+  RECEIVED
+  CANCELLED
+}
+
+/// Προμηθευτής
+model Supplier {
+  id        String         @id @default(cuid())
+  tenantId  String
+  code      String
+  name      String
+  vatNumber String?
+  email     String?
+  phone     String?
+  notes     String?
+  status    SupplierStatus @default(ACTIVE)
+  createdAt DateTime       @default(now())
+  updatedAt DateTime       @updatedAt
+
+  tenant         Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  purchaseOrders PurchaseOrder[]
+
+  @@unique([tenantId, code])
+  @@index([tenantId, name])
+  @@index([tenantId, status, createdAt(sort: Desc)])
+  @@map("suppliers")
+}
+
+/// Παραγγελία αγοράς
+model PurchaseOrder {
+  id         String              @id @default(cuid())
+  tenantId   String
+  supplierId String
+  siteId     String?
+  seriesId   String?
+  number     String
+  status     PurchaseOrderStatus @default(DRAFT)
+  orderedAt  DateTime            @default(now())
+  currency   String              @default("EUR")
+  subtotal   Decimal             @default(0) @db.Decimal(14, 2)
+  vatAmount  Decimal             @default(0) @db.Decimal(14, 2)
+  total      Decimal             @default(0) @db.Decimal(14, 2)
+  notes      String?
+  createdAt  DateTime            @default(now())
+  updatedAt  DateTime            @updatedAt
+
+  tenant   Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  supplier Supplier            @relation(fields: [supplierId], references: [id], onDelete: Restrict)
+  site     Site?               @relation(fields: [siteId], references: [id], onDelete: SetNull)
+  series   DocumentSeries?     @relation(fields: [seriesId], references: [id], onDelete: SetNull)
+  lines    PurchaseOrderLine[]
+
+  @@unique([tenantId, number])
+  @@index([tenantId, status, orderedAt(sort: Desc)])
+  @@index([tenantId, supplierId, orderedAt(sort: Desc)])
+  @@index([tenantId, createdAt(sort: Desc), id(sort: Desc)])
+  @@map("purchase_orders")
+}
+
+model PurchaseOrderLine {
+  id               String  @id @default(cuid())
+  tenantId         String
+  purchaseOrderId  String
+  productId        String?
+  position         Int
+  description      String
+  quantity         Decimal @db.Decimal(14, 3)
+  quantityReceived Decimal @default(0) @db.Decimal(14, 3)
+  unitPrice        Decimal @db.Decimal(14, 2)
+  vatRate          Decimal @default(24) @db.Decimal(5, 2)
+  lineTotal        Decimal @db.Decimal(14, 2)
+
+  purchaseOrder PurchaseOrder @relation(fields: [purchaseOrderId], references: [id], onDelete: Cascade)
+  product       Product?      @relation(fields: [productId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, purchaseOrderId, position])
+  @@index([tenantId, productId])
+  @@map("purchase_order_lines")
 }
 
 enum UnitOfMeasureKind {
@@ -582,6 +675,7 @@ model Site {
   posTerminals PosTerminal[]
   stockBalances  StockBalance[]
   stockMovements StockMovement[]
+  purchaseOrders PurchaseOrder[]
 
   @@unique([tenantId, code])
   @@index([tenantId, kind, isActive])
@@ -656,6 +750,7 @@ model DocumentSeries {
   site           Site?                         @relation(fields: [siteId], references: [id], onDelete: SetNull)
   invoices       Invoice[]
   orders         Order[]
+  purchaseOrders PurchaseOrder[]
   paymentMethods DocumentSeriesPaymentMethod[]
   printForms     DocumentSeriesPrintForm[]
 
