@@ -65,6 +65,20 @@ const links = [
     badge: "Παραμετρικό",
   },
   {
+    href: "/settings/entity-views",
+    title: "Πεδία & Προβολές",
+    description:
+      "Custom fields ανά module · πολλαπλές λίστες/φόρμες με στήλες, φίλτρα και ενότητες.",
+    badge: "Platform",
+  },
+  {
+    href: "/settings/scripts",
+    title: "Script Hooks",
+    description:
+      "Custom JavaScript ανά event (before/after create/update) · sandbox · HTTP allow-list & secrets για marketplace.",
+    badge: "Platform",
+  },
+  {
     href: "/settings/series",
     title: "Σειρές & Τύποι",
     description:

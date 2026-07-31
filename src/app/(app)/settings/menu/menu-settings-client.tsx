@@ -22,6 +22,7 @@ import {
 import { CSS } from "@dnd-kit/utilities";
 import {
   ArrowLeft,
+  ChevronDown,
   Eye,
   EyeOff,
   FolderPlus,
@@ -32,6 +33,7 @@ import {
   Save,
   Smartphone,
   Trash2,
+  Users,
 } from "lucide-react";
 import { PageHeader } from "@/shared/ui/page-header";
 import { Button } from "@/shared/ui/button";
@@ -54,22 +56,46 @@ import {
   moveNodeInTree,
 } from "@/platform/navigation/menu-tree";
 
+type AudienceGroup = { id: string; code: string; name: string };
+type AudienceUser = { id: string; name: string; email: string };
+
+type AudienceOptions = {
+  groups: AudienceGroup[];
+  users: AudienceUser[];
+};
+
+const MEMBERSHIP_ROLES = ["OWNER", "ADMIN", "MEMBER", "VIEWER"] as const;
+
 type DragData =
   | { kind: "tree"; id: string }
   | { kind: "catalog"; node: MenuNodeConfig };
+
+function toggleId(list: string[] | undefined, id: string): string[] {
+  const cur = list ?? [];
+  return cur.includes(id) ? cur.filter((x) => x !== id) : [...cur, id];
+}
 
 function SortableMenuRow({
   node,
   depth,
   onChange,
   onRemove,
+  audienceOptions,
+  tenantDefaultExpanded,
 }: {
   node: MenuNodeConfig;
   depth: number;
   onChange: (id: string, fn: (n: MenuNodeConfig) => MenuNodeConfig) => void;
   onRemove: (id: string) => void;
+  audienceOptions: AudienceOptions;
+  tenantDefaultExpanded: boolean;
 }) {
+  const [openAccess, setOpenAccess] = useState(false);
   const hidden = node.visible === false;
+  const hasAudience =
+    (node.groupIds?.length ?? 0) > 0 ||
+    (node.userIds?.length ?? 0) > 0 ||
+    (node.roles?.length ?? 0) > 0;
   const {
     attributes,
     listeners,
@@ -88,68 +114,242 @@ function SortableMenuRow({
     marginLeft: depth * 16,
   };
 
+  const folderExpanded = node.defaultExpanded ?? tenantDefaultExpanded;
+
   return (
     <div
       ref={setNodeRef}
       style={style}
       className={cn(
-        "flex items-center gap-2 rounded-xl border border-slate-200/80 bg-white px-2 py-2",
+        "rounded-xl border border-slate-200/80 bg-white",
         hidden && "opacity-55",
         isDragging && "z-10 opacity-40 shadow-md",
       )}
     >
-      <button
-        type="button"
-        className="cursor-grab touch-none rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-600 active:cursor-grabbing"
-        title="Σύρε για αναδιάταξη"
-        {...attributes}
-        {...listeners}
-      >
-        <GripVertical size={16} />
-      </button>
-      <span
-        className={cn(
-          "shrink-0 rounded-md px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide",
-          node.type === "folder"
-            ? "bg-slate-100 text-slate-600"
-            : "bg-teal-50 text-teal-800",
-        )}
-      >
-        {node.type === "folder" ? "Φάκελος" : "Σύνδεσμος"}
-      </span>
-      <input
-        value={node.label}
-        onChange={(e) =>
-          onChange(node.id, (n) => ({ ...n, label: e.target.value }))
-        }
-        className="min-w-0 flex-1 rounded-lg border border-transparent bg-transparent px-2 py-1 text-sm font-medium text-ink-950 outline-none focus:border-slate-200 focus:bg-slate-50"
-      />
-      {node.href ? (
-        <span className="hidden shrink-0 text-xs text-slate-400 sm:inline">
-          {node.href}
+      <div className="flex items-center gap-2 px-2 py-2">
+        <button
+          type="button"
+          className="cursor-grab touch-none rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-600 active:cursor-grabbing"
+          title="Σύρε για αναδιάταξη"
+          {...attributes}
+          {...listeners}
+        >
+          <GripVertical size={16} />
+        </button>
+        <span
+          className={cn(
+            "shrink-0 rounded-md px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide",
+            node.type === "folder"
+              ? "bg-slate-100 text-slate-600"
+              : "bg-teal-50 text-teal-800",
+          )}
+        >
+          {node.type === "folder" ? "Φάκελος" : "Σύνδεσμος"}
         </span>
+        <input
+          value={node.label}
+          onChange={(e) =>
+            onChange(node.id, (n) => ({ ...n, label: e.target.value }))
+          }
+          className="min-w-0 flex-1 rounded-lg border border-transparent bg-transparent px-2 py-1 text-sm font-medium text-ink-950 outline-none focus:border-slate-200 focus:bg-slate-50"
+        />
+        {node.href ? (
+          <span className="hidden shrink-0 text-xs text-slate-400 sm:inline">
+            {node.href}
+          </span>
+        ) : null}
+        <button
+          type="button"
+          title="Πρόσβαση (ρόλοι / ομάδες / χρήστες)"
+          onClick={() => setOpenAccess((v) => !v)}
+          className={cn(
+            "rounded-lg p-1.5 hover:bg-slate-100",
+            hasAudience || openAccess
+              ? "text-teal-700"
+              : "text-slate-500",
+          )}
+        >
+          <Users size={16} />
+        </button>
+        <button
+          type="button"
+          title={hidden ? "Εμφάνιση" : "Απόκρυψη"}
+          onClick={() =>
+            onChange(node.id, (n) => ({
+              ...n,
+              visible: n.visible === false ? true : false,
+            }))
+          }
+          className="rounded-lg p-1.5 text-slate-500 hover:bg-slate-100"
+        >
+          {hidden ? <EyeOff size={16} /> : <Eye size={16} />}
+        </button>
+        <button
+          type="button"
+          title="Αφαίρεση"
+          onClick={() => onRemove(node.id)}
+          className="rounded-lg p-1.5 text-slate-500 hover:bg-rose-50 hover:text-rose-700"
+        >
+          <Trash2 size={16} />
+        </button>
+        <button
+          type="button"
+          aria-expanded={openAccess}
+          onClick={() => setOpenAccess((v) => !v)}
+          className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100"
+        >
+          <ChevronDown
+            size={14}
+            className={cn(
+              "transition-transform",
+              openAccess && "rotate-180",
+            )}
+          />
+        </button>
+      </div>
+
+      {openAccess ? (
+        <div className="space-y-3 border-t border-slate-100 px-3 py-3">
+          {node.type === "folder" ? (
+            <label className="flex items-center justify-between gap-3 text-sm text-ink-900">
+              <span>
+                Expand από προεπιλογή
+                <span className="mt-0.5 block text-xs text-slate-500">
+                  Ναι = ανοιχτός φάκελος στο sidebar
+                </span>
+              </span>
+              <select
+                value={folderExpanded ? "yes" : "no"}
+                onChange={(e) =>
+                  onChange(node.id, (n) => ({
+                    ...n,
+                    defaultExpanded: e.target.value === "yes",
+                  }))
+                }
+                className="rounded-lg border border-slate-200 bg-slate-50 px-2 py-1.5 text-sm outline-none focus:border-teal-300 focus:bg-white"
+              >
+                <option value="yes">Ναι</option>
+                <option value="no">Όχι</option>
+              </select>
+            </label>
+          ) : null}
+
+          <div>
+            <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+              Ρόλοι membership
+            </p>
+            <div className="flex flex-wrap gap-1.5">
+              {MEMBERSHIP_ROLES.map((role) => {
+                const active = (node.roles ?? []).includes(role);
+                return (
+                  <button
+                    key={role}
+                    type="button"
+                    onClick={() =>
+                      onChange(node.id, (n) => ({
+                        ...n,
+                        roles: toggleId(n.roles, role) as MenuNodeConfig["roles"],
+                      }))
+                    }
+                    className={cn(
+                      "rounded-lg border px-2 py-1 text-xs font-medium",
+                      active
+                        ? "border-teal-300 bg-teal-50 text-teal-900"
+                        : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50",
+                    )}
+                  >
+                    {role}
+                  </button>
+                );
+              })}
+            </div>
+            <p className="mt-1 text-[11px] text-slate-400">
+              Κενό = όλοι οι ρόλοι
+            </p>
+          </div>
+
+          <div>
+            <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+              Ομάδες χρηστών
+            </p>
+            {audienceOptions.groups.length === 0 ? (
+              <p className="text-xs text-slate-500">
+                Δεν υπάρχουν ομάδες. Δημιούργησε στο Ρυθμίσεις → Ομάδες.
+              </p>
+            ) : (
+              <div className="flex max-h-28 flex-wrap gap-1.5 overflow-y-auto">
+                {audienceOptions.groups.map((g) => {
+                  const active = (node.groupIds ?? []).includes(g.id);
+                  return (
+                    <button
+                      key={g.id}
+                      type="button"
+                      title={g.code}
+                      onClick={() =>
+                        onChange(node.id, (n) => ({
+                          ...n,
+                          groupIds: toggleId(n.groupIds, g.id),
+                        }))
+                      }
+                      className={cn(
+                        "rounded-lg border px-2 py-1 text-xs font-medium",
+                        active
+                          ? "border-teal-300 bg-teal-50 text-teal-900"
+                          : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50",
+                      )}
+                    >
+                      {g.name}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
+          <div>
+            <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+              Συγκεκριμένοι χρήστες
+            </p>
+            {audienceOptions.users.length === 0 ? (
+              <p className="text-xs text-slate-500">Δεν υπάρχουν χρήστες.</p>
+            ) : (
+              <div className="max-h-32 space-y-1 overflow-y-auto rounded-lg border border-slate-100 p-1.5">
+                {audienceOptions.users.map((u) => {
+                  const active = (node.userIds ?? []).includes(u.id);
+                  return (
+                    <label
+                      key={u.id}
+                      className={cn(
+                        "flex cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 text-xs hover:bg-slate-50",
+                        active && "bg-teal-50/70",
+                      )}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={active}
+                        onChange={() =>
+                          onChange(node.id, (n) => ({
+                            ...n,
+                            userIds: toggleId(n.userIds, u.id),
+                          }))
+                        }
+                      />
+                      <span className="min-w-0 flex-1 truncate font-medium text-ink-900">
+                        {u.name}
+                      </span>
+                      <span className="truncate text-slate-400">{u.email}</span>
+                    </label>
+                  );
+                })}
+              </div>
+            )}
+            <p className="mt-1 text-[11px] text-slate-400">
+              Αν οριστούν ομάδες ή χρήστες, εμφανίζεται μόνο σε αυτούς (OR). Οι
+              ρόλοι ισχύουν πάντα επιπλέον.
+            </p>
+          </div>
+        </div>
       ) : null}
-      <button
-        type="button"
-        title={hidden ? "Εμφάνιση" : "Απόκρυψη"}
-        onClick={() =>
-          onChange(node.id, (n) => ({
-            ...n,
-            visible: n.visible === false ? true : false,
-          }))
-        }
-        className="rounded-lg p-1.5 text-slate-500 hover:bg-slate-100"
-      >
-        {hidden ? <EyeOff size={16} /> : <Eye size={16} />}
-      </button>
-      <button
-        type="button"
-        title="Αφαίρεση"
-        onClick={() => onRemove(node.id)}
-        className="rounded-lg p-1.5 text-slate-500 hover:bg-rose-50 hover:text-rose-700"
-      >
-        <Trash2 size={16} />
-      </button>
     </div>
   );
 }
@@ -237,11 +437,15 @@ function TreeBranch({
   depth,
   onChange,
   onRemove,
+  audienceOptions,
+  tenantDefaultExpanded,
 }: {
   nodes: MenuNodeConfig[];
   depth: number;
   onChange: (id: string, fn: (n: MenuNodeConfig) => MenuNodeConfig) => void;
   onRemove: (id: string) => void;
+  audienceOptions: AudienceOptions;
+  tenantDefaultExpanded: boolean;
 }) {
   return (
     <SortableContext
@@ -256,6 +460,8 @@ function TreeBranch({
               depth={depth}
               onChange={onChange}
               onRemove={onRemove}
+              audienceOptions={audienceOptions}
+              tenantDefaultExpanded={tenantDefaultExpanded}
             />
             {node.type === "folder" ? (
               <FolderDropZone folderId={node.id} label={`Μέσα: ${node.label}`}>
@@ -264,6 +470,8 @@ function TreeBranch({
                   depth={depth + 1}
                   onChange={onChange}
                   onRemove={onRemove}
+                  audienceOptions={audienceOptions}
+                  tenantDefaultExpanded={tenantDefaultExpanded}
                 />
               </FolderDropZone>
             ) : null}
@@ -423,10 +631,17 @@ function MobileFooterEditor({
 
 export function MenuSettingsClient({
   initialMenu,
+  initialNavGroupsDefaultExpanded = true,
+  audienceOptions,
 }: {
   initialMenu: MenuNodeConfig[];
+  initialNavGroupsDefaultExpanded?: boolean;
+  audienceOptions: AudienceOptions;
 }) {
   const [tree, setTree] = useState(() => cloneMenuTree(initialMenu));
+  const [navGroupsDefaultExpanded, setNavGroupsDefaultExpanded] = useState(
+    initialNavGroupsDefaultExpanded,
+  );
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
@@ -595,7 +810,10 @@ export function MenuSettingsClient({
       const res = await fetch("/api/settings/menu", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ menu: tree }),
+        body: JSON.stringify({
+          menu: tree,
+          navGroupsDefaultExpanded,
+        }),
       });
       const data = await res.json();
       if (!res.ok) {
@@ -603,6 +821,9 @@ export function MenuSettingsClient({
         return;
       }
       setTree(cloneMenuTree(data.menu));
+      if (typeof data.navGroupsDefaultExpanded === "boolean") {
+        setNavGroupsDefaultExpanded(data.navGroupsDefaultExpanded);
+      }
       setMessage("Το μενού αποθηκεύτηκε. Ανανεώστε τη σελίδα για το sidebar.");
     });
   };
@@ -622,6 +843,11 @@ export function MenuSettingsClient({
         return;
       }
       setTree(cloneMenuTree(data.menu));
+      setNavGroupsDefaultExpanded(
+        typeof data.navGroupsDefaultExpanded === "boolean"
+          ? data.navGroupsDefaultExpanded
+          : true,
+      );
       setMessage("Επαναφορά στο προεπιλεγμένο μενού.");
     });
   };
@@ -655,7 +881,7 @@ export function MenuSettingsClient({
           </Link>
           <PageHeader
             title="Μενού πλοήγησης"
-            description="Drag & drop, διαθέσιμες επιλογές και footer κινητού — ανά tenant."
+            description="Δομή, expand φακέλων και εμφάνιση ανά ρόλο / ομάδα / χρήστη."
           />
         </div>
         <div className="flex flex-wrap gap-2">
@@ -692,6 +918,50 @@ export function MenuSettingsClient({
         </p>
       ) : null}
 
+      <div className="soft-panel flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <p className="text-sm font-semibold text-ink-900">
+            Expand φακέλων από προεπιλογή
+          </p>
+          <p className="text-xs text-slate-500">
+            Ναι = ανοιχτοί οι φάκελοι στο sidebar (ο χρήστης μπορεί να τους
+            αλλάξει τοπικά). Ανά φάκελο μπορείς να ορίσεις εξαίρεση.
+          </p>
+        </div>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => {
+              setNavGroupsDefaultExpanded(true);
+              setMessage(null);
+            }}
+            className={cn(
+              "rounded-xl border px-4 py-2 text-sm font-medium",
+              navGroupsDefaultExpanded
+                ? "border-teal-300 bg-teal-50 text-teal-900"
+                : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50",
+            )}
+          >
+            Ναι
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setNavGroupsDefaultExpanded(false);
+              setMessage(null);
+            }}
+            className={cn(
+              "rounded-xl border px-4 py-2 text-sm font-medium",
+              !navGroupsDefaultExpanded
+                ? "border-teal-300 bg-teal-50 text-teal-900"
+                : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50",
+            )}
+          >
+            Όχι
+          </button>
+        </div>
+      </div>
+
       <DndContext
         sensors={sensors}
         collisionDetection={closestCenter}
@@ -704,7 +974,7 @@ export function MenuSettingsClient({
             <div className="mb-2 flex items-center justify-between gap-2">
               <h2 className="text-sm font-semibold text-ink-900">Δομή μενού</h2>
               <span className="text-xs text-slate-400">
-                Σύρε για σειρά ή μέσα σε φάκελο
+                Εικονίδιο χρηστών = πρόσβαση ανά ομάδα/χρήστη
               </span>
             </div>
             <TreeBranch
@@ -712,6 +982,8 @@ export function MenuSettingsClient({
               depth={0}
               onChange={updateNode}
               onRemove={removeNode}
+              audienceOptions={audienceOptions}
+              tenantDefaultExpanded={navGroupsDefaultExpanded}
             />
             {tree.length === 0 ? (
               <p className="rounded-xl border border-dashed border-slate-200 px-3 py-8 text-center text-sm text-slate-500">

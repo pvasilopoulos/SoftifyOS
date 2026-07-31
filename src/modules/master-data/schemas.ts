@@ -8,7 +8,21 @@ export const customerCreateSchema = z.object({
   phone: z.string().trim().max(40).optional().nullable(),
   notes: z.string().trim().max(2000).optional().nullable(),
   status: z.enum(["ACTIVE", "INACTIVE"]).optional(),
+  customFields: z
+    .record(
+      z.string(),
+      z.union([
+        z.string(),
+        z.number(),
+        z.boolean(),
+        z.null(),
+        z.array(z.string()),
+      ]),
+    )
+    .optional(),
 });
+
+export const customerUpdateSchema = customerCreateSchema.partial();
 
 export const branchCreateSchema = z.object({
   code: z.string().trim().min(1).max(40),
@@ -58,7 +72,22 @@ export const productCreateSchema = z.object({
   price: z.coerce.number().nonnegative().max(10_000_000),
   notes: z.string().trim().max(2000).optional().nullable(),
   status: z.enum(["ACTIVE", "INACTIVE"]).optional(),
+  trackInventory: z.boolean().optional(),
+  customFields: z
+    .record(
+      z.string(),
+      z.union([
+        z.string(),
+        z.number(),
+        z.boolean(),
+        z.null(),
+        z.array(z.string()),
+      ]),
+    )
+    .optional(),
 });
+
+export const productUpdateSchema = productCreateSchema.partial();
 
 export const productStatusLabel = {
   ACTIVE: "Ενεργό",

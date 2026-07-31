@@ -1,7 +1,10 @@
 import { redirect } from "next/navigation";
 import { AppShell } from "@/platform/shell/app-shell";
 import { getSession } from "@/platform/auth/session";
-import { getTenantMenuTree } from "@/platform/navigation/resolve-menu";
+import {
+  getMenuAudienceForSession,
+  getTenantMenuSettings,
+} from "@/platform/navigation/resolve-menu";
 
 export default async function AppLayout({
   children,
@@ -13,10 +16,23 @@ export default async function AppLayout({
     redirect("/login");
   }
 
-  const menuTree = await getTenantMenuTree(session.tenantId);
+  const [{ menuTree, navGroupsDefaultExpanded }, menuAudience] =
+    await Promise.all([
+      getTenantMenuSettings(session.tenantId),
+      getMenuAudienceForSession({
+        tenantId: session.tenantId,
+        userId: session.sub,
+        role: session.role,
+      }),
+    ]);
 
   return (
-    <AppShell session={session} menuTree={menuTree}>
+    <AppShell
+      session={session}
+      menuTree={menuTree}
+      menuAudience={menuAudience}
+      navGroupsDefaultExpanded={navGroupsDefaultExpanded}
+    >
       {children}
     </AppShell>
   );

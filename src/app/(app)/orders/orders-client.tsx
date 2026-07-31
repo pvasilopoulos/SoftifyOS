@@ -1,17 +1,18 @@
 "use client";
 
-import Link from "next/link";
-import { useState, useTransition } from "react";
-import { Pencil, Search } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { useMemo, useState, useTransition } from "react";
+import { Search } from "lucide-react";
 import { Badge } from "@/shared/ui/badge";
 import { Button } from "@/shared/ui/button";
-import { cn } from "@/shared/lib/cn";
-import { formatEUR } from "@/modules/sales/invoice-utils";
+import { ENTITY_REGISTRY } from "@/modules/entity-views/registry";
+import type { CustomFieldDef } from "@/modules/entity-views/dynamic-ui";
+import { ViewSwitcher } from "@/modules/entity-views/view-switcher";
 import {
-  orderStatusLabel,
-  orderStatusTone,
-  type OrderStatusKey,
-} from "@/modules/sales/order-utils";
+  normalizeListConfig,
+  type ListViewConfig,
+} from "@/modules/entity-views/types";
+import { ListExperienceRenderer } from "@/modules/entity-views/list-experience-renderer";
 
 export type OrderListItem = {
   id: string;
@@ -25,6 +26,15 @@ export type OrderListItem = {
   customerCode: string;
   branchName: string | null;
   lineCount: number;
+  customFields?: Record<string, unknown>;
+};
+
+type ListViewOpt = {
+  id: string;
+  code: string;
+  name: string;
+  isDefault: boolean;
+  config: ListViewConfig;
 };
 
 type ListResponse = {
@@ -41,6 +51,9 @@ export function OrdersClient({
   kind = "SALES_ORDER",
   detailBasePath = "/orders",
   emptyLabel = "Δεν βρέθηκαν παραγγελίες",
+  entity = "ORDERS",
+  listViews = [],
+  customFields = [],
 }: {
   initialItems: OrderListItem[];
   initialNextCursor: string | null;
@@ -48,7 +61,14 @@ export function OrdersClient({
   kind?: "SALES_ORDER" | "SALES_QUOTE";
   detailBasePath?: string;
   emptyLabel?: string;
+  entity?: "ORDERS" | "QUOTES";
+  listViews?: ListViewOpt[];
+  customFields?: CustomFieldDef[];
 }) {
+  const router = useRouter();
+  const defaultView =
+    listViews.find((v) => v.isDefault) ?? listViews[0] ?? null;
+  const [viewId, setViewId] = useState(defaultView?.id ?? "");
   const [items, setItems] = useState(initialItems);
   const [nextCursor, setNextCursor] = useState(initialNextCursor);
   const [ms, setMs] = useState(initialMs);
@@ -56,9 +76,25 @@ export function OrdersClient({
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
 
+  const activeView = listViews.find((v) => v.id === viewId) ?? defaultView;
+  const config = useMemo(() => {
+    const normalized = normalizeListConfig(activeView?.config);
+    if (!normalized.page?.emptyTitle) {
+      return {
+        ...normalized,
+        page: { ...normalized.page, emptyTitle: emptyLabel },
+      };
+    }
+    return normalized;
+  }, [activeView, emptyLabel]);
+  const builtins = ENTITY_REGISTRY[entity].builtins;
+
   async function search() {
     setError(null);
-    const params = new URLSearchParams({ limit: "50", kind });
+    const params = new URLSearchParams({
+      limit: String(config.pageSize ?? 50),
+      kind,
+    });
     if (q.trim()) params.set("q", q.trim());
     const res = await fetch(`/api/orders?${params}`, { cache: "no-store" });
     const data = (await res.json()) as ListResponse;
@@ -76,7 +112,7 @@ export function OrdersClient({
   async function loadMore() {
     if (!nextCursor) return;
     const params = new URLSearchParams({
-      limit: "50",
+      limit: String(config.pageSize ?? 50),
       cursor: nextCursor,
       kind,
     });
@@ -96,7 +132,7 @@ export function OrdersClient({
 
   return (
     <div className="space-y-3">
-      <div className="flex flex-col gap-2 sm:flex-row">
+      <div className="flex flex-col gap-2 lg:flex-row lg:items-center">
         <label className="soft-surface flex flex-1 items-center gap-2 px-3 py-2.5">
           <Search size={16} className="text-slate-400" />
           <input
@@ -109,6 +145,16 @@ export function OrdersClient({
             className="w-full bg-transparent text-sm outline-none"
           />
         </label>
+        {listViews.length > 0 ? (
+          <ViewSwitcher
+            views={listViews}
+            value={viewId}
+            onChange={(id) => {
+              setViewId(id);
+              void search();
+            }}
+          />
+        ) : null}
         <Button
           variant="secondary"
           onClick={() => void search()}
@@ -125,74 +171,20 @@ export function OrdersClient({
         </p>
       ) : null}
 
-      <section className="soft-panel overflow-hidden">
-        <div className="hidden border-b border-slate-100 px-4 py-2.5 text-xs font-medium uppercase tracking-wide text-slate-400 md:grid md:grid-cols-[0.9fr_1.3fr_0.7fr_0.6fr_0.7fr_auto] md:gap-3">
-          <span>Αριθμός</span>
-          <span>Πελάτης</span>
-          <span className="text-right">Ποσό</span>
-          <span>Γραμμές</span>
-          <span>Κατάσταση</span>
-          <span />
-        </div>
-        <ul className="divide-y divide-slate-100">
-          {items.map((o) => {
-            const status = o.status as OrderStatusKey;
-            return (
-              <li key={o.id} className="soft-row">
-                <div className="grid grid-cols-[1fr_auto] gap-3 px-4 py-3 md:grid-cols-[0.9fr_1.3fr_0.7fr_0.6fr_0.7fr_auto] md:items-center">
-                  <Link href={`${detailBasePath}/${o.id}`} className="min-w-0">
-                    <p className="text-sm font-semibold text-ink-950">
-                      {o.number}
-                    </p>
-                    <p className="text-xs text-slate-500 md:hidden">
-                      {o.customerName}
-                    </p>
-                  </Link>
-                  <Link
-                    href={`${detailBasePath}/${o.id}`}
-                    className="hidden min-w-0 md:block"
-                  >
-                    <p className="truncate text-sm font-medium text-ink-900">
-                      {o.customerName}
-                    </p>
-                    <p className="truncate text-xs text-slate-500">
-                      {o.branchName || o.customerCode}
-                    </p>
-                  </Link>
-                  <p className="text-sm font-medium md:text-right">
-                    {formatEUR(o.total)}
-                  </p>
-                  <p className="hidden text-sm text-slate-500 md:block">
-                    {o.lineCount}
-                  </p>
-                  <div>
-                    <Badge tone={orderStatusTone[status] ?? "slate"}>
-                      {orderStatusLabel[status] ?? o.status}
-                    </Badge>
-                  </div>
-                  <Link
-                    href={`${detailBasePath}/${o.id}`}
-                    className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-600 hover:border-teal-200 hover:bg-teal-50 hover:text-teal-700 md:hidden"
-                    aria-label={`Άνοιγμα ${o.number}`}
-                  >
-                    <Pencil size={15} />
-                  </Link>
-                </div>
-              </li>
-            );
-          })}
-          {items.length === 0 ? (
-            <li className="px-4 py-8 text-center text-sm text-slate-500">
-              {emptyLabel}
-            </li>
-          ) : null}
-        </ul>
-      </section>
+      <ListExperienceRenderer
+        config={config}
+        builtins={builtins}
+        customDefs={customFields}
+        rows={items as unknown as Array<Record<string, unknown> & { id: string }>}
+        hrefForRow={(row) => `${detailBasePath}/${row.id}`}
+        onNavigateNew={() => router.push(`${detailBasePath}/new`)}
+        emptyActionLabel="Νέα εγγραφή"
+      />
 
       {nextCursor ? (
         <Button
           variant="secondary"
-          className={cn("w-full sm:w-auto")}
+          className="w-full sm:w-auto"
           disabled={isPending}
           onClick={() => void loadMore()}
         >

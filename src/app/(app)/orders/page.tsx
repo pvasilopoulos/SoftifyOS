@@ -7,6 +7,12 @@ import { encodeCursor } from "@/shared/lib/cursor";
 import { PageHeader } from "@/shared/ui/page-header";
 import { Badge } from "@/shared/ui/badge";
 import { toNumber } from "@/modules/sales/invoice-utils";
+import {
+  listCustomFields,
+  listEntityListViews,
+  serializeListView,
+} from "@/modules/entity-views/service";
+import { parseCustomFields } from "@/modules/entity-views/types";
 import { OrdersClient } from "./orders-client";
 
 export const metadata = { title: "Παραγγελίες" };
@@ -37,6 +43,7 @@ async function loadOrders(tenantId: string) {
     customerCode: o.customer.code,
     branchName: o.branch?.name ?? null,
     lineCount: o._count.lines,
+    customFields: parseCustomFields(o.customFields),
   }));
   const last = items[items.length - 1];
   return {
@@ -53,13 +60,17 @@ export default async function OrdersPage() {
   const session = await getSession();
   if (!session) redirect("/login");
 
-  const first = await loadOrders(session.tenantId);
+  const [first, listViews, customFields] = await Promise.all([
+    loadOrders(session.tenantId),
+    listEntityListViews(prisma, session.tenantId, "ORDERS", true),
+    listCustomFields(prisma, session.tenantId, "ORDERS", true),
+  ]);
 
   return (
     <div className="space-y-5">
       <PageHeader
         title="Παραγγελίες"
-        description="Παραγγελία → έκδοση τιμολογίου"
+        description="Παραγγελία → έκδοση τιμολογίου · δυναμικές προβολές"
         actions={
           <Link
             href="/orders/new"
@@ -75,10 +86,19 @@ export default async function OrdersPage() {
         initialNextCursor={first.nextCursor}
         initialMs={first.ms}
         kind="SALES_ORDER"
+        entity="ORDERS"
+        listViews={listViews.map(serializeListView)}
+        customFields={customFields.map((f) => ({
+          code: f.code,
+          label: f.label,
+          type: f.type,
+          optionsJson: f.optionsJson,
+          required: f.required,
+        }))}
       />
       <p className="text-xs text-slate-500">
-        Οι γραμμές μπορούν να δεθούν με προϊόντα καταλόγου.{" "}
-        <Badge tone="teal">Phase 1 sales</Badge>
+        Προβολές από Ρυθμίσεις → Πεδία & Προβολές.{" "}
+        <Badge tone="teal">Entity views</Badge>
       </p>
     </div>
   );

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState, useTransition } from "react";
-import { Sidebar } from "@/platform/shell/sidebar";
+import { Sidebar, readSidebarCollapsed } from "@/platform/shell/sidebar";
 import { Topbar } from "@/platform/shell/topbar";
 import { MobileTabBar } from "@/platform/shell/mobile-tab-bar";
 import { CommandPalette } from "@/platform/shell/command-palette";
@@ -9,6 +9,7 @@ import { QuickActionsSheet } from "@/platform/shell/quick-actions-sheet";
 import { NavProvider } from "@/platform/navigation/nav-context";
 import {
   menuTreeToNavGroups,
+  type MenuAudience,
   type MenuNodeConfig,
 } from "@/platform/navigation";
 import { resolveMobileTabsFromGroups } from "@/platform/navigation/menu-tree";
@@ -17,10 +18,14 @@ import type { SessionPayload } from "@/platform/auth/session";
 export function AppShell({
   session,
   menuTree,
+  menuAudience,
+  navGroupsDefaultExpanded = true,
   children,
 }: {
   session: SessionPayload;
   menuTree: MenuNodeConfig[];
+  menuAudience?: MenuAudience;
+  navGroupsDefaultExpanded?: boolean;
   children: React.ReactNode;
 }) {
   const [collapsed, setCollapsed] = useState(false);
@@ -28,9 +33,23 @@ export function AppShell({
   const [quickOpen, setQuickOpen] = useState(false);
   const [, startTransition] = useTransition();
 
+  useEffect(() => {
+    setCollapsed(readSidebarCollapsed());
+  }, []);
+
+  const audience = useMemo<MenuAudience>(
+    () =>
+      menuAudience ?? {
+        role: session.role,
+        userId: session.sub,
+        groupIds: [],
+      },
+    [menuAudience, session.role, session.sub],
+  );
+
   const groups = useMemo(
-    () => menuTreeToNavGroups(menuTree, session.role),
-    [menuTree, session.role],
+    () => menuTreeToNavGroups(menuTree, audience, navGroupsDefaultExpanded),
+    [menuTree, audience, navGroupsDefaultExpanded],
   );
 
   const mobileTabs = useMemo(

@@ -51,10 +51,12 @@ export async function GET(request: NextRequest) {
         status: string;
         createdAt: Date;
         branchCount: bigint;
+        customFields: unknown;
       }>
     >`
       SELECT
         c.id, c.code, c.name, c."vatNumber", c.email, c.phone, c.status, c."createdAt",
+        c."customFields",
         (SELECT COUNT(*) FROM branches b WHERE b."customerId" = c.id AND b."tenantId" = c."tenantId") AS "branchCount"
       FROM customers c
       WHERE c."tenantId" = ${session.tenantId}
@@ -82,6 +84,10 @@ export async function GET(request: NextRequest) {
       ...row,
       branchCount: Number(row.branchCount),
       createdAt: row.createdAt.toISOString(),
+      customFields:
+        row.customFields && typeof row.customFields === "object"
+          ? row.customFields
+          : {},
     }));
     const last = items[items.length - 1];
     const nextCursor =
@@ -113,16 +119,85 @@ export async function POST(request: Request) {
     }
 
     const body = customerCreateSchema.parse(await request.json());
+    const { normalizeCustomFieldsInput } = await import(
+      "@/modules/entity-views/service"
+    );
+    const {
+      applyRecordPatch,
+      dispatchScriptEvent,
+    } = await import("@/modules/scripts/service");
+
+    let customFields = await normalizeCustomFieldsInput(
+      prisma,
+      session.tenantId,
+      "CUSTOMERS",
+      body.customFields,
+    );
+
+    const draftRecord: Record<string, unknown> = {
+      code: body.code,
+      name: body.name,
+      vatNumber: body.vatNumber || null,
+      email: body.email || null,
+      phone: body.phone || null,
+      notes: body.notes || null,
+      status: body.status ?? "ACTIVE",
+      customFields,
+    };
+
+    const before = await dispatchScriptEvent(prisma, {
+      tenantId: session.tenantId,
+      module: "CUSTOMERS",
+      eventKey: "before.create",
+      record: draftRecord,
+      user: {
+        id: session.sub,
+        role: session.role,
+        email: session.email,
+        name: session.name,
+      },
+    });
+    if (before.failed) {
+      return NextResponse.json(
+        { error: before.failed.message, script: before.failed.scriptCode },
+        { status: 400 },
+      );
+    }
+
+    const patched = applyRecordPatch(draftRecord, before.record, [
+      "code",
+      "name",
+      "vatNumber",
+      "email",
+      "phone",
+      "notes",
+      "status",
+      "customFields",
+    ]);
+    if (
+      patched.customFields &&
+      typeof patched.customFields === "object" &&
+      !Array.isArray(patched.customFields)
+    ) {
+      customFields = await normalizeCustomFieldsInput(
+        prisma,
+        session.tenantId,
+        "CUSTOMERS",
+        patched.customFields as Record<string, unknown>,
+      );
+    }
+
     const customer = await prisma.customer.create({
       data: {
         tenantId: session.tenantId,
-        code: body.code,
-        name: body.name,
-        vatNumber: body.vatNumber || null,
-        email: body.email || null,
-        phone: body.phone || null,
-        notes: body.notes || null,
-        status: body.status ?? "ACTIVE",
+        code: String(patched.code),
+        name: String(patched.name),
+        vatNumber: (patched.vatNumber as string | null) || null,
+        email: (patched.email as string | null) || null,
+        phone: (patched.phone as string | null) || null,
+        notes: (patched.notes as string | null) || null,
+        status: (patched.status as "ACTIVE" | "INACTIVE") ?? "ACTIVE",
+        customFields,
       },
     });
 
@@ -134,6 +209,40 @@ export async function POST(request: Request) {
       entityId: customer.id,
       meta: { code: customer.code },
     });
+
+    const afterRecord: Record<string, unknown> = {
+      id: customer.id,
+      code: customer.code,
+      name: customer.name,
+      vatNumber: customer.vatNumber,
+      email: customer.email,
+      phone: customer.phone,
+      notes: customer.notes,
+      status: customer.status,
+      customFields: customer.customFields,
+    };
+    const after = await dispatchScriptEvent(prisma, {
+      tenantId: session.tenantId,
+      module: "CUSTOMERS",
+      eventKey: "after.create",
+      record: afterRecord,
+      user: {
+        id: session.sub,
+        role: session.role,
+        email: session.email,
+        name: session.name,
+      },
+    });
+    if (after.failed) {
+      return NextResponse.json(
+        {
+          item: customer,
+          warning: after.failed.message,
+          script: after.failed.scriptCode,
+        },
+        { status: 201 },
+      );
+    }
 
     return NextResponse.json({ item: customer }, { status: 201 });
   } catch (error) {

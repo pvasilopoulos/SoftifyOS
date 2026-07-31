@@ -15,6 +15,26 @@ import {
 } from "@/modules/sales/invoice-utils";
 import { invoiceKindLabel } from "@/modules/documents/series";
 import { InvoiceActions } from "./invoice-actions";
+import { ViewSwitcher } from "@/modules/entity-views/view-switcher";
+import {
+  DynamicListCells,
+  DynamicListHeader,
+  type CustomFieldDef,
+} from "@/modules/entity-views/dynamic-ui";
+import { ENTITY_REGISTRY } from "@/modules/entity-views/registry";
+import {
+  applyListConfig,
+  normalizeListConfig,
+  type ListViewConfig,
+} from "@/modules/entity-views/types";
+
+type ListViewOpt = {
+  id: string;
+  code: string;
+  name: string;
+  isDefault: boolean;
+  config: ListViewConfig;
+};
 
 export type InvoiceListItem = {
   id: string;
@@ -31,6 +51,7 @@ export type InvoiceListItem = {
   customerCode: string;
   branchName: string | null;
   spaceName: string | null;
+  customFields?: Record<string, unknown>;
 };
 
 type Counts = {
@@ -92,12 +113,19 @@ export function InvoicesWorkspace({
   initialNextCursor,
   initialCounts,
   initialMs,
+  listViews = [],
+  customFields = [],
 }: {
   initialItems: InvoiceListItem[];
   initialNextCursor: string | null;
   initialCounts: Counts;
   initialMs: number;
+  listViews?: ListViewOpt[];
+  customFields?: CustomFieldDef[];
 }) {
+  const defaultView =
+    listViews.find((v) => v.isDefault) ?? listViews[0] ?? null;
+  const [viewId, setViewId] = useState(defaultView?.id ?? "");
   const [items, setItems] = useState(initialItems);
   const [nextCursor, setNextCursor] = useState(initialNextCursor);
   const [counts, setCounts] = useState(initialCounts);
@@ -113,6 +141,20 @@ export function InvoicesWorkspace({
   const [isPending, startTransition] = useTransition();
 
   const selectedSet = useMemo(() => new Set(selectedIds), [selectedIds]);
+  const activeView = listViews.find((v) => v.id === viewId) ?? defaultView;
+  const config = useMemo(
+    () => normalizeListConfig(activeView?.config),
+    [activeView],
+  );
+  const useDynamic = Boolean(config.columns?.length);
+  const builtins = ENTITY_REGISTRY.INVOICES.builtins;
+
+  const visibleItems = useMemo(() => {
+    return applyListConfig(
+      items as unknown as Array<Record<string, unknown>>,
+      config,
+    ) as unknown as InvoiceListItem[];
+  }, [items, config]);
 
   useEffect(() => {
     if (!previewId) return;
@@ -168,8 +210,8 @@ export function InvoicesWorkspace({
   }
 
   function toggleAll() {
-    if (selectedIds.length === items.length) setSelectedIds([]);
-    else setSelectedIds(items.map((i) => i.id));
+    if (selectedIds.length === visibleItems.length) setSelectedIds([]);
+    else setSelectedIds(visibleItems.map((i) => i.id));
   }
 
   return (
@@ -199,15 +241,11 @@ export function InvoicesWorkspace({
       </div>
 
       <div className="flex flex-wrap gap-2">
-        {["Τελευταίες 30 ημέρες", "Ληξιπρόθεσμα", "Ποσά > 5.000€"].map((v) => (
-          <button
-            key={v}
-            type="button"
-            className="rounded-full bg-white px-3 py-1 text-xs font-medium text-slate-600 ring-1 ring-slate-200 hover:bg-slate-50"
-          >
-            {v}
-          </button>
-        ))}
+        <ViewSwitcher
+          views={listViews}
+          value={viewId}
+          onChange={setViewId}
+        />
       </div>
 
       <div className="flex flex-col gap-2 sm:flex-row">
@@ -306,7 +344,10 @@ export function InvoicesWorkspace({
           <div className="hidden border-b border-slate-100 px-4 py-2.5 text-xs font-medium uppercase tracking-wide text-slate-400 md:grid md:grid-cols-[auto_1fr_1.2fr_0.7fr_0.8fr_0.8fr] md:gap-3">
             <input
               type="checkbox"
-              checked={items.length > 0 && selectedIds.length === items.length}
+              checked={
+                visibleItems.length > 0 &&
+                selectedIds.length === visibleItems.length
+              }
               onChange={toggleAll}
               aria-label="Επιλογή όλων"
             />
@@ -314,12 +355,50 @@ export function InvoicesWorkspace({
             <span>Πελάτης</span>
             <span className="text-right">Ποσό</span>
             <span>Κατάσταση</span>
-            <span>Πληρωμή</span>
+            <span>{useDynamic ? "Προβολή" : "Πληρωμή"}</span>
           </div>
           <ul className="divide-y divide-slate-100">
-            {items.map((inv) => {
+            {visibleItems.map((inv) => {
               const status = inv.status as InvoiceStatusKey;
               const ratio = paidRatio(inv.paidAmount, inv.total);
+              if (useDynamic && config) {
+                return (
+                  <li key={inv.id} className="soft-row">
+                    <div
+                      className={cn(
+                        "flex items-center gap-3 px-4 py-3",
+                        previewId === inv.id && "bg-teal-50/60",
+                      )}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={selectedSet.has(inv.id)}
+                        onChange={() => toggleSelect(inv.id)}
+                        aria-label={`Επιλογή ${inv.number}`}
+                      />
+                      <button
+                        type="button"
+                        className="min-w-0 flex-1 text-left"
+                        onClick={() => setPreviewId(inv.id)}
+                      >
+                        <DynamicListCells
+                          columns={config.columns}
+                          builtins={builtins}
+                          customDefs={customFields}
+                          row={inv as unknown as Record<string, unknown>}
+                        />
+                      </button>
+                      <Link
+                        href={`/invoices/${inv.id}`}
+                        className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-600 hover:border-teal-200 hover:bg-teal-50 hover:text-teal-700"
+                        aria-label={`Επεξεργασία ${inv.number}`}
+                      >
+                        <Pencil size={15} />
+                      </Link>
+                    </div>
+                  </li>
+                );
+              }
               return (
                 <li key={inv.id} className="soft-row">
                   <div
@@ -398,15 +477,15 @@ export function InvoicesWorkspace({
                 </li>
               );
             })}
-            {items.length === 0 ? (
+            {visibleItems.length === 0 ? (
               <li className="px-4 py-12 text-center text-sm text-slate-500">
-                Δεν βρέθηκαν τιμολόγια. Τρέξε `npm run db:seed:invoices`.
+                Δεν βρέθηκαν τιμολόγια για αυτή την προβολή.
               </li>
             ) : null}
           </ul>
           <div className="flex items-center justify-between border-t border-slate-100 px-4 py-3">
             <p className="text-xs text-slate-500">
-              {items.length} εμφανίζονται · cursor pagination
+              {visibleItems.length} εμφανίζονται · cursor pagination
             </p>
             <Button
               variant="secondary"

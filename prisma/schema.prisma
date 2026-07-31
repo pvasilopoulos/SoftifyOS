@@ -64,6 +64,18 @@ model Tenant {
   tenantSettings               TenantSettings?
   appRoles                     AppRole[]
   userGroups                   UserGroup[]
+  customFieldDefinitions       CustomFieldDefinition[]
+  entityListViews              EntityListView[]
+  entityFormViews              EntityFormView[]
+  scriptDefinitions            ScriptDefinition[]
+  scriptSecrets                ScriptSecret[]
+  scriptHttpAllowlist          ScriptHttpAllowlist[]
+  scriptRunLogs                ScriptRunLog[]
+  scriptSettings               ScriptSettings?
+  stockBalances                StockBalance[]
+  stockMovements               StockMovement[]
+  suppliers                    Supplier[]
+  purchaseOrders               PurchaseOrder[]
 
   @@map("tenants")
 }
@@ -132,6 +144,8 @@ model Customer {
   phone     String?
   status    CustomerStatus @default(ACTIVE)
   notes     String?
+  /// Hybrid custom fields: { [fieldCode]: value }
+  customFields Json?
   createdAt DateTime       @default(now())
   updatedAt DateTime       @updatedAt
 
@@ -220,7 +234,10 @@ model Product {
   vatRate   Decimal       @default(24) @db.Decimal(5, 2)
   price     Decimal       @db.Decimal(14, 2)
   status    ProductStatus @default(ACTIVE)
+  /// When false, stock movements skip this product (services)
+  trackInventory Boolean  @default(true)
   notes     String?
+  customFields Json?
   createdAt DateTime      @default(now())
   updatedAt DateTime      @updatedAt
 
@@ -228,6 +245,9 @@ model Product {
   unitOfMeasure UnitOfMeasure? @relation(fields: [unitId], references: [id], onDelete: SetNull)
   lines         OrderLine[]
   invoiceLines  InvoiceLine[]
+  stockBalances StockBalance[]
+  stockMovements StockMovement[]
+  purchaseOrderLines PurchaseOrderLine[]
 
   @@unique([tenantId, sku])
   @@unique([tenantId, barcode])
@@ -236,6 +256,158 @@ model Product {
   @@index([tenantId, createdAt(sort: Desc), id(sort: Desc)])
   @@index([tenantId, status, createdAt(sort: Desc)])
   @@map("products")
+}
+
+enum StockMovementType {
+  IN
+  OUT
+  ADJUST
+}
+
+enum StockMovementSource {
+  MANUAL
+  INVOICE
+  CREDIT
+  ADJUSTMENT
+  OPENING
+  PURCHASE
+  RECEIPT
+}
+
+/// Υπόλοιπο αποθέματος ανά προϊόν × υποκατάστημα (Site)
+model StockBalance {
+  id        String   @id @default(cuid())
+  tenantId  String
+  siteId    String
+  productId String
+  qtyOnHand Decimal  @default(0) @db.Decimal(14, 3)
+  updatedAt DateTime @updatedAt
+
+  tenant  Tenant  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  site    Site    @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, siteId, productId])
+  @@index([tenantId, productId])
+  @@index([tenantId, siteId])
+  @@map("stock_balances")
+}
+
+/// Κίνηση αποθήκης (αμετάβλητο ιστορικό)
+model StockMovement {
+  id        String              @id @default(cuid())
+  tenantId  String
+  siteId    String
+  productId String
+  type      StockMovementType
+  source    StockMovementSource @default(MANUAL)
+  /// Absolute quantity of the movement (always ≥ 0)
+  qty       Decimal             @db.Decimal(14, 3)
+  qtyBefore Decimal             @db.Decimal(14, 3)
+  qtyAfter  Decimal             @db.Decimal(14, 3)
+  note      String?
+  refType   String?
+  refId     String?
+  userId    String?
+  createdAt DateTime            @default(now())
+
+  tenant  Tenant  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  site    Site    @relation(fields: [siteId], references: [id], onDelete: Restrict)
+  product Product @relation(fields: [productId], references: [id], onDelete: Restrict)
+
+  @@index([tenantId, createdAt(sort: Desc), id(sort: Desc)])
+  @@index([tenantId, productId, createdAt(sort: Desc)])
+  @@index([tenantId, siteId, createdAt(sort: Desc)])
+  @@index([tenantId, refType, refId])
+  @@map("stock_movements")
+}
+
+enum SupplierStatus {
+  ACTIVE
+  INACTIVE
+}
+
+enum PurchaseOrderStatus {
+  DRAFT
+  ORDERED
+  PARTIAL
+  RECEIVED
+  CANCELLED
+}
+
+/// Προμηθευτής
+model Supplier {
+  id        String         @id @default(cuid())
+  tenantId  String
+  code      String
+  name      String
+  vatNumber String?
+  email     String?
+  phone     String?
+  notes     String?
+  status    SupplierStatus @default(ACTIVE)
+  createdAt DateTime       @default(now())
+  updatedAt DateTime       @updatedAt
+
+  tenant         Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  purchaseOrders PurchaseOrder[]
+
+  @@unique([tenantId, code])
+  @@index([tenantId, name])
+  @@index([tenantId, status, createdAt(sort: Desc)])
+  @@map("suppliers")
+}
+
+/// Παραγγελία αγοράς
+model PurchaseOrder {
+  id         String              @id @default(cuid())
+  tenantId   String
+  supplierId String
+  siteId     String?
+  seriesId   String?
+  number     String
+  status     PurchaseOrderStatus @default(DRAFT)
+  orderedAt  DateTime            @default(now())
+  currency   String              @default("EUR")
+  subtotal   Decimal             @default(0) @db.Decimal(14, 2)
+  vatAmount  Decimal             @default(0) @db.Decimal(14, 2)
+  total      Decimal             @default(0) @db.Decimal(14, 2)
+  notes      String?
+  createdAt  DateTime            @default(now())
+  updatedAt  DateTime            @updatedAt
+
+  tenant   Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  supplier Supplier            @relation(fields: [supplierId], references: [id], onDelete: Restrict)
+  site     Site?               @relation(fields: [siteId], references: [id], onDelete: SetNull)
+  series   DocumentSeries?     @relation(fields: [seriesId], references: [id], onDelete: SetNull)
+  lines    PurchaseOrderLine[]
+
+  @@unique([tenantId, number])
+  @@index([tenantId, status, orderedAt(sort: Desc)])
+  @@index([tenantId, supplierId, orderedAt(sort: Desc)])
+  @@index([tenantId, createdAt(sort: Desc), id(sort: Desc)])
+  @@map("purchase_orders")
+}
+
+model PurchaseOrderLine {
+  id               String  @id @default(cuid())
+  tenantId         String
+  purchaseOrderId  String
+  productId        String?
+  position         Int
+  description      String
+  quantity         Decimal @db.Decimal(14, 3)
+  quantityReceived Decimal @default(0) @db.Decimal(14, 3)
+  unitPrice        Decimal @db.Decimal(14, 2)
+  vatRate          Decimal @default(24) @db.Decimal(5, 2)
+  lineTotal        Decimal @db.Decimal(14, 2)
+
+  purchaseOrder PurchaseOrder @relation(fields: [purchaseOrderId], references: [id], onDelete: Cascade)
+  product       Product?      @relation(fields: [productId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, purchaseOrderId, position])
+  @@index([tenantId, productId])
+  @@map("purchase_order_lines")
 }
 
 enum UnitOfMeasureKind {
@@ -316,6 +488,7 @@ model Invoice {
   total             Decimal       @db.Decimal(14, 2)
   paidAmount        Decimal       @default(0) @db.Decimal(14, 2)
   notes             String?
+  customFields      Json?
   createdAt         DateTime      @default(now())
   updatedAt         DateTime      @updatedAt
 
@@ -428,6 +601,7 @@ model Order {
   vatAmount     Decimal     @db.Decimal(14, 2)
   total         Decimal     @db.Decimal(14, 2)
   notes         String?
+  customFields  Json?
   createdAt     DateTime    @default(now())
   updatedAt     DateTime    @updatedAt
 
@@ -499,6 +673,9 @@ model Site {
   orders   Order[]
   posSessions PosSession[]
   posTerminals PosTerminal[]
+  stockBalances  StockBalance[]
+  stockMovements StockMovement[]
+  purchaseOrders PurchaseOrder[]
 
   @@unique([tenantId, code])
   @@index([tenantId, kind, isActive])
@@ -573,6 +750,7 @@ model DocumentSeries {
   site           Site?                         @relation(fields: [siteId], references: [id], onDelete: SetNull)
   invoices       Invoice[]
   orders         Order[]
+  purchaseOrders PurchaseOrder[]
   paymentMethods DocumentSeriesPaymentMethod[]
   printForms     DocumentSeriesPrintForm[]
 
@@ -751,6 +929,7 @@ model GiftCard {
   glRedeemContraAccount String?
   costCenter     String?
   accountingCode String?
+  customFields   Json?
   createdAt      DateTime       @default(now())
   updatedAt      DateTime       @updatedAt
 
@@ -849,6 +1028,8 @@ model TenantSettings {
   tenantId  String   @unique
   /// JSON MenuNodeConfig[]
   menuJson  Json?
+  /// Default expand state for sidebar nav folders (user localStorage can override)
+  navGroupsDefaultExpanded Boolean @default(true)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -932,7 +1113,10 @@ model UserGroupRole {
 enum PrintPaperSize {
   A4
   A5
+  A3
+  LETTER
   RECEIPT_80
+  CUSTOM
 }
 
 enum PrintOrientation {
@@ -1089,4 +1273,227 @@ model JournalLine {
   @@index([tenantId, journalEntryId])
   @@index([tenantId, glAccountId])
   @@map("journal_lines")
+}
+
+// ─── Custom Fields & Entity Views ───────────────────────────────────
+
+enum EntityModule {
+  CUSTOMERS
+  PRODUCTS
+  INVOICES
+  ORDERS
+  QUOTES
+  GIFT_CARDS
+}
+
+enum CustomFieldType {
+  TEXT
+  NUMBER
+  DATE
+  BOOLEAN
+  SELECT
+  MULTI_SELECT
+}
+
+model CustomFieldDefinition {
+  id          String          @id @default(cuid())
+  tenantId    String
+  entity      EntityModule
+  code        String
+  label       String
+  type        CustomFieldType @default(TEXT)
+  /// For SELECT / MULTI_SELECT: string[]
+  optionsJson Json?
+  required    Boolean         @default(false)
+  filterable  Boolean         @default(false)
+  showInList  Boolean         @default(true)
+  sortOrder   Int             @default(0)
+  isActive    Boolean         @default(true)
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, entity, code])
+  @@index([tenantId, entity, isActive, sortOrder])
+  @@map("custom_field_definitions")
+}
+
+/// Saved list layout per entity (columns, filters, sort)
+model EntityListView {
+  id          String       @id @default(cuid())
+  tenantId    String
+  entity      EntityModule
+  code        String
+  name        String
+  description String?
+  /// { columns: [{key,source}], filters: [...], sort?: {key,dir}, pageSize?: number }
+  configJson  Json
+  isDefault   Boolean      @default(false)
+  isSystem    Boolean      @default(false)
+  isActive    Boolean      @default(true)
+  sortOrder   Int          @default(0)
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, entity, code])
+  @@index([tenantId, entity, isActive, sortOrder])
+  @@map("entity_list_views")
+}
+
+/// Saved form layout per entity (sections + fields)
+model EntityFormView {
+  id          String       @id @default(cuid())
+  tenantId    String
+  entity      EntityModule
+  code        String
+  name        String
+  description String?
+  /// { sections: [{ id, title, fields: [{key,source,required?}] }] }
+  configJson  Json
+  isDefault   Boolean      @default(false)
+  isSystem    Boolean      @default(false)
+  isActive    Boolean      @default(true)
+  sortOrder   Int          @default(0)
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, entity, code])
+  @@index([tenantId, entity, isActive, sortOrder])
+  @@map("entity_form_views")
+}
+
+// ─── Script Hooks Engine ────────────────────────────────────────────
+
+enum ScriptRuntime {
+  SERVER
+  UI
+  BOTH
+}
+
+enum ScriptLifecycle {
+  DRAFT
+  PUBLISHED
+}
+
+enum ScriptRunSource {
+  PRODUCTION
+  TEST
+}
+
+/// Per-tenant kill switch & defaults for custom scripts
+model ScriptSettings {
+  id              String   @id @default(cuid())
+  tenantId        String   @unique
+  scriptsEnabled  Boolean  @default(true)
+  maxTimeoutMs    Int      @default(3000)
+  maxHttpCalls    Int      @default(5)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@map("script_settings")
+}
+
+/// Custom JS hooks per module event
+model ScriptDefinition {
+  id          String          @id @default(cuid())
+  tenantId    String
+  module      EntityModule
+  code        String
+  name        String
+  description String?
+  /// e.g. before.create, after.update, form.beforeSubmit
+  eventKey    String
+  runtime     ScriptRuntime   @default(SERVER)
+  source      String          @db.Text
+  lifecycle   ScriptLifecycle @default(DRAFT)
+  isActive    Boolean         @default(true)
+  sortOrder   Int             @default(0)
+  timeoutMs   Int             @default(3000)
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+  updatedById String?
+
+  tenant Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  runs   ScriptRunLog[]
+
+  @@unique([tenantId, module, code])
+  @@index([tenantId, module, eventKey, isActive, lifecycle])
+  @@map("script_definitions")
+}
+
+/// Encrypted secrets for script HTTP auth (MARKETPLACE_TOKEN, …)
+model ScriptSecret {
+  id        String   @id @default(cuid())
+  tenantId  String
+  key       String
+  valueEnc  String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, key])
+  @@index([tenantId])
+  @@map("script_secrets")
+}
+
+/// Allow-listed hosts for api.http.* outbound calls
+model ScriptHttpAllowlist {
+  id        String   @id @default(cuid())
+  tenantId  String
+  host      String
+  createdAt DateTime @default(now())
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, host])
+  @@index([tenantId])
+  @@map("script_http_allowlist")
+}
+
+model ScriptRunLog {
+  id             String          @id @default(cuid())
+  tenantId       String
+  scriptId       String?
+  module         EntityModule
+  eventKey       String
+  success        Boolean
+  durationMs     Int
+  error          String?
+  httpCalls      Int             @default(0)
+  /// PRODUCTION (API dispatch) or TEST (settings test run)
+  source         ScriptRunSource @default(PRODUCTION)
+  scriptCode     String?
+  scriptName     String?
+  userId         String?
+  userEmail      String?
+  userName       String?
+  userRole       String?
+  /// Related entity id when available (customer id, …)
+  recordId       String?
+  recordCode     String?
+  /// Truncated api.log lines
+  logsJson       Json?
+  /// Small snapshot of record keys for debugging
+  recordSnapshot Json?
+  createdAt      DateTime        @default(now())
+
+  tenant Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  script ScriptDefinition? @relation(fields: [scriptId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, createdAt])
+  @@index([tenantId, module, eventKey])
+  @@index([tenantId, success, createdAt])
+  @@index([tenantId, source, createdAt])
+  @@index([tenantId, scriptCode])
+  @@index([tenantId, userId])
+  @@index([tenantId, recordId])
+  @@map("script_run_logs")
 }

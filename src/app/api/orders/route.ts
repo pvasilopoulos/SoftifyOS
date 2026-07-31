@@ -116,12 +116,13 @@ export async function GET(request: NextRequest) {
         customerCode: string;
         branchName: string | null;
         lineCount: bigint;
+        customFields: unknown;
       }>
     >`
       SELECT
         o.id, o.number, o.status, o.kind, o."orderedAt", o.total, o."createdAt",
         o."customerId", c.name AS "customerName", c.code AS "customerCode",
-        b.name AS "branchName",
+        b.name AS "branchName", o."customFields",
         (SELECT COUNT(*) FROM order_lines ol WHERE ol."orderId" = o.id) AS "lineCount"
       FROM orders o
       JOIN customers c ON c.id = o."customerId"
@@ -161,6 +162,10 @@ export async function GET(request: NextRequest) {
       customerCode: row.customerCode,
       branchName: row.branchName,
       lineCount: Number(row.lineCount),
+      customFields:
+        row.customFields && typeof row.customFields === "object"
+          ? row.customFields
+          : {},
     }));
     const last = items[items.length - 1];
     const nextCursor =
@@ -222,6 +227,16 @@ export async function POST(request: Request) {
 
     const totals = calcInvoiceTotals(body.lines);
     const docKind = body.kind ?? "SALES_ORDER";
+    const scriptModule =
+      docKind === "SALES_QUOTE" ? ("QUOTES" as const) : ("ORDERS" as const);
+    const {
+      applyRecordPatch,
+      dispatchScriptEvent,
+    } = await import("@/modules/scripts/service");
+    const { scriptActorFromSession } = await import(
+      "@/modules/scripts/actor"
+    );
+
     const series =
       (body.seriesId
         ? await prisma.documentSeries.findFirst({
@@ -245,8 +260,43 @@ export async function POST(request: Request) {
       );
     }
 
+    const draftRecord: Record<string, unknown> = {
+      customerId: hierarchy.customerId,
+      branchId: hierarchy.branchId,
+      spaceId: hierarchy.spaceId,
+      seriesId: series?.id ?? body.seriesId ?? null,
+      kind: docKind,
+      number: body.number?.trim() || null,
+      status: body.status ?? "DRAFT",
+      notes: body.notes || null,
+      subtotal: totals.subtotal,
+      vatAmount: totals.vatAmount,
+      total: totals.total,
+      lines: body.lines,
+    };
+
+    const before = await dispatchScriptEvent(prisma, {
+      tenantId: session.tenantId,
+      module: scriptModule,
+      eventKey: "before.create",
+      record: draftRecord,
+      user: scriptActorFromSession(session),
+    });
+    if (before.failed) {
+      return NextResponse.json(
+        { error: before.failed.message, script: before.failed.scriptCode },
+        { status: 400 },
+      );
+    }
+
+    const patched = applyRecordPatch(draftRecord, before.record, [
+      "notes",
+      "status",
+      "number",
+    ]);
+
     const order = await prisma.$transaction(async (tx) => {
-      let number = body.number?.trim() || "";
+      let number = String(patched.number ?? "").trim() || "";
       let seriesId: string | null = series?.id ?? null;
       let siteId: string | null = series?.siteId ?? null;
       if (!number) {
@@ -274,12 +324,12 @@ export async function POST(request: Request) {
           siteId,
           kind: docKind,
           number,
-          status: body.status ?? "DRAFT",
+          status: (patched.status as typeof body.status) ?? body.status ?? "DRAFT",
           currency: "EUR",
           subtotal: totals.subtotal,
           vatAmount: totals.vatAmount,
           total: totals.total,
-          notes: body.notes || null,
+          notes: (patched.notes as string | null) || null,
           lines: {
             create: body.lines.map((line, idx) => ({
               tenantId: session.tenantId,
@@ -309,27 +359,51 @@ export async function POST(request: Request) {
       meta: { number: order.number, status: order.status, kind: order.kind },
     });
 
-    return NextResponse.json(
-      {
-        item: {
-          ...order,
-          subtotal: toNumber(order.subtotal),
-          vatAmount: toNumber(order.vatAmount),
-          total: toNumber(order.total),
-          orderedAt: order.orderedAt.toISOString(),
-          createdAt: order.createdAt.toISOString(),
-          updatedAt: order.updatedAt.toISOString(),
-          lines: order.lines.map((line) => ({
-            ...line,
-            quantity: toNumber(line.quantity),
-            unitPrice: toNumber(line.unitPrice),
-            vatRate: toNumber(line.vatRate),
-            lineTotal: toNumber(line.lineTotal),
-          })),
-        },
+    const item = {
+      ...order,
+      subtotal: toNumber(order.subtotal),
+      vatAmount: toNumber(order.vatAmount),
+      total: toNumber(order.total),
+      orderedAt: order.orderedAt.toISOString(),
+      createdAt: order.createdAt.toISOString(),
+      updatedAt: order.updatedAt.toISOString(),
+      lines: order.lines.map((line) => ({
+        ...line,
+        quantity: toNumber(line.quantity),
+        unitPrice: toNumber(line.unitPrice),
+        vatRate: toNumber(line.vatRate),
+        lineTotal: toNumber(line.lineTotal),
+      })),
+    };
+
+    const after = await dispatchScriptEvent(prisma, {
+      tenantId: session.tenantId,
+      module: scriptModule,
+      eventKey: "after.create",
+      record: {
+        id: order.id,
+        kind: order.kind,
+        number: order.number,
+        status: order.status,
+        customerId: order.customerId,
+        total: item.total,
+        notes: order.notes,
       },
-      { status: 201 },
-    );
+      user: scriptActorFromSession(session),
+    });
+
+    if (after.failed) {
+      return NextResponse.json(
+        {
+          item,
+          warning: after.failed.message,
+          script: after.failed.scriptCode,
+        },
+        { status: 201 },
+      );
+    }
+
+    return NextResponse.json({ item }, { status: 201 });
   } catch (error) {
     if (error instanceof z.ZodError) {
       return NextResponse.json(

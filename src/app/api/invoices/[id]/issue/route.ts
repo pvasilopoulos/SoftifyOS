@@ -30,6 +30,15 @@ export async function POST(
             glDebitAccount: true,
             glCreditAccount: true,
             glVatAccount: true,
+            affectsInventory: true,
+            siteId: true,
+          },
+        },
+        lines: {
+          select: {
+            productId: true,
+            quantity: true,
+            description: true,
           },
         },
       },
@@ -40,6 +49,36 @@ export async function POST(
     if (invoice.status !== "DRAFT") {
       return NextResponse.json(
         { error: "Μόνο πρόχειρα τιμολόγια εκδίδονται" },
+        { status: 400 },
+      );
+    }
+
+    const { dispatchScriptEvent } = await import("@/modules/scripts/service");
+    const { scriptActorFromSession } = await import(
+      "@/modules/scripts/actor"
+    );
+
+    const issueRecord: Record<string, unknown> = {
+      id: invoice.id,
+      number: invoice.number,
+      kind: invoice.kind,
+      status: invoice.status,
+      customerId: invoice.customerId,
+      total: toNumber(invoice.total),
+      vatAmount: toNumber(invoice.vatAmount),
+      notes: invoice.notes,
+    };
+
+    const before = await dispatchScriptEvent(prisma, {
+      tenantId: session.tenantId,
+      module: "INVOICES",
+      eventKey: "invoice.beforeIssue",
+      record: issueRecord,
+      user: scriptActorFromSession(session),
+    });
+    if (before.failed) {
+      return NextResponse.json(
+        { error: before.failed.message, script: before.failed.scriptCode },
         { status: 400 },
       );
     }
@@ -71,17 +110,82 @@ export async function POST(
       journalId = null;
     }
 
+    let stockMeta: {
+      applied: number;
+      skipped: number;
+      movements: string[];
+      siteId?: string;
+    } | null = null;
+    try {
+      const { applyInvoiceInventoryEffect } = await import(
+        "@/modules/inventory/service"
+      );
+      stockMeta = await applyInvoiceInventoryEffect(prisma, {
+        tenantId: session.tenantId,
+        invoiceId: invoice.id,
+        invoiceNumber: updated.number,
+        siteId: invoice.siteId ?? invoice.series?.siteId,
+        effect: invoice.series?.affectsInventory ?? "NONE",
+        lines: invoice.lines.map((l) => ({
+          productId: l.productId,
+          quantity: toNumber(l.quantity),
+          description: l.description,
+        })),
+        userId: session.sub,
+        allowNegative: true,
+      });
+    } catch {
+      stockMeta = null;
+    }
+
     await writeAuditEvent({
       tenantId: session.tenantId,
       userId: session.sub,
       action: "invoice.issue",
       entity: "invoice",
       entityId: invoice.id,
-      meta: { number: updated.number, journalId },
+      meta: { number: updated.number, journalId, stock: stockMeta },
     });
 
+    const after = await dispatchScriptEvent(prisma, {
+      tenantId: session.tenantId,
+      module: "INVOICES",
+      eventKey: "invoice.afterIssue",
+      record: {
+        id: updated.id,
+        number: updated.number,
+        kind: updated.kind,
+        status: updated.status,
+        customerId: updated.customerId,
+        total: toNumber(updated.total),
+        vatAmount: toNumber(updated.vatAmount),
+        issuedAt: updated.issuedAt?.toISOString() ?? null,
+        journalId,
+      },
+      previous: issueRecord,
+      user: scriptActorFromSession(session),
+    });
+
+    if (after.failed) {
+      return NextResponse.json({
+        item: {
+          id: updated.id,
+          status: updated.status,
+          journalId,
+          stock: stockMeta,
+        },
+        warning: after.failed.message,
+        script: after.failed.scriptCode,
+      });
+    }
+
     return NextResponse.json({
-      item: { id: updated.id, status: updated.status, journalId },
+      item: {
+        id: updated.id,
+        status: updated.status,
+        journalId,
+        stock: stockMeta,
+      },
     });
   } catch (error) {
     return NextResponse.json(

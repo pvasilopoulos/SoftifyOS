@@ -55,10 +55,12 @@ export async function GET(request: NextRequest) {
         price: Prisma.Decimal;
         status: string;
         createdAt: Date;
+        customFields: unknown;
       }>
     >`
       SELECT
-        p.id, p.sku, p.name, p.unit, p."vatRate", p.price, p.status, p."createdAt"
+        p.id, p.sku, p.name, p.unit, p."vatRate", p.price, p.status, p."createdAt",
+        p."customFields"
       FROM products p
       WHERE p."tenantId" = ${session.tenantId}
         ${status ? Prisma.sql`AND p.status = ${status}::"ProductStatus"` : Prisma.empty}
@@ -89,6 +91,10 @@ export async function GET(request: NextRequest) {
       price: toNumber(row.price),
       status: row.status,
       createdAt: row.createdAt.toISOString(),
+      customFields:
+        row.customFields && typeof row.customFields === "object"
+          ? row.customFields
+          : {},
     }));
     const last = items[items.length - 1];
     const nextCursor =
@@ -125,18 +131,95 @@ export async function POST(request: Request) {
       unitId: body.unitId,
       unit: body.unit,
     });
+    const { normalizeCustomFieldsInput } = await import(
+      "@/modules/entity-views/service"
+    );
+    const {
+      applyRecordPatch,
+      dispatchScriptEvent,
+    } = await import("@/modules/scripts/service");
+    const { scriptActorFromSession } = await import(
+      "@/modules/scripts/actor"
+    );
+
+    let customFields = await normalizeCustomFieldsInput(
+      prisma,
+      session.tenantId,
+      "PRODUCTS",
+      body.customFields,
+    );
+
+    const draftRecord: Record<string, unknown> = {
+      sku: body.sku,
+      barcode: body.barcode || null,
+      name: body.name,
+      unit: unit.symbol,
+      unitId: unit.id,
+      vatRate: body.vatRate ?? 24,
+      price: body.price,
+      notes: body.notes || null,
+      status: body.status ?? "ACTIVE",
+      trackInventory: body.trackInventory ?? true,
+      customFields,
+    };
+
+    const before = await dispatchScriptEvent(prisma, {
+      tenantId: session.tenantId,
+      module: "PRODUCTS",
+      eventKey: "before.create",
+      record: draftRecord,
+      user: scriptActorFromSession(session),
+    });
+    if (before.failed) {
+      return NextResponse.json(
+        { error: before.failed.message, script: before.failed.scriptCode },
+        { status: 400 },
+      );
+    }
+
+    const patched = applyRecordPatch(draftRecord, before.record, [
+      "sku",
+      "barcode",
+      "name",
+      "unit",
+      "unitId",
+      "vatRate",
+      "price",
+      "notes",
+      "status",
+      "trackInventory",
+      "customFields",
+    ]);
+    if (
+      patched.customFields &&
+      typeof patched.customFields === "object" &&
+      !Array.isArray(patched.customFields)
+    ) {
+      customFields = await normalizeCustomFieldsInput(
+        prisma,
+        session.tenantId,
+        "PRODUCTS",
+        patched.customFields as Record<string, unknown>,
+      );
+    }
+
     const product = await prisma.product.create({
       data: {
         tenantId: session.tenantId,
-        sku: body.sku,
-        barcode: body.barcode || null,
-        name: body.name,
-        unit: unit.symbol,
-        unitId: unit.id,
-        vatRate: body.vatRate ?? 24,
-        price: body.price,
-        notes: body.notes || null,
-        status: body.status ?? "ACTIVE",
+        sku: String(patched.sku),
+        barcode: (patched.barcode as string | null) || null,
+        name: String(patched.name),
+        unit: String(patched.unit ?? unit.symbol),
+        unitId: String(patched.unitId ?? unit.id),
+        vatRate: Number(patched.vatRate ?? 24),
+        price: Number(patched.price),
+        notes: (patched.notes as string | null) || null,
+        status: (patched.status as "ACTIVE" | "INACTIVE") ?? "ACTIVE",
+        trackInventory:
+          typeof patched.trackInventory === "boolean"
+            ? patched.trackInventory
+            : true,
+        customFields,
       },
     });
 
@@ -149,18 +232,47 @@ export async function POST(request: Request) {
       meta: { sku: product.sku },
     });
 
-    return NextResponse.json(
-      {
-        item: {
-          ...product,
-          vatRate: toNumber(product.vatRate),
-          price: toNumber(product.price),
-          createdAt: product.createdAt.toISOString(),
-          updatedAt: product.updatedAt.toISOString(),
+    const afterRecord: Record<string, unknown> = {
+      id: product.id,
+      sku: product.sku,
+      barcode: product.barcode,
+      name: product.name,
+      unit: product.unit,
+      unitId: product.unitId,
+      vatRate: toNumber(product.vatRate),
+      price: toNumber(product.price),
+      notes: product.notes,
+      status: product.status,
+      customFields: product.customFields,
+    };
+    const after = await dispatchScriptEvent(prisma, {
+      tenantId: session.tenantId,
+      module: "PRODUCTS",
+      eventKey: "after.create",
+      record: afterRecord,
+      user: scriptActorFromSession(session),
+    });
+
+    const item = {
+      ...product,
+      vatRate: toNumber(product.vatRate),
+      price: toNumber(product.price),
+      createdAt: product.createdAt.toISOString(),
+      updatedAt: product.updatedAt.toISOString(),
+    };
+
+    if (after.failed) {
+      return NextResponse.json(
+        {
+          item,
+          warning: after.failed.message,
+          script: after.failed.scriptCode,
         },
-      },
-      { status: 201 },
-    );
+        { status: 201 },
+      );
+    }
+
+    return NextResponse.json({ item }, { status: 201 });
   } catch (error) {
     if (
       error instanceof Prisma.PrismaClientKnownRequestError &&

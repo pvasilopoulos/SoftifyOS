@@ -5,7 +5,7 @@ import { getSession } from "@/platform/auth/session";
 import { writeAuditEvent } from "@/platform/tenancy/audit";
 import { getErrorMessage } from "@/shared/lib/safe";
 import { defaultMenuTree, type MenuNodeConfig } from "@/platform/navigation";
-import { getTenantMenuTree } from "@/platform/navigation/resolve-menu";
+import { getTenantMenuSettings } from "@/platform/navigation/resolve-menu";
 
 export const dynamic = "force-dynamic";
 
@@ -19,6 +19,9 @@ const menuNodeSchema: z.ZodType<MenuNodeConfig> = z.lazy(() =>
     visible: z.boolean().optional(),
     children: z.array(menuNodeSchema).optional(),
     roles: z.array(z.enum(["OWNER", "ADMIN", "MEMBER", "VIEWER"])).optional(),
+    groupIds: z.array(z.string().min(1).max(80)).max(100).optional(),
+    userIds: z.array(z.string().min(1).max(80)).max(200).optional(),
+    defaultExpanded: z.boolean().optional(),
     mobileTab: z.boolean().optional(),
     mobileOrder: z.number().int().min(0).max(20).optional(),
   }),
@@ -26,6 +29,7 @@ const menuNodeSchema: z.ZodType<MenuNodeConfig> = z.lazy(() =>
 
 const saveSchema = z.object({
   menu: z.array(menuNodeSchema).min(1).max(50),
+  navGroupsDefaultExpanded: z.boolean().optional(),
 });
 
 export async function GET() {
@@ -34,8 +38,32 @@ export async function GET() {
     if (!session) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
-    const menu = await getTenantMenuTree(session.tenantId);
-    return NextResponse.json({ menu, defaultMenu: defaultMenuTree });
+    const settings = await getTenantMenuSettings(session.tenantId);
+
+    const [groups, memberships] = await Promise.all([
+      prisma.userGroup.findMany({
+        where: { tenantId: session.tenantId },
+        orderBy: { name: "asc" },
+        select: { id: true, code: true, name: true },
+      }),
+      prisma.membership.findMany({
+        where: { tenantId: session.tenantId },
+        orderBy: { user: { name: "asc" } },
+        select: {
+          user: { select: { id: true, name: true, email: true } },
+        },
+      }),
+    ]);
+
+    return NextResponse.json({
+      menu: settings.menuTree,
+      defaultMenu: defaultMenuTree,
+      navGroupsDefaultExpanded: settings.navGroupsDefaultExpanded,
+      audienceOptions: {
+        groups,
+        users: memberships.map((m) => m.user),
+      },
+    });
   } catch (error) {
     return NextResponse.json(
       { error: getErrorMessage(error, "Load failed") },
@@ -55,10 +83,22 @@ export async function PUT(request: Request) {
     }
     const body = saveSchema.parse(await request.json());
 
+    const data: {
+      menuJson: MenuNodeConfig[];
+      navGroupsDefaultExpanded?: boolean;
+    } = { menuJson: body.menu };
+    if (typeof body.navGroupsDefaultExpanded === "boolean") {
+      data.navGroupsDefaultExpanded = body.navGroupsDefaultExpanded;
+    }
+
     await prisma.tenantSettings.upsert({
       where: { tenantId: session.tenantId },
-      update: { menuJson: body.menu },
-      create: { tenantId: session.tenantId, menuJson: body.menu },
+      update: data,
+      create: {
+        tenantId: session.tenantId,
+        menuJson: body.menu,
+        navGroupsDefaultExpanded: body.navGroupsDefaultExpanded ?? true,
+      },
     });
 
     await writeAuditEvent({
@@ -67,10 +107,18 @@ export async function PUT(request: Request) {
       action: "settings.menu.update",
       entity: "tenant_settings",
       entityId: session.tenantId,
-      meta: { nodes: body.menu.length },
+      meta: {
+        nodes: body.menu.length,
+        navGroupsDefaultExpanded: body.navGroupsDefaultExpanded,
+      },
     });
 
-    return NextResponse.json({ ok: true, menu: body.menu });
+    const settings = await getTenantMenuSettings(session.tenantId);
+    return NextResponse.json({
+      ok: true,
+      menu: settings.menuTree,
+      navGroupsDefaultExpanded: settings.navGroupsDefaultExpanded,
+    });
   } catch (error) {
     if (error instanceof z.ZodError) {
       return NextResponse.json({ error: "Μη έγκυρη δομή μενού" }, { status: 400 });
@@ -92,14 +140,27 @@ export async function POST(request: Request) {
     if (session.role !== "OWNER" && session.role !== "ADMIN") {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
-    const action = (await request.json().catch(() => ({}))) as { reset?: boolean };
+    const action = (await request.json().catch(() => ({}))) as {
+      reset?: boolean;
+    };
     if (action.reset) {
       await prisma.tenantSettings.upsert({
         where: { tenantId: session.tenantId },
-        update: { menuJson: defaultMenuTree },
-        create: { tenantId: session.tenantId, menuJson: defaultMenuTree },
+        update: {
+          menuJson: defaultMenuTree,
+          navGroupsDefaultExpanded: true,
+        },
+        create: {
+          tenantId: session.tenantId,
+          menuJson: defaultMenuTree,
+          navGroupsDefaultExpanded: true,
+        },
       });
-      return NextResponse.json({ ok: true, menu: defaultMenuTree });
+      return NextResponse.json({
+        ok: true,
+        menu: defaultMenuTree,
+        navGroupsDefaultExpanded: true,
+      });
     }
     return NextResponse.json({ error: "Unknown action" }, { status: 400 });
   } catch (error) {

@@ -69,6 +69,8 @@ export default async function InvoicePrintPage({
 
       <InvoicePrintArticle
         body={body}
+        paper={printForm?.paper ?? "A4"}
+        orientation={printForm?.orientation ?? "PORTRAIT"}
         invoice={{
           id: invoice.id,
           number: invoice.number,
