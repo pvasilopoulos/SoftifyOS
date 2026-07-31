@@ -12,7 +12,11 @@ import {
   type CustomFieldDef,
 } from "@/modules/entity-views/dynamic-ui";
 import { ViewSwitcher } from "@/modules/entity-views/view-switcher";
-import type { CustomFieldsMap, FormViewConfig } from "@/modules/entity-views/types";
+import {
+  collectRequiredErrors,
+  type CustomFieldsMap,
+  type FormViewConfig,
+} from "@/modules/entity-views/types";
 
 type FormViewOpt = {
   id: string;
@@ -46,6 +50,19 @@ export function NewCustomerForm({
   );
 
   async function onSubmit() {
+    if (active) {
+      const missing = collectRequiredErrors(
+        active.config,
+        ENTITY_REGISTRY.CUSTOMERS.builtins,
+        customFields,
+        values,
+        customValues,
+      );
+      if (missing.length) {
+        setError(`Υποχρεωτικά πεδία: ${missing.join(", ")}`);
+        return;
+      }
+    }
     setPending(true);
     setError(null);
     const payload = {

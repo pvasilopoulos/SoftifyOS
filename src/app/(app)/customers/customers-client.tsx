@@ -14,6 +14,7 @@ import {
 import { ViewSwitcher } from "@/modules/entity-views/view-switcher";
 import {
   matchesFilters,
+  sortRows,
   type ListViewConfig,
 } from "@/modules/entity-views/types";
 
@@ -73,10 +74,18 @@ export function CustomersClient({
   const builtins = ENTITY_REGISTRY.CUSTOMERS.builtins;
 
   const visibleItems = useMemo(() => {
-    if (!config?.filters?.length) return items;
-    return items.filter((row) =>
-      matchesFilters(row as unknown as Record<string, unknown>, config.filters),
-    );
+    const filtered = !config?.filters?.length
+      ? items
+      : items.filter((row) =>
+          matchesFilters(
+            row as unknown as Record<string, unknown>,
+            config.filters,
+          ),
+        );
+    return sortRows(
+      filtered as unknown as Array<Record<string, unknown>>,
+      config?.sort,
+    ) as unknown as CustomerListItem[];
   }, [items, config]);
 
   async function search(nextViewId = viewId) {
@@ -85,7 +94,9 @@ export function CustomersClient({
     const statusFilter = view?.config.filters.find(
       (f) => f.source === "system" && f.key === "status" && f.op === "eq",
     );
-    const params = new URLSearchParams({ limit: "50" });
+    const params = new URLSearchParams({
+      limit: String(view?.config.pageSize ?? config?.pageSize ?? 50),
+    });
     if (q.trim()) params.set("q", q.trim());
     if (statusFilter?.value) params.set("status", String(statusFilter.value));
     const res = await fetch(`/api/customers?${params}`, { cache: "no-store" });

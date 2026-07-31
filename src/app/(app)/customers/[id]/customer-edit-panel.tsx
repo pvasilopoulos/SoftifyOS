@@ -10,6 +10,7 @@ import {
 } from "@/modules/entity-views/dynamic-ui";
 import { ViewSwitcher } from "@/modules/entity-views/view-switcher";
 import {
+  collectRequiredErrors,
   parseCustomFields,
   type CustomFieldsMap,
   type FormViewConfig,
@@ -72,6 +73,19 @@ export function CustomerEditPanel({
   );
 
   async function save() {
+    if (active) {
+      const missing = collectRequiredErrors(
+        active.config,
+        ENTITY_REGISTRY.CUSTOMERS.builtins,
+        customFields,
+        values,
+        customValues,
+      );
+      if (missing.length) {
+        setError(`Υποχρεωτικά πεδία: ${missing.join(", ")}`);
+        return;
+      }
+    }
     setPending(true);
     setError(null);
     setMessage(null);

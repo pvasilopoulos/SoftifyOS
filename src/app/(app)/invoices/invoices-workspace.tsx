@@ -24,6 +24,7 @@ import {
 import { ENTITY_REGISTRY } from "@/modules/entity-views/registry";
 import {
   matchesFilters,
+  sortRows,
   type ListViewConfig,
 } from "@/modules/entity-views/types";
 
@@ -146,10 +147,18 @@ export function InvoicesWorkspace({
   const builtins = ENTITY_REGISTRY.INVOICES.builtins;
 
   const visibleItems = useMemo(() => {
-    if (!config?.filters?.length) return items;
-    return items.filter((row) =>
-      matchesFilters(row as unknown as Record<string, unknown>, config.filters),
-    );
+    const filtered = !config?.filters?.length
+      ? items
+      : items.filter((row) =>
+          matchesFilters(
+            row as unknown as Record<string, unknown>,
+            config.filters,
+          ),
+        );
+    return sortRows(
+      filtered as unknown as Array<Record<string, unknown>>,
+      config?.sort,
+    ) as unknown as InvoiceListItem[];
   }, [items, config]);
 
   useEffect(() => {

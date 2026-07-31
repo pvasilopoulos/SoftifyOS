@@ -21,6 +21,7 @@ import {
 import { ViewSwitcher } from "@/modules/entity-views/view-switcher";
 import {
   matchesFilters,
+  sortRows,
   type ListViewConfig,
 } from "@/modules/entity-views/types";
 
@@ -91,10 +92,18 @@ export function OrdersClient({
   const builtins = ENTITY_REGISTRY[entity].builtins;
 
   const visibleItems = useMemo(() => {
-    if (!config?.filters?.length) return items;
-    return items.filter((row) =>
-      matchesFilters(row as unknown as Record<string, unknown>, config.filters),
-    );
+    const filtered = !config?.filters?.length
+      ? items
+      : items.filter((row) =>
+          matchesFilters(
+            row as unknown as Record<string, unknown>,
+            config.filters,
+          ),
+        );
+    return sortRows(
+      filtered as unknown as Array<Record<string, unknown>>,
+      config?.sort,
+    ) as unknown as OrderListItem[];
   }, [items, config]);
 
   async function search() {
