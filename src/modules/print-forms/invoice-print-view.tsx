@@ -1,5 +1,14 @@
 import Link from "next/link";
-import type { PrintFormBody, PrintBlock } from "@/modules/print-forms/defaults";
+import {
+  isHtmlBody,
+  type PrintFormBody,
+  type PrintBlock,
+} from "@/modules/print-forms/defaults";
+import {
+  renderPrintTemplate,
+  sanitizePrintCss,
+  sanitizePrintHtml,
+} from "@/modules/print-forms/template-engine";
 import {
   formatEUR,
   invoiceStatusLabel,
@@ -10,6 +19,7 @@ export type InvoicePrintModel = {
   id: string;
   number: string;
   status: InvoiceStatusKey;
+  kindLabel: string;
   currency: string;
   notes: string | null;
   issuedAt: Date | null;
@@ -19,11 +29,14 @@ export type InvoicePrintModel = {
   total: number;
   paid: number;
   tenantName: string;
+  tenantCode: string;
   formName: string;
   customer: {
     name: string;
     code: string;
     vatNumber: string | null;
+    email: string | null;
+    phone: string | null;
   };
   branchName: string | null;
   spaceName: string | null;
@@ -36,6 +49,47 @@ export type InvoicePrintModel = {
     lineTotal: number;
   }>;
 };
+
+export function invoiceToTemplateContext(
+  invoice: InvoicePrintModel,
+): Record<string, unknown> {
+  return {
+    tenant: { name: invoice.tenantName, code: invoice.tenantCode },
+    form: { name: invoice.formName },
+    doc: {
+      number: invoice.number,
+      status: invoiceStatusLabel[invoice.status],
+      kindLabel: invoice.kindLabel,
+      issuedAt: invoice.issuedAt?.toISOString() ?? "",
+      dueAt: invoice.dueAt?.toISOString() ?? "",
+      currency: invoice.currency,
+      notes: invoice.notes ?? "",
+    },
+    customer: {
+      name: invoice.customer.name,
+      code: invoice.customer.code,
+      vatNumber: invoice.customer.vatNumber ?? "",
+      email: invoice.customer.email ?? "",
+      phone: invoice.customer.phone ?? "",
+    },
+    branch: { name: invoice.branchName ?? "" },
+    space: { name: invoice.spaceName ?? "" },
+    lines: invoice.lines.map((l) => ({
+      description: l.description,
+      quantity: l.quantity,
+      unitPrice: l.unitPrice,
+      vatRate: l.vatRate,
+      lineTotal: l.lineTotal,
+    })),
+    totals: {
+      subtotal: invoice.subtotal,
+      vatAmount: invoice.vatAmount,
+      total: invoice.total,
+      paid: invoice.paid,
+      balance: invoice.total - invoice.paid,
+    },
+  };
+}
 
 function Row({ label, value }: { label: string; value: string }) {
   return (
@@ -192,12 +246,39 @@ function BlockView({
         <p className="text-xs text-slate-400">{block.text || "SoftifyOS"}</p>
       );
     case "text":
-      return <p className="text-sm text-slate-600 whitespace-pre-wrap">{block.text}</p>;
+      return (
+        <p className="whitespace-pre-wrap text-sm text-slate-600">{block.text}</p>
+      );
     case "spacer":
       return <div className="h-6" aria-hidden />;
     default:
       return null;
   }
+}
+
+function HtmlPrintArticle({
+  invoice,
+  html,
+  css,
+}: {
+  invoice: InvoicePrintModel;
+  html: string;
+  css: string;
+}) {
+  const rendered = renderPrintTemplate(html, invoiceToTemplateContext(invoice));
+  const safeHtml = sanitizePrintHtml(rendered);
+  const safeCss = sanitizePrintCss(css);
+  return (
+    <div className="mx-auto max-w-4xl bg-white px-6 py-8 shadow-sm print:max-w-none print:px-0 print:py-0 print:shadow-none">
+      <style dangerouslySetInnerHTML={{ __html: safeCss }} />
+      <div dangerouslySetInnerHTML={{ __html: safeHtml }} />
+      <p className="mt-8 text-xs text-slate-400 print:hidden">
+        <Link href={`/invoices/${invoice.id}`} className="text-teal-700">
+          Επιστροφή στην καρτέλα
+        </Link>
+      </p>
+    </div>
+  );
 }
 
 export function InvoicePrintArticle({
@@ -207,23 +288,42 @@ export function InvoicePrintArticle({
   invoice: InvoicePrintModel;
   body: PrintFormBody;
 }) {
-  const blocks = body.blocks;
-  const hasParties = blocks.some((b) => b.type === "parties");
-  const hasMeta = blocks.some((b) => b.type === "meta");
+  if (isHtmlBody(body)) {
+    return (
+      <HtmlPrintArticle invoice={invoice} html={body.html} css={body.css} />
+    );
+  }
+
+  let blocks: PrintBlock[] = [];
+  if (body.version === 1) {
+    blocks = body.blocks;
+  } else if (body.blocks && body.blocks.length > 0) {
+    blocks = body.blocks;
+  }
+  const hasParties = blocks.some((b: PrintBlock) => b.type === "parties");
+  const hasMeta = blocks.some((b: PrintBlock) => b.type === "meta");
 
   return (
     <article className="mx-auto max-w-3xl bg-white px-8 py-10 shadow-sm print:max-w-none print:px-0 print:py-0 print:shadow-none">
       <div className="space-y-6">
-        {blocks.map((block) => {
+        {blocks.map((block: PrintBlock) => {
           if (block.type === "parties" && hasMeta) {
-            const meta = blocks.find((b) => b.type === "meta");
-            if (!meta) return <BlockView key={block.id} block={block} invoice={invoice} />;
-            // Render parties+meta as a paired grid once when parties appears first
-            const partiesIndex = blocks.findIndex((b) => b.type === "parties");
-            const metaIndex = blocks.findIndex((b) => b.type === "meta");
+            const meta = blocks.find((b: PrintBlock) => b.type === "meta");
+            if (!meta) {
+              return <BlockView key={block.id} block={block} invoice={invoice} />;
+            }
+            const partiesIndex = blocks.findIndex(
+              (b: PrintBlock) => b.type === "parties",
+            );
+            const metaIndex = blocks.findIndex(
+              (b: PrintBlock) => b.type === "meta",
+            );
             if (partiesIndex < metaIndex && block.type === "parties") {
               return (
-                <div key={`${block.id}-pair`} className="grid gap-6 sm:grid-cols-2">
+                <div
+                  key={`${block.id}-pair`}
+                  className="grid gap-6 sm:grid-cols-2"
+                >
                   <BlockView block={block} invoice={invoice} />
                   <BlockView block={meta} invoice={invoice} />
                 </div>
@@ -232,8 +332,12 @@ export function InvoicePrintArticle({
             return null;
           }
           if (block.type === "meta" && hasParties) {
-            const partiesIndex = blocks.findIndex((b) => b.type === "parties");
-            const metaIndex = blocks.findIndex((b) => b.type === "meta");
+            const partiesIndex = blocks.findIndex(
+              (b: PrintBlock) => b.type === "parties",
+            );
+            const metaIndex = blocks.findIndex(
+              (b: PrintBlock) => b.type === "meta",
+            );
             if (partiesIndex < metaIndex) return null;
           }
           return <BlockView key={block.id} block={block} invoice={invoice} />;

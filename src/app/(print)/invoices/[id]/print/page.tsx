@@ -3,6 +3,7 @@ import type { DocumentKind } from "@/generated/prisma/client";
 import { getSession } from "@/platform/auth/session";
 import { prisma } from "@/server/db";
 import { toNumber, type InvoiceStatusKey } from "@/modules/sales/invoice-utils";
+import { documentKindLabel } from "@/modules/documents/series";
 import {
   parseBodyJson,
   resolvePrintFormForSeries,
@@ -58,6 +59,9 @@ export default async function InvoicePrintPage({
 
   const body = parseBodyJson(printForm?.bodyJson);
   const status = invoice.status as InvoiceStatusKey;
+  const kindLabel =
+    documentKindLabel[documentKind as keyof typeof documentKindLabel] ??
+    documentKind;
 
   return (
     <div className="min-h-screen bg-slate-100 text-ink-950 print:bg-white">
@@ -69,6 +73,7 @@ export default async function InvoicePrintPage({
           id: invoice.id,
           number: invoice.number,
           status,
+          kindLabel,
           currency: invoice.currency,
           notes: invoice.notes,
           issuedAt: invoice.issuedAt,
@@ -78,11 +83,14 @@ export default async function InvoicePrintPage({
           total: toNumber(invoice.total),
           paid: toNumber(invoice.paidAmount),
           tenantName: invoice.tenant.name,
+          tenantCode: invoice.tenant.slug ?? invoice.tenant.id,
           formName: printForm?.name ?? "Τιμολόγιο πώλησης",
           customer: {
             name: invoice.customer.name,
             code: invoice.customer.code,
             vatNumber: invoice.customer.vatNumber,
+            email: invoice.customer.email,
+            phone: invoice.customer.phone,
           },
           branchName: invoice.branch?.name ?? null,
           spaceName: invoice.space?.name ?? null,

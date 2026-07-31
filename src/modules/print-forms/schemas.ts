@@ -19,10 +19,20 @@ const blockSchema = z.object({
   showPaidBalance: z.boolean().optional(),
 });
 
-export const printFormBodySchema = z.object({
+const bodyV1Schema = z.object({
   version: z.literal(1),
   blocks: z.array(blockSchema).min(1).max(40),
 });
+
+const bodyV2Schema = z.object({
+  version: z.literal(2),
+  engine: z.enum(["html", "blocks"]),
+  html: z.string().max(200_000),
+  css: z.string().max(80_000),
+  blocks: z.array(blockSchema).max(40).optional(),
+});
+
+export const printFormBodySchema = z.union([bodyV1Schema, bodyV2Schema]);
 
 export const printFormUpsertSchema = z.object({
   code: z.string().trim().min(1).max(40),

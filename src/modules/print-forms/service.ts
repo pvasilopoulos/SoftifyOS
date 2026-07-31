@@ -16,20 +16,39 @@ export class PrintFormError extends Error {
 
 export async function ensureDefaultPrintForms(db: Db, tenantId: string) {
   for (const row of DEFAULT_PRINT_FORMS) {
-    await db.printForm.upsert({
+    const existing = await db.printForm.findUnique({
       where: { tenantId_code: { tenantId, code: row.code } },
-      create: {
-        tenantId,
-        code: row.code,
-        name: row.name,
-        documentKind: row.documentKind,
-        bodyJson: row.body as unknown as Prisma.InputJsonValue,
-        isDefault: row.isDefault,
-        isSystem: true,
-        isActive: true,
-      },
-      update: {},
     });
+    if (!existing) {
+      await db.printForm.create({
+        data: {
+          tenantId,
+          code: row.code,
+          name: row.name,
+          documentKind: row.documentKind,
+          bodyJson: row.body as unknown as Prisma.InputJsonValue,
+          isDefault: row.isDefault,
+          isSystem: true,
+          isActive: true,
+        },
+      });
+      continue;
+    }
+    // Upgrade system templates that are still legacy block-only
+    const parsed = parseBodyJson(existing.bodyJson);
+    const needsHtmlUpgrade =
+      existing.isSystem &&
+      (parsed.version === 1 ||
+        (parsed.version === 2 && parsed.engine !== "html"));
+    if (needsHtmlUpgrade) {
+      await db.printForm.update({
+        where: { id: existing.id },
+        data: {
+          name: row.name,
+          bodyJson: row.body as unknown as Prisma.InputJsonValue,
+        },
+      });
+    }
   }
 }
 
