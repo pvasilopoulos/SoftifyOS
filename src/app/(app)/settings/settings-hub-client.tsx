@@ -70,27 +70,36 @@ const ICONS = {
   BarChart3,
 };
 
+/** Sections sized for even 2-column rows (no orphan empty cells). */
 const SECTIONS: SettingsSection[] = [
   {
     id: "org",
     title: "Οργανισμός",
-    description: "Στοιχεία εταιρείας, τοπικοποίηση και συντήρηση",
+    description: "Εταιρεία, μενού, integrations και αντίγραφα ασφαλείας",
     items: [
       {
         href: "/settings/organization",
         title: "Στοιχεία εταιρείας",
-        description:
-          "Επωνυμία, ΑΦΜ, διεύθυνση, νόμισμα, γλώσσα, timezone και maintenance mode.",
+        description: "Επωνυμία, ΑΦΜ, νόμισμα, locale και maintenance mode.",
         badge: "Tenant",
         tone: "teal",
         icon: "Building2",
         keywords: "εταιρεία αφμ vat currency locale",
       },
       {
+        href: "/settings/menu",
+        title: "Μενού πλοήγησης",
+        description:
+          "Δομή sidebar, διαθέσιμες επιλογές και footer κινητού (ανά user/ομάδα).",
+        badge: "Παραμετρικό",
+        tone: "teal",
+        icon: "Menu",
+        keywords: "menu πλοήγηση footer mobile",
+      },
+      {
         href: "/settings/integrations",
         title: "API & Integrations",
-        description:
-          "Webhooks, myDATA περιβάλλον, marketplace hooks και διαθέσιμα endpoints.",
+        description: "Webhooks, myDATA περιβάλλον και εξωτερικές συνδέσεις.",
         badge: "Platform",
         tone: "slate",
         icon: "Plug",
@@ -99,36 +108,24 @@ const SECTIONS: SettingsSection[] = [
       {
         href: "/api/settings/export",
         title: "Εξαγωγή ρυθμίσεων",
-        description:
-          "Κατέβασμα JSON snapshot (σειρές, GL, ρόλοι, μονάδες) χωρίς secrets.",
+        description: "JSON snapshot ρυθμίσεων (χωρίς secrets).",
         badge: "Backup",
         tone: "amber",
         icon: "Download",
         keywords: "export backup json download",
         action: "export",
       },
-      {
-        href: "/audit",
-        title: "Audit log",
-        description:
-          "Ποιος άλλαξε τι και πότε — πλήρες ιστορικό ενεργειών του tenant.",
-        badge: "Ασφάλεια",
-        tone: "rose",
-        icon: "ScrollText",
-        keywords: "audit log ιστορικό",
-      },
     ],
   },
   {
     id: "iam",
     title: "Ασφάλεια & Πρόσβαση",
-    description: "Χρήστες, ρόλοι, ομάδες και δικαιώματα",
+    description: "Χρήστες, ρόλοι, ομάδες και audit",
     items: [
       {
         href: "/settings/users",
         title: "Χρήστες",
-        description:
-          "Δημιουργία, επεξεργασία και αφαίρεση μελών · ρόλοι και App Role.",
+        description: "Μέλη tenant, ρόλοι και App Role.",
         badge: "IAM",
         tone: "emerald",
         icon: "Users",
@@ -136,7 +133,7 @@ const SECTIONS: SettingsSection[] = [
       {
         href: "/settings/roles",
         title: "Ρόλοι",
-        description: "App roles με granular permissions για λειτουργίες του ERP.",
+        description: "Granular permissions ανά λειτουργία ERP.",
         badge: "IAM",
         tone: "emerald",
         icon: "UserCog",
@@ -144,7 +141,7 @@ const SECTIONS: SettingsSection[] = [
       {
         href: "/settings/groups",
         title: "Ομάδες χρηστών",
-        description: "Ομαδοποίηση μελών και ανάθεση ρόλων σε ομάδες.",
+        description: "Ομαδοποίηση μελών και ανάθεση ρόλων.",
         badge: "IAM",
         tone: "emerald",
         icon: "UsersRound",
@@ -152,24 +149,40 @@ const SECTIONS: SettingsSection[] = [
       {
         href: "/settings/permissions",
         title: "Permissions",
-        description:
-          "Κατάλογος δικαιωμάτων που μπορούν να ανατεθούν σε ρόλους.",
+        description: "Κατάλογος δικαιωμάτων για ρόλους.",
         badge: "IAM",
         tone: "emerald",
         icon: "Shield",
+      },
+      {
+        href: "/audit",
+        title: "Audit log",
+        description: "Ιστορικό ενεργειών — ποιος άλλαξε τι και πότε.",
+        badge: "Ασφάλεια",
+        tone: "rose",
+        icon: "ScrollText",
+        keywords: "audit log ιστορικό",
+      },
+      {
+        href: "/finance",
+        title: "Οικονομικά / myDATA",
+        description: "AR/AP, ΦΠΑ και ουρά διαβίβασης myDATA.",
+        badge: "Live",
+        tone: "teal",
+        icon: "BarChart3",
+        keywords: "finance vat mydata",
       },
     ],
   },
   {
     id: "docs",
     title: "Παραστατικά & Πληρωμές",
-    description: "Σειρές, τρόποι πληρωμής και φόρμες εκτύπωσης",
+    description: "Σειρές, πληρωμές, εκτυπώσεις και λογιστικό σχέδιο",
     items: [
       {
         href: "/settings/series",
         title: "Σειρές & Τύποι",
-        description:
-          "Αρίθμηση, myDATA, εξοφλήσεις και φόρμες εκτύπωσης ανά σειρά.",
+        description: "Αρίθμηση, myDATA και φόρμες ανά σειρά.",
         badge: "Κρίσιμο",
         tone: "amber",
         icon: "FileText",
@@ -178,8 +191,7 @@ const SECTIONS: SettingsSection[] = [
       {
         href: "/settings/payment-methods",
         title: "Τρόποι πληρωμής",
-        description:
-          "Παραμετρικοί τρόποι για POS & εισπράξεις, με λογιστικούς λογαριασμούς και IBAN.",
+        description: "POS & εισπράξεις, GL λογαριασμοί και IBAN.",
         badge: "Παραμετρικό",
         tone: "teal",
         icon: "Wallet",
@@ -187,8 +199,7 @@ const SECTIONS: SettingsSection[] = [
       {
         href: "/settings/print-forms",
         title: "Φόρμες εκτύπωσης",
-        description:
-          "Print Form Builder — blocks κεφαλίδας, γραμμών και συνόλων για τιμολόγια/ΑΠΥ.",
+        description: "Print Form Builder για τιμολόγια και ΑΠΥ.",
         badge: "Παραμετρικό",
         tone: "teal",
         icon: "Printer",
@@ -196,8 +207,7 @@ const SECTIONS: SettingsSection[] = [
       {
         href: "/settings/gl-accounts",
         title: "Λογιστικό σχέδιο",
-        description:
-          "Λογαριασμοί γενικής λογιστικής για άρθρα ημερολογίου.",
+        description: "Λογαριασμοί γενικής λογιστικής.",
         badge: "Λογιστική",
         tone: "emerald",
         icon: "BookOpen",
@@ -205,24 +215,14 @@ const SECTIONS: SettingsSection[] = [
     ],
   },
   {
-    id: "ops",
-    title: "Λειτουργίες",
-    description: "Μενού, μονάδες και προβολές δεδομένων",
+    id: "platform",
+    title: "Πλατφόρμα",
+    description: "Μονάδες, προβολές, scripts και αποθήκη",
     items: [
-      {
-        href: "/settings/menu",
-        title: "Μενού πλοήγησης",
-        description:
-          "Drag & drop δομή, διαθέσιμες επιλογές και footer μενού για mobile.",
-        badge: "Παραμετρικό",
-        tone: "teal",
-        icon: "Menu",
-      },
       {
         href: "/settings/units",
         title: "Μονάδες μέτρησης",
-        description:
-          "Κατάλογος μονάδων (τεμ, kg, lt…) για προϊόντα — σύμβολο, δεκαδικά, προεπιλογή.",
+        description: "τεμ, kg, lt… σύμβολο και δεκαδικά.",
         badge: "Παραμετρικό",
         tone: "teal",
         icon: "Ruler",
@@ -230,8 +230,7 @@ const SECTIONS: SettingsSection[] = [
       {
         href: "/settings/entity-views",
         title: "Πεδία & Προβολές",
-        description:
-          "Custom fields ανά module · πολλαπλές λίστες/φόρμες με στήλες, φίλτρα και ενότητες.",
+        description: "Custom fields, λίστες και φόρμες.",
         badge: "Platform",
         tone: "slate",
         icon: "Layers",
@@ -239,31 +238,15 @@ const SECTIONS: SettingsSection[] = [
       {
         href: "/settings/scripts",
         title: "Script Hooks",
-        description:
-          "Custom JavaScript ανά event · sandbox · HTTP allow-list & secrets.",
+        description: "JS hooks, sandbox, allow-list και secrets.",
         badge: "Platform",
         tone: "slate",
         icon: "Workflow",
       },
-    ],
-  },
-  {
-    id: "quick",
-    title: "Γρήγοροι σύνδεσμοι",
-    description: "Συχνές λειτουργικές οθόνες",
-    items: [
-      {
-        href: "/finance",
-        title: "Οικονομικά / myDATA",
-        description: "AR/AP, ΦΠΑ περιόδου και ουρά διαβίβασης myDATA.",
-        badge: "Live",
-        tone: "teal",
-        icon: "BarChart3",
-      },
       {
         href: "/inventory",
         title: "Αποθήκη",
-        description: "Υπόλοιπα, κινήσεις και προσαρμογές αποθέματος.",
+        description: "Υπόλοιπα, κινήσεις και προσαρμογές.",
         badge: "Ops",
         tone: "slate",
         icon: "Package",
@@ -305,7 +288,7 @@ export function SettingsHubClient({
   const shown = filtered.reduce((n, s) => n + s.items.length, 0);
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-5">
       {maintenanceMode ? (
         <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
           Το <strong>maintenance mode</strong> είναι ενεργό — οι μη-διαχειριστές
@@ -313,8 +296,8 @@ export function SettingsHubClient({
         </div>
       ) : null}
 
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div className="relative w-full max-w-md">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+        <div className="relative w-full max-w-lg">
           <Search
             size={16}
             className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"
@@ -323,55 +306,55 @@ export function SettingsHubClient({
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder="Αναζήτηση ρυθμίσεων…"
-            className="h-11 w-full rounded-xl border border-slate-200 bg-white pl-9 pr-3 text-sm shadow-sm outline-none ring-teal-500/30 placeholder:text-slate-400 focus:border-teal-300 focus:ring-2"
+            className="h-10 w-full rounded-xl border border-slate-200 bg-white pl-9 pr-3 text-sm outline-none placeholder:text-slate-400 focus:border-teal-300 focus:ring-2 focus:ring-teal-500/20"
           />
         </div>
-        <p className="text-xs text-slate-500">
-          {tenantName} · {shown}/{total} ενότητες
+        <p className="shrink-0 text-xs text-slate-500">
+          {tenantName} · {shown}/{total}
         </p>
       </div>
 
       {filtered.length === 0 ? (
-        <div className="soft-panel px-6 py-16 text-center text-sm text-slate-500">
+        <div className="rounded-xl border border-dashed border-slate-200 bg-white px-6 py-12 text-center text-sm text-slate-500">
           Καμία ρύθμιση δεν ταιριάζει με «{query}».
         </div>
       ) : null}
 
       {filtered.map((section) => (
-        <section key={section.id} className="space-y-3">
-          <div>
-            <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-500">
+        <section key={section.id} className="space-y-2.5">
+          <div className="flex flex-wrap items-baseline gap-x-3 gap-y-0.5">
+            <h2 className="text-xs font-semibold uppercase tracking-wide text-slate-500">
               {section.title}
             </h2>
-            <p className="text-sm text-slate-500">{section.description}</p>
+            <p className="text-xs text-slate-400">{section.description}</p>
           </div>
-          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             {section.items.map((item) => {
               const Icon = ICONS[item.icon] ?? KeyRound;
               const className = cn(
-                "group soft-panel relative block p-5 transition",
-                "hover:-translate-y-0.5 hover:border-teal-300 hover:bg-teal-50/50 hover:shadow-md hover:shadow-teal-900/5",
+                "group soft-panel flex h-full gap-3 p-4 transition",
+                "hover:border-teal-300 hover:bg-teal-50/40",
                 "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-500/40",
               );
 
               const body = (
                 <>
-                  <div className="mb-3 flex items-start justify-between gap-3">
-                    <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-slate-100 text-teal-700 transition group-hover:bg-teal-100">
-                      <Icon size={18} />
-                    </span>
-                    <Badge tone={item.tone}>{item.badge}</Badge>
+                  <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-slate-100 text-teal-700 transition group-hover:bg-teal-100">
+                    <Icon size={18} />
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <div className="mb-1 flex flex-wrap items-center gap-2">
+                      <h3 className="font-semibold text-ink-950">{item.title}</h3>
+                      <Badge tone={item.tone}>{item.badge}</Badge>
+                      <ArrowRight
+                        size={14}
+                        className="ml-auto text-slate-300 transition group-hover:translate-x-0.5 group-hover:text-teal-600"
+                      />
+                    </div>
+                    <p className="text-sm leading-snug text-slate-600">
+                      {item.description}
+                    </p>
                   </div>
-                  <div className="mb-1.5 flex items-center gap-2">
-                    <h3 className="font-semibold text-ink-950">{item.title}</h3>
-                    <ArrowRight
-                      size={14}
-                      className="text-slate-300 transition group-hover:translate-x-0.5 group-hover:text-teal-600"
-                    />
-                  </div>
-                  <p className="text-sm leading-relaxed text-slate-600">
-                    {item.description}
-                  </p>
                 </>
               );
 
