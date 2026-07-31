@@ -4,41 +4,79 @@ import { prisma } from "@/server/db";
 import { encodeCursor } from "@/shared/lib/cursor";
 import { AuditEventsClient } from "./audit-events-client";
 
-export const metadata = { title: "Audit log" };
+export const metadata = { title: "Καταγραφή ενεργειών" };
 export const dynamic = "force-dynamic";
 
 async function loadFirstPage(tenantId: string) {
   const started = Date.now();
-  const rows = await prisma.auditEvent.findMany({
-    where: { tenantId },
-    orderBy: [{ createdAt: "desc" }, { id: "desc" }],
-    take: 51,
-    select: {
-      id: true,
-      action: true,
-      entity: true,
-      entityId: true,
-      createdAt: true,
-      userId: true,
-    },
-  });
+  const [rows, total, authCount, settingsCount, dataCount] = await Promise.all([
+    prisma.auditEvent.findMany({
+      where: { tenantId },
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+      take: 51,
+      select: {
+        id: true,
+        action: true,
+        entity: true,
+        entityId: true,
+        createdAt: true,
+        userId: true,
+        meta: true,
+        user: { select: { id: true, name: true, email: true } },
+      },
+    }),
+    prisma.auditEvent.count({ where: { tenantId } }),
+    prisma.auditEvent.count({
+      where: { tenantId, action: { startsWith: "auth." } },
+    }),
+    prisma.auditEvent.count({
+      where: { tenantId, action: { startsWith: "settings." } },
+    }),
+    prisma.auditEvent.count({
+      where: {
+        tenantId,
+        NOT: [
+          { action: { startsWith: "auth." } },
+          { action: { startsWith: "settings." } },
+        ],
+      },
+    }),
+  ]);
+
   const ms = Date.now() - started;
   const hasMore = rows.length > 50;
-  const items = (hasMore ? rows.slice(0, 50) : rows).map((row) => ({
-    ...row,
+  const page = hasMore ? rows.slice(0, 50) : rows;
+  const items = page.map((row) => ({
+    id: row.id,
+    action: row.action,
+    entity: row.entity,
+    entityId: row.entityId,
     createdAt: row.createdAt.toISOString(),
+    userId: row.userId,
+    meta: row.meta,
+    user: row.user,
   }));
   const last = items[items.length - 1];
   const nextCursor =
     hasMore && last
       ? encodeCursor({ createdAt: last.createdAt, id: last.id })
       : null;
-  return { items, nextCursor, ms };
+
+  return {
+    items,
+    nextCursor,
+    ms,
+    total,
+    stats: { auth: authCount, settings: settingsCount, data: dataCount },
+  };
 }
 
 export default async function AuditPage() {
   const session = await getSession();
   if (!session) redirect("/login");
+  if (session.role !== "OWNER" && session.role !== "ADMIN") {
+    redirect("/");
+  }
 
   const first = await loadFirstPage(session.tenantId);
 
@@ -47,6 +85,8 @@ export default async function AuditPage() {
       initialItems={first.items}
       initialNextCursor={first.nextCursor}
       initialMs={first.ms}
+      initialTotal={first.total}
+      initialStats={first.stats}
     />
   );
 }
