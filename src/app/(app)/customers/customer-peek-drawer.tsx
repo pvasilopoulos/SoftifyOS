@@ -209,6 +209,7 @@ export function CustomerPeekDrawer({
               disabled={pending}
               compact
               modeOverride="edit"
+              entityModule="CUSTOMERS"
             />
           ) : (
             <p className="text-sm text-slate-500">Δεν υπάρχει διαθέσιμη φόρμα.</p>

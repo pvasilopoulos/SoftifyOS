@@ -228,18 +228,17 @@ Modules: `CUSTOMERS` · `PRODUCTS` · `INVOICES` · `ORDERS` · `QUOTES` · `GIF
 
 ### Κατάσταση wiring (runtime)
 
-| Event | CUSTOMERS | Άλλα modules |
-|-------|-----------|--------------|
-| `before.create` / `after.create` | ✅ API | 🔜 κατάλογος + Test |
-| `before.update` / `after.update` | ✅ API | 🔜 κατάλογος + Test |
-| `before.delete` / `after.delete` | 🔜 | 🔜 |
-| `form.*` / `list.onRowClick` | 🔜 UI | 🔜 UI |
-| `list.onKanbanMove` | 🔜 | 🔜 |
-| `invoice.beforeIssue` / `afterIssue` | — | 🔜 |
+| Event | CUSTOMERS | PRODUCTS | ORDERS | QUOTES | INVOICES | GIFT_CARDS |
+|-------|:---------:|:--------:|:------:|:------:|:--------:|:----------:|
+| `before.create` / `after.create` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `before.update` / `after.update` | ✅ | 🔜 no PATCH | 🔜 | 🔜 | ✅ | 🔜 actions |
+| `invoice.beforeIssue` / `afterIssue` | — | — | — | — | ✅ | — |
+| `form.onLoad` / `onFieldChange` / `beforeSubmit` | ✅ Form Experience | 🔜 hardcoded forms | 🔜 | 🔜 | 🔜 | 🔜 |
+| `before.delete` / `after.delete` | 🔜 | 🔜 | 🔜 | 🔜 | 🔜 | 🔜 |
 
-> Μπορείς να γράψεις & να κάνεις **Test run** / **Publish** για οποιοδήποτε event του καταλόγου. Στην παραγωγή (API) σήμερα εκτελούνται τα customer create/update hooks.
+> UI form hooks τρέχουν μέσω `/api/scripts/ui-event` (sandbox) με debounce στο `onFieldChange`. Runtime script: `UI` ή `BOTH`.
 
-Σε `after.*` αποτυχία σε customers: το record **έχει ήδη σωθεί**· η απάντηση μπορεί να περιέχει `warning` + `script` (όχι rollback).
+Σε `after.*` αποτυχία: το record **έχει ήδη σωθεί**· η απάντηση μπορεί να περιέχει `warning` + `script` (όχι rollback).
 
 ---
 

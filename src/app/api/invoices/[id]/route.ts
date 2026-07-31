@@ -120,6 +120,55 @@ export async function PATCH(
     const body = invoiceUpdateSchema.parse(await request.json());
     const totals = body.lines ? calcInvoiceTotals(body.lines) : null;
 
+    const {
+      applyRecordPatch,
+      dispatchScriptEvent,
+    } = await import("@/modules/scripts/service");
+    const { scriptActorFromSession } = await import(
+      "@/modules/scripts/actor"
+    );
+
+    const previous: Record<string, unknown> = {
+      id: invoice.id,
+      number: invoice.number,
+      status: invoice.status,
+      notes: invoice.notes,
+      branchId: invoice.branchId,
+      spaceId: invoice.spaceId,
+      total: toNumber(invoice.total),
+    };
+
+    const draftRecord: Record<string, unknown> = {
+      ...previous,
+      ...(body.branchId !== undefined ? { branchId: body.branchId } : {}),
+      ...(body.spaceId !== undefined ? { spaceId: body.spaceId } : {}),
+      ...(body.notes !== undefined ? { notes: body.notes || null } : {}),
+      ...(body.dueAt !== undefined ? { dueAt: body.dueAt } : {}),
+      ...(totals ? { total: totals.total, subtotal: totals.subtotal } : {}),
+      ...(body.lines ? { lines: body.lines } : {}),
+    };
+
+    const before = await dispatchScriptEvent(prisma, {
+      tenantId: session.tenantId,
+      module: "INVOICES",
+      eventKey: "before.update",
+      record: draftRecord,
+      previous,
+      user: scriptActorFromSession(session),
+    });
+    if (before.failed) {
+      return NextResponse.json(
+        { error: before.failed.message, script: before.failed.scriptCode },
+        { status: 400 },
+      );
+    }
+
+    const patched = applyRecordPatch(draftRecord, before.record, [
+      "notes",
+      "branchId",
+      "spaceId",
+    ]);
+
     const updated = await prisma.$transaction(async (tx) => {
       if (body.lines) {
         await tx.invoiceLine.deleteMany({ where: { invoiceId: invoice.id } });
@@ -127,10 +176,27 @@ export async function PATCH(
       return tx.invoice.update({
         where: { id: invoice.id },
         data: {
-          ...(body.branchId !== undefined ? { branchId: body.branchId } : {}),
-          ...(body.spaceId !== undefined ? { spaceId: body.spaceId } : {}),
+          ...(body.branchId !== undefined || patched.branchId !== undefined
+            ? {
+                branchId:
+                  (patched.branchId as string | null | undefined) ??
+                  body.branchId,
+              }
+            : {}),
+          ...(body.spaceId !== undefined || patched.spaceId !== undefined
+            ? {
+                spaceId:
+                  (patched.spaceId as string | null | undefined) ?? body.spaceId,
+              }
+            : {}),
           ...(body.dueAt !== undefined ? { dueAt: parseDueAt(body.dueAt) } : {}),
-          ...(body.notes !== undefined ? { notes: body.notes || null } : {}),
+          ...(body.notes !== undefined || patched.notes !== undefined
+            ? {
+                notes:
+                  (patched.notes as string | null | undefined) ??
+                  (body.notes || null),
+              }
+            : {}),
           ...(totals
             ? {
                 subtotal: totals.subtotal,
@@ -163,13 +229,36 @@ export async function PATCH(
       entityId: invoice.id,
     });
 
-    return NextResponse.json({
-      item: {
+    const item = {
+      id: updated.id,
+      status: updated.status,
+      total: toNumber(updated.total),
+    };
+
+    const after = await dispatchScriptEvent(prisma, {
+      tenantId: session.tenantId,
+      module: "INVOICES",
+      eventKey: "after.update",
+      record: {
         id: updated.id,
+        number: updated.number,
         status: updated.status,
-        total: toNumber(updated.total),
+        notes: updated.notes,
+        total: item.total,
       },
+      previous,
+      user: scriptActorFromSession(session),
     });
+
+    if (after.failed) {
+      return NextResponse.json({
+        item,
+        warning: after.failed.message,
+        script: after.failed.scriptCode,
+      });
+    }
+
+    return NextResponse.json({ item });
   } catch (error) {
     return NextResponse.json(
       { error: getErrorMessage(error, "Update failed") },

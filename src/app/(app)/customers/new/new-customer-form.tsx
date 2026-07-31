@@ -49,6 +49,10 @@ export function NewCustomerForm({
     [formViews, formId],
   );
 
+  const [beforeSubmitFn, setBeforeSubmitFn] = useState<
+    (() => Promise<{ ok: boolean; error?: string }>) | null
+  >(null);
+
   async function onSubmit() {
     if (active) {
       const missing = collectRequiredErrors(
@@ -60,6 +64,13 @@ export function NewCustomerForm({
       );
       if (missing.length) {
         setError(`Υποχρεωτικά πεδία: ${missing.join(", ")}`);
+        return;
+      }
+    }
+    if (beforeSubmitFn) {
+      const gate = await beforeSubmitFn();
+      if (!gate.ok) {
+        setError(gate.error || "Έλεγχος φόρμας απέτυχε");
         return;
       }
     }
@@ -133,6 +144,10 @@ export function NewCustomerForm({
               setCustomValues((prev) => ({ ...prev, [key]: value }))
             }
             disabled={pending}
+            entityModule="CUSTOMERS"
+            modeOverride="create"
+            onScriptFail={(msg) => setError(msg)}
+            onBeforeSubmitReady={(fn) => setBeforeSubmitFn(() => fn)}
           />
         ) : (
           <p className="text-sm text-slate-500">Δεν υπάρχει διαθέσιμη φόρμα.</p>

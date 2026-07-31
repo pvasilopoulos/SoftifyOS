@@ -151,7 +151,8 @@ export function CustomerQuickDrawer({
               }
               disabled={pending}
               compact
-              modeOverride="quick"
+              modeOverride="create"
+              entityModule="CUSTOMERS"
             />
           ) : (
             <p className="text-sm text-slate-500">Δεν υπάρχει quick φόρμα.</p>

@@ -44,6 +44,36 @@ export async function POST(
       );
     }
 
+    const { dispatchScriptEvent } = await import("@/modules/scripts/service");
+    const { scriptActorFromSession } = await import(
+      "@/modules/scripts/actor"
+    );
+
+    const issueRecord: Record<string, unknown> = {
+      id: invoice.id,
+      number: invoice.number,
+      kind: invoice.kind,
+      status: invoice.status,
+      customerId: invoice.customerId,
+      total: toNumber(invoice.total),
+      vatAmount: toNumber(invoice.vatAmount),
+      notes: invoice.notes,
+    };
+
+    const before = await dispatchScriptEvent(prisma, {
+      tenantId: session.tenantId,
+      module: "INVOICES",
+      eventKey: "invoice.beforeIssue",
+      record: issueRecord,
+      user: scriptActorFromSession(session),
+    });
+    if (before.failed) {
+      return NextResponse.json(
+        { error: before.failed.message, script: before.failed.scriptCode },
+        { status: 400 },
+      );
+    }
+
     const updated = await prisma.invoice.update({
       where: { id: invoice.id },
       data: {
@@ -79,6 +109,33 @@ export async function POST(
       entityId: invoice.id,
       meta: { number: updated.number, journalId },
     });
+
+    const after = await dispatchScriptEvent(prisma, {
+      tenantId: session.tenantId,
+      module: "INVOICES",
+      eventKey: "invoice.afterIssue",
+      record: {
+        id: updated.id,
+        number: updated.number,
+        kind: updated.kind,
+        status: updated.status,
+        customerId: updated.customerId,
+        total: toNumber(updated.total),
+        vatAmount: toNumber(updated.vatAmount),
+        issuedAt: updated.issuedAt?.toISOString() ?? null,
+        journalId,
+      },
+      previous: issueRecord,
+      user: scriptActorFromSession(session),
+    });
+
+    if (after.failed) {
+      return NextResponse.json({
+        item: { id: updated.id, status: updated.status, journalId },
+        warning: after.failed.message,
+        script: after.failed.scriptCode,
+      });
+    }
 
     return NextResponse.json({
       item: { id: updated.id, status: updated.status, journalId },

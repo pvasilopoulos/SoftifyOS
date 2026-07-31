@@ -192,6 +192,9 @@ export function CustomerEditPanel({
           setCustomValues((prev) => ({ ...prev, [key]: value }))
         }
         disabled={!editing || pending}
+        entityModule="CUSTOMERS"
+        modeOverride="edit"
+        onScriptFail={(msg) => setError(msg)}
       />
     </section>
   );

@@ -35,6 +35,8 @@ export async function dispatchScriptEvent(
     user?: (ScriptActor & { id: string; role?: string }) | null;
     /** Only run SERVER-capable scripts (default). UI events skipped here. */
     runtime?: "SERVER" | "UI";
+    /** Extra ctx fields (field, value, mode, row, …) */
+    extra?: Record<string, unknown>;
   },
 ): Promise<DispatchResult> {
   const deps = await loadScriptRuntimeDeps(db, opts.tenantId);
@@ -66,6 +68,7 @@ export async function dispatchScriptEvent(
       deps.settings.maxTimeoutMs,
     );
     const ctx: ScriptContext = {
+      ...(opts.extra ?? {}),
       module: opts.module,
       eventKey: opts.eventKey,
       record,

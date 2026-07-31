@@ -74,10 +74,78 @@ export async function POST(request: Request) {
     }
 
     const body = issueGiftCardSchema.parse(await request.json());
+    const {
+      applyRecordPatch,
+      dispatchScriptEvent,
+    } = await import("@/modules/scripts/service");
+    const { scriptActorFromSession } = await import(
+      "@/modules/scripts/actor"
+    );
+
+    const draftRecord: Record<string, unknown> = {
+      ...body,
+      code: body.code ?? null,
+      initialBalance: body.initialBalance,
+      customerId: body.customerId ?? null,
+      expiresAt: body.expiresAt ?? null,
+      notes: body.notes ?? null,
+    };
+
+    const before = await dispatchScriptEvent(prisma, {
+      tenantId: session.tenantId,
+      module: "GIFT_CARDS",
+      eventKey: "before.create",
+      record: draftRecord,
+      user: scriptActorFromSession(session),
+    });
+    if (before.failed) {
+      return NextResponse.json(
+        { error: before.failed.message, script: before.failed.scriptCode },
+        { status: 400 },
+      );
+    }
+
+    const patched = applyRecordPatch(draftRecord, before.record, [
+      "code",
+      "initialBalance",
+      "customerId",
+      "expiresAt",
+      "notes",
+      "glLiabilityAccount",
+      "glCashAccount",
+      "glRedeemContraAccount",
+      "costCenter",
+      "accountingCode",
+    ]);
+
     const card = await issueGiftCard(prisma, {
       tenantId: session.tenantId,
       userId: session.sub,
-      data: body,
+      data: {
+        ...body,
+        code:
+          typeof patched.code === "string" && patched.code
+            ? patched.code
+            : body.code,
+        initialBalance: Number(patched.initialBalance ?? body.initialBalance),
+        customerId:
+          (patched.customerId as string | null | undefined) ?? body.customerId,
+        expiresAt:
+          (patched.expiresAt as string | null | undefined) ?? body.expiresAt,
+        notes: (patched.notes as string | null | undefined) ?? body.notes,
+        glLiabilityAccount:
+          (patched.glLiabilityAccount as string | undefined) ??
+          body.glLiabilityAccount,
+        glCashAccount:
+          (patched.glCashAccount as string | undefined) ?? body.glCashAccount,
+        glRedeemContraAccount:
+          (patched.glRedeemContraAccount as string | undefined) ??
+          body.glRedeemContraAccount,
+        costCenter:
+          (patched.costCenter as string | undefined) ?? body.costCenter,
+        accountingCode:
+          (patched.accountingCode as string | undefined) ?? body.accountingCode,
+      },
     });
 
     await writeAuditEvent({
@@ -89,27 +157,51 @@ export async function POST(request: Request) {
       meta: { code: card.code, balance: toNumber(card.balance) },
     });
 
-    return NextResponse.json(
-      {
-        item: {
-          id: card.id,
-          code: card.code,
-          initialBalance: toNumber(card.initialBalance),
-          balance: toNumber(card.balance),
-          status: card.status,
-          customer: card.customer,
-          expiresAt: card.expiresAt?.toISOString() ?? null,
-          notes: card.notes,
-          glLiabilityAccount: card.glLiabilityAccount,
-          glCashAccount: card.glCashAccount,
-          glRedeemContraAccount: card.glRedeemContraAccount,
-          costCenter: card.costCenter,
-          accountingCode: card.accountingCode,
-          createdAt: card.createdAt.toISOString(),
-        },
+    const item = {
+      id: card.id,
+      code: card.code,
+      initialBalance: toNumber(card.initialBalance),
+      balance: toNumber(card.balance),
+      status: card.status,
+      customer: card.customer,
+      expiresAt: card.expiresAt?.toISOString() ?? null,
+      notes: card.notes,
+      glLiabilityAccount: card.glLiabilityAccount,
+      glCashAccount: card.glCashAccount,
+      glRedeemContraAccount: card.glRedeemContraAccount,
+      costCenter: card.costCenter,
+      accountingCode: card.accountingCode,
+      createdAt: card.createdAt.toISOString(),
+    };
+
+    const after = await dispatchScriptEvent(prisma, {
+      tenantId: session.tenantId,
+      module: "GIFT_CARDS",
+      eventKey: "after.create",
+      record: {
+        id: card.id,
+        code: card.code,
+        status: card.status,
+        balance: item.balance,
+        initialBalance: item.initialBalance,
+        customerId: card.customerId,
+        notes: card.notes,
       },
-      { status: 201 },
-    );
+      user: scriptActorFromSession(session),
+    });
+
+    if (after.failed) {
+      return NextResponse.json(
+        {
+          item,
+          warning: after.failed.message,
+          script: after.failed.scriptCode,
+        },
+        { status: 201 },
+      );
+    }
+
+    return NextResponse.json({ item }, { status: 201 });
   } catch (error) {
     if (error instanceof z.ZodError) {
       return NextResponse.json({ error: "Μη έγκυρα δεδομένα" }, { status: 400 });

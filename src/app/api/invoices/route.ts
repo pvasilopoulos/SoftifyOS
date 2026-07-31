@@ -346,8 +346,53 @@ export async function POST(request: Request) {
       }
     }
 
+    const {
+      applyRecordPatch,
+      dispatchScriptEvent,
+    } = await import("@/modules/scripts/service");
+    const { scriptActorFromSession } = await import(
+      "@/modules/scripts/actor"
+    );
+
+    const draftRecord: Record<string, unknown> = {
+      customerId: customer.id,
+      branchId,
+      spaceId,
+      seriesId: series?.id ?? body.seriesId ?? null,
+      relatedInvoiceId,
+      kind: docKind,
+      number: body.number?.trim() || null,
+      status,
+      notes,
+      subtotal: totals.subtotal,
+      vatAmount: totals.vatAmount,
+      total: totals.total,
+      lines: body.lines,
+    };
+
+    const before = await dispatchScriptEvent(prisma, {
+      tenantId: session.tenantId,
+      module: "INVOICES",
+      eventKey: "before.create",
+      record: draftRecord,
+      user: scriptActorFromSession(session),
+    });
+    if (before.failed) {
+      return NextResponse.json(
+        { error: before.failed.message, script: before.failed.scriptCode },
+        { status: 400 },
+      );
+    }
+
+    const patched = applyRecordPatch(draftRecord, before.record, [
+      "notes",
+      "number",
+      "status",
+    ]);
+    notes = (patched.notes as string | null) || null;
+
     const invoice = await prisma.$transaction(async (tx) => {
-      let number = body.number?.trim() || "";
+      let number = String(patched.number ?? "").trim() || "";
       let seriesId: string | null = series?.id ?? null;
       let siteId: string | null = series?.siteId ?? null;
       if (!number) {
@@ -422,29 +467,53 @@ export async function POST(request: Request) {
       },
     });
 
-    return NextResponse.json(
-      {
-        item: {
-          ...invoice,
-          subtotal: toNumber(invoice.subtotal),
-          vatAmount: toNumber(invoice.vatAmount),
-          total: toNumber(invoice.total),
-          paidAmount: toNumber(invoice.paidAmount),
-          issuedAt: invoice.issuedAt?.toISOString() ?? null,
-          dueAt: invoice.dueAt?.toISOString() ?? null,
-          createdAt: invoice.createdAt.toISOString(),
-          updatedAt: invoice.updatedAt.toISOString(),
-          lines: invoice.lines.map((line) => ({
-            ...line,
-            quantity: toNumber(line.quantity),
-            unitPrice: toNumber(line.unitPrice),
-            vatRate: toNumber(line.vatRate),
-            lineTotal: toNumber(line.lineTotal),
-          })),
-        },
+    const item = {
+      ...invoice,
+      subtotal: toNumber(invoice.subtotal),
+      vatAmount: toNumber(invoice.vatAmount),
+      total: toNumber(invoice.total),
+      paidAmount: toNumber(invoice.paidAmount),
+      issuedAt: invoice.issuedAt?.toISOString() ?? null,
+      dueAt: invoice.dueAt?.toISOString() ?? null,
+      createdAt: invoice.createdAt.toISOString(),
+      updatedAt: invoice.updatedAt.toISOString(),
+      lines: invoice.lines.map((line) => ({
+        ...line,
+        quantity: toNumber(line.quantity),
+        unitPrice: toNumber(line.unitPrice),
+        vatRate: toNumber(line.vatRate),
+        lineTotal: toNumber(line.lineTotal),
+      })),
+    };
+
+    const after = await dispatchScriptEvent(prisma, {
+      tenantId: session.tenantId,
+      module: "INVOICES",
+      eventKey: "after.create",
+      record: {
+        id: invoice.id,
+        number: invoice.number,
+        kind: invoice.kind,
+        status: invoice.status,
+        customerId: invoice.customerId,
+        total: item.total,
+        notes: invoice.notes,
       },
-      { status: 201 },
-    );
+      user: scriptActorFromSession(session),
+    });
+
+    if (after.failed) {
+      return NextResponse.json(
+        {
+          item,
+          warning: after.failed.message,
+          script: after.failed.scriptCode,
+        },
+        { status: 201 },
+      );
+    }
+
+    return NextResponse.json({ item }, { status: 201 });
   } catch (error) {
     if (error instanceof z.ZodError) {
       return NextResponse.json(
