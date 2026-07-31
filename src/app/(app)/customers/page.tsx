@@ -6,6 +6,12 @@ import { prisma } from "@/server/db";
 import { encodeCursor } from "@/shared/lib/cursor";
 import { PageHeader } from "@/shared/ui/page-header";
 import { Badge } from "@/shared/ui/badge";
+import {
+  listCustomFields,
+  listEntityListViews,
+  serializeListView,
+} from "@/modules/entity-views/service";
+import { parseCustomFields } from "@/modules/entity-views/types";
 import { CustomersClient } from "./customers-client";
 
 export const metadata = { title: "Πελάτες" };
@@ -30,6 +36,7 @@ async function loadCustomers(tenantId: string) {
     status: c.status,
     branchCount: c._count.branches,
     createdAt: c.createdAt.toISOString(),
+    customFields: parseCustomFields(c.customFields),
   }));
   const last = items[items.length - 1];
   return {
@@ -46,33 +53,42 @@ export default async function CustomersPage() {
   const session = await getSession();
   if (!session) redirect("/login");
 
-  const first = await loadCustomers(session.tenantId);
+  const [data, listViews, customFields] = await Promise.all([
+    loadCustomers(session.tenantId),
+    listEntityListViews(prisma, session.tenantId, "CUSTOMERS", true),
+    listCustomFields(prisma, session.tenantId, "CUSTOMERS", true),
+  ]);
 
   return (
     <div className="space-y-5">
       <PageHeader
         title="Πελάτες"
-        description="Πελάτης → Υποκαταστήματα → Χώροι"
+        description="Καρτέλες πελατών με δυναμικές προβολές λίστας και custom πεδία."
         actions={
-          <Link
-            href="/customers/new"
-            className="inline-flex h-10 items-center gap-1.5 rounded-xl bg-teal-600 px-4 text-sm font-medium text-white hover:bg-teal-700"
-          >
-            <Plus size={16} />
-            Νέος πελάτης
-          </Link>
+          <div className="flex flex-wrap items-center gap-2">
+            <Badge tone="teal">{data.items.length} στη σελίδα</Badge>
+            <Link
+              href="/customers/new"
+              className="inline-flex h-9 items-center gap-1.5 rounded-xl bg-teal-700 px-3 text-sm font-medium text-white hover:bg-teal-800"
+            >
+              <Plus size={16} /> Νέος
+            </Link>
+          </div>
         }
       />
       <CustomersClient
-        initialItems={first.items}
-        initialNextCursor={first.nextCursor}
-        initialMs={first.ms}
+        initialItems={data.items}
+        initialNextCursor={data.nextCursor}
+        initialMs={data.ms}
+        listViews={listViews.map(serializeListView)}
+        customFields={customFields.map((f) => ({
+          code: f.code,
+          label: f.label,
+          type: f.type,
+          optionsJson: f.optionsJson,
+          required: f.required,
+        }))}
       />
-      <p className="text-xs text-slate-500">
-        Κάθε πελάτης μπορεί να έχει πολλά υποκαταστήματα· κάθε υποκατάστημα πολλούς
-        χώρους.{" "}
-        <Badge tone="teal">Phase 1 master data</Badge>
-      </p>
     </div>
   );
 }

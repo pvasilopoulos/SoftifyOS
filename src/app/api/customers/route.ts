@@ -51,10 +51,12 @@ export async function GET(request: NextRequest) {
         status: string;
         createdAt: Date;
         branchCount: bigint;
+        customFields: unknown;
       }>
     >`
       SELECT
         c.id, c.code, c.name, c."vatNumber", c.email, c.phone, c.status, c."createdAt",
+        c."customFields",
         (SELECT COUNT(*) FROM branches b WHERE b."customerId" = c.id AND b."tenantId" = c."tenantId") AS "branchCount"
       FROM customers c
       WHERE c."tenantId" = ${session.tenantId}
@@ -82,6 +84,10 @@ export async function GET(request: NextRequest) {
       ...row,
       branchCount: Number(row.branchCount),
       createdAt: row.createdAt.toISOString(),
+      customFields:
+        row.customFields && typeof row.customFields === "object"
+          ? row.customFields
+          : {},
     }));
     const last = items[items.length - 1];
     const nextCursor =
@@ -113,6 +119,15 @@ export async function POST(request: Request) {
     }
 
     const body = customerCreateSchema.parse(await request.json());
+    const { normalizeCustomFieldsInput } = await import(
+      "@/modules/entity-views/service"
+    );
+    const customFields = await normalizeCustomFieldsInput(
+      prisma,
+      session.tenantId,
+      "CUSTOMERS",
+      body.customFields,
+    );
     const customer = await prisma.customer.create({
       data: {
         tenantId: session.tenantId,
@@ -123,6 +138,7 @@ export async function POST(request: Request) {
         phone: body.phone || null,
         notes: body.notes || null,
         status: body.status ?? "ACTIVE",
+        customFields,
       },
     });
 

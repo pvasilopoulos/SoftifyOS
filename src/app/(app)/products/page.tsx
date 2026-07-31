@@ -7,6 +7,12 @@ import { encodeCursor } from "@/shared/lib/cursor";
 import { PageHeader } from "@/shared/ui/page-header";
 import { Badge } from "@/shared/ui/badge";
 import { toNumber } from "@/modules/sales/invoice-utils";
+import {
+  listCustomFields,
+  listEntityListViews,
+  serializeListView,
+} from "@/modules/entity-views/service";
+import { parseCustomFields } from "@/modules/entity-views/types";
 import { ProductsClient } from "./products-client";
 
 export const metadata = { title: "Προϊόντα" };
@@ -29,6 +35,7 @@ async function loadProducts(tenantId: string) {
     price: toNumber(p.price),
     status: p.status,
     createdAt: p.createdAt.toISOString(),
+    customFields: parseCustomFields(p.customFields),
   }));
   const last = items[items.length - 1];
   return {
@@ -45,13 +52,17 @@ export default async function ProductsPage() {
   const session = await getSession();
   if (!session) redirect("/login");
 
-  const first = await loadProducts(session.tenantId);
+  const [first, listViews, customFields] = await Promise.all([
+    loadProducts(session.tenantId),
+    listEntityListViews(prisma, session.tenantId, "PRODUCTS", true),
+    listCustomFields(prisma, session.tenantId, "PRODUCTS", true),
+  ]);
 
   return (
     <div className="space-y-5">
       <PageHeader
         title="Προϊόντα"
-        description="Κατάλογος SKU · τιμή · μονάδα · ΦΠΑ"
+        description="Κατάλογος με δυναμικές προβολές και custom πεδία."
         actions={
           <Link
             href="/products/new"
@@ -66,10 +77,18 @@ export default async function ProductsPage() {
         initialItems={first.items}
         initialNextCursor={first.nextCursor}
         initialMs={first.ms}
+        listViews={listViews.map(serializeListView)}
+        customFields={customFields.map((f) => ({
+          code: f.code,
+          label: f.label,
+          type: f.type,
+          optionsJson: f.optionsJson,
+          required: f.required,
+        }))}
       />
       <p className="text-xs text-slate-500">
-        Ο κατάλογος τροφοδοτεί παραγγελίες και αποθήκη.{" "}
-        <Badge tone="teal">Phase 1 master data</Badge>
+        Προβολές ρυθμίζονται από Ρυθμίσεις → Πεδία & Προβολές.{" "}
+        <Badge tone="teal">Entity views</Badge>
       </p>
     </div>
   );

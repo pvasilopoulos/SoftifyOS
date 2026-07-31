@@ -55,10 +55,12 @@ export async function GET(request: NextRequest) {
         price: Prisma.Decimal;
         status: string;
         createdAt: Date;
+        customFields: unknown;
       }>
     >`
       SELECT
-        p.id, p.sku, p.name, p.unit, p."vatRate", p.price, p.status, p."createdAt"
+        p.id, p.sku, p.name, p.unit, p."vatRate", p.price, p.status, p."createdAt",
+        p."customFields"
       FROM products p
       WHERE p."tenantId" = ${session.tenantId}
         ${status ? Prisma.sql`AND p.status = ${status}::"ProductStatus"` : Prisma.empty}
@@ -89,6 +91,10 @@ export async function GET(request: NextRequest) {
       price: toNumber(row.price),
       status: row.status,
       createdAt: row.createdAt.toISOString(),
+      customFields:
+        row.customFields && typeof row.customFields === "object"
+          ? row.customFields
+          : {},
     }));
     const last = items[items.length - 1];
     const nextCursor =
@@ -125,6 +131,15 @@ export async function POST(request: Request) {
       unitId: body.unitId,
       unit: body.unit,
     });
+    const { normalizeCustomFieldsInput } = await import(
+      "@/modules/entity-views/service"
+    );
+    const customFields = await normalizeCustomFieldsInput(
+      prisma,
+      session.tenantId,
+      "PRODUCTS",
+      body.customFields,
+    );
     const product = await prisma.product.create({
       data: {
         tenantId: session.tenantId,
@@ -137,6 +152,7 @@ export async function POST(request: Request) {
         price: body.price,
         notes: body.notes || null,
         status: body.status ?? "ACTIVE",
+        customFields,
       },
     });
 

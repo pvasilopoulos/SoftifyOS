@@ -64,6 +64,9 @@ model Tenant {
   tenantSettings               TenantSettings?
   appRoles                     AppRole[]
   userGroups                   UserGroup[]
+  customFieldDefinitions       CustomFieldDefinition[]
+  entityListViews              EntityListView[]
+  entityFormViews              EntityFormView[]
 
   @@map("tenants")
 }
@@ -132,6 +135,8 @@ model Customer {
   phone     String?
   status    CustomerStatus @default(ACTIVE)
   notes     String?
+  /// Hybrid custom fields: { [fieldCode]: value }
+  customFields Json?
   createdAt DateTime       @default(now())
   updatedAt DateTime       @updatedAt
 
@@ -221,6 +226,7 @@ model Product {
   price     Decimal       @db.Decimal(14, 2)
   status    ProductStatus @default(ACTIVE)
   notes     String?
+  customFields Json?
   createdAt DateTime      @default(now())
   updatedAt DateTime      @updatedAt
 
@@ -316,6 +322,7 @@ model Invoice {
   total             Decimal       @db.Decimal(14, 2)
   paidAmount        Decimal       @default(0) @db.Decimal(14, 2)
   notes             String?
+  customFields      Json?
   createdAt         DateTime      @default(now())
   updatedAt         DateTime      @updatedAt
 
@@ -428,6 +435,7 @@ model Order {
   vatAmount     Decimal     @db.Decimal(14, 2)
   total         Decimal     @db.Decimal(14, 2)
   notes         String?
+  customFields  Json?
   createdAt     DateTime    @default(now())
   updatedAt     DateTime    @updatedAt
 
@@ -751,6 +759,7 @@ model GiftCard {
   glRedeemContraAccount String?
   costCenter     String?
   accountingCode String?
+  customFields   Json?
   createdAt      DateTime       @default(now())
   updatedAt      DateTime       @updatedAt
 
@@ -1089,4 +1098,96 @@ model JournalLine {
   @@index([tenantId, journalEntryId])
   @@index([tenantId, glAccountId])
   @@map("journal_lines")
+}
+
+// ─── Custom Fields & Entity Views ───────────────────────────────────
+
+enum EntityModule {
+  CUSTOMERS
+  PRODUCTS
+  INVOICES
+  ORDERS
+  QUOTES
+  GIFT_CARDS
+}
+
+enum CustomFieldType {
+  TEXT
+  NUMBER
+  DATE
+  BOOLEAN
+  SELECT
+  MULTI_SELECT
+}
+
+model CustomFieldDefinition {
+  id          String          @id @default(cuid())
+  tenantId    String
+  entity      EntityModule
+  code        String
+  label       String
+  type        CustomFieldType @default(TEXT)
+  /// For SELECT / MULTI_SELECT: string[]
+  optionsJson Json?
+  required    Boolean         @default(false)
+  filterable  Boolean         @default(false)
+  showInList  Boolean         @default(true)
+  sortOrder   Int             @default(0)
+  isActive    Boolean         @default(true)
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, entity, code])
+  @@index([tenantId, entity, isActive, sortOrder])
+  @@map("custom_field_definitions")
+}
+
+/// Saved list layout per entity (columns, filters, sort)
+model EntityListView {
+  id          String       @id @default(cuid())
+  tenantId    String
+  entity      EntityModule
+  code        String
+  name        String
+  description String?
+  /// { columns: [{key,source}], filters: [...], sort?: {key,dir}, pageSize?: number }
+  configJson  Json
+  isDefault   Boolean      @default(false)
+  isSystem    Boolean      @default(false)
+  isActive    Boolean      @default(true)
+  sortOrder   Int          @default(0)
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, entity, code])
+  @@index([tenantId, entity, isActive, sortOrder])
+  @@map("entity_list_views")
+}
+
+/// Saved form layout per entity (sections + fields)
+model EntityFormView {
+  id          String       @id @default(cuid())
+  tenantId    String
+  entity      EntityModule
+  code        String
+  name        String
+  description String?
+  /// { sections: [{ id, title, fields: [{key,source,required?}] }] }
+  configJson  Json
+  isDefault   Boolean      @default(false)
+  isSystem    Boolean      @default(false)
+  isActive    Boolean      @default(true)
+  sortOrder   Int          @default(0)
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, entity, code])
+  @@index([tenantId, entity, isActive, sortOrder])
+  @@map("entity_form_views")
 }
