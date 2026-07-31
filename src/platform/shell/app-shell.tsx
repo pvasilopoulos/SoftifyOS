@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState, useTransition } from "react";
-import { Sidebar } from "@/platform/shell/sidebar";
+import { Sidebar, readSidebarCollapsed } from "@/platform/shell/sidebar";
 import { Topbar } from "@/platform/shell/topbar";
 import { MobileTabBar } from "@/platform/shell/mobile-tab-bar";
 import { CommandPalette } from "@/platform/shell/command-palette";
@@ -27,6 +27,10 @@ export function AppShell({
   const [commandOpen, setCommandOpen] = useState(false);
   const [quickOpen, setQuickOpen] = useState(false);
   const [, startTransition] = useTransition();
+
+  useEffect(() => {
+    setCollapsed(readSidebarCollapsed());
+  }, []);
 
   const groups = useMemo(
     () => menuTreeToNavGroups(menuTree, session.role),
