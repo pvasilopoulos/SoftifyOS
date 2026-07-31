@@ -5,7 +5,6 @@ import { getSession } from "@/platform/auth/session";
 import { prisma } from "@/server/db";
 import { encodeCursor } from "@/shared/lib/cursor";
 import { PageHeader } from "@/shared/ui/page-header";
-import { Badge } from "@/shared/ui/badge";
 import {
   listCustomFields,
   listEntityFormViews,
@@ -70,10 +69,9 @@ export default async function CustomersPage() {
     <div className="space-y-5">
       <PageHeader
         title="Πελάτες"
-        description="Καρτέλες πελατών με δυναμικές προβολές λίστας και Form Experience."
+        description="Αναζήτηση, φίλτρα κατάστασης, προβολές λίστας, peek edit και μαζικές ενέργειες."
         actions={
           <div className="flex flex-wrap items-center gap-2">
-            <Badge tone="teal">{data.items.length} στη σελίδα</Badge>
             <Link
               href="/customers/new"
               className="inline-flex h-9 items-center gap-1.5 rounded-xl bg-teal-700 px-3 text-sm font-medium text-white hover:bg-teal-800"

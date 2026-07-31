@@ -17,8 +17,10 @@ import {
   normalizeListConfig,
   visibleColumns,
   type ListColumn,
+  type ListSort,
 } from "./list-experience-types";
 import { evaluateListRules, rowToneClass } from "./list-rules";
+import { ArrowDown, ArrowUp, ArrowUpDown } from "lucide-react";
 
 function colLabel(
   col: ListColumn,
@@ -101,6 +103,8 @@ export function ListExperienceRenderer({
   onQuickCreate,
   onNavigateNew,
   onKanbanMove,
+  onBulkStatus,
+  onSortChange,
   emptyActionLabel,
 }: {
   config: ListViewConfig;
@@ -116,6 +120,8 @@ export function ListExperienceRenderer({
     row: Record<string, unknown> & { id: string },
     nextValue: string,
   ) => void;
+  onBulkStatus?: (ids: string[], status: string) => void | Promise<void>;
+  onSortChange?: (sort: ListSort) => void;
   emptyActionLabel?: string;
 }) {
   const config = useMemo(() => normalizeListConfig(rawConfig), [rawConfig]);
@@ -138,7 +144,10 @@ export function ListExperienceRenderer({
     [config, rulesEval.hiddenColumns],
   );
 
-  const selectMode = mode === "select" || (config.bulkActions?.length ?? 0) > 0;
+  const selectMode =
+    mode === "select" ||
+    (config.bulkActions?.length ?? 0) > 0 ||
+    Boolean(onBulkStatus);
   const isCards = mode === "cards";
   const isKanban = mode === "kanban";
   const isPeekLayout = mode === "peek";
@@ -223,11 +232,32 @@ export function ListExperienceRenderer({
     });
   }
 
-  function runBulk(type: string) {
+  function runBulk(type: string, statusValue?: string) {
     const picked = visibleRows.filter((r) => selected.has(r.id));
     if (type === "export_csv") {
       exportCsv(picked.length ? picked : visibleRows, columns, builtins, customDefs);
+      return;
     }
+    if (type === "status" && onBulkStatus && statusValue) {
+      const ids = picked.map((r) => r.id);
+      if (ids.length === 0) return;
+      void Promise.resolve(onBulkStatus(ids, statusValue)).then(() =>
+        setSelected(new Set()),
+      );
+    }
+  }
+
+  function toggleSort(col: ListColumn) {
+    if (!onSortChange || col.sortable === false) return;
+    const current = config.sort;
+    const same =
+      current?.key === col.key && current?.source === col.source;
+    const next: ListSort = {
+      key: col.key,
+      source: col.source,
+      dir: same && current?.dir === "asc" ? "desc" : "asc",
+    };
+    onSortChange(next);
   }
 
   function handleRowActivate(row: Record<string, unknown> & { id: string }) {
@@ -276,11 +306,29 @@ export function ListExperienceRenderer({
             key={a.id}
             size="sm"
             variant="secondary"
-            onClick={() => runBulk(a.type)}
+            onClick={() => runBulk(a.type, a.statusValue)}
           >
             {a.label}
           </Button>
         ))}
+        {onBulkStatus ? (
+          <>
+            <Button
+              size="sm"
+              variant="secondary"
+              onClick={() => runBulk("status", "ACTIVE")}
+            >
+              Ενεργοποίηση
+            </Button>
+            <Button
+              size="sm"
+              variant="secondary"
+              onClick={() => runBulk("status", "INACTIVE")}
+            >
+              Απενεργοποίηση
+            </Button>
+          </>
+        ) : null}
         <button
           type="button"
           className="text-xs text-teal-700 underline"
@@ -486,19 +534,41 @@ export function ListExperienceRenderer({
                 />
               </div>
             ) : null}
-            {columns.map((col) => (
-              <span
-                key={col.id}
-                className={cn(
-                  "px-2 py-2.5",
-                  col.align === "end" && "text-right",
-                  col.align === "center" && "text-center",
-                )}
-                style={col.width ? { width: col.width } : undefined}
-              >
-                {colLabel(col, builtins, customDefs)}
-              </span>
-            ))}
+            {columns.map((col) => {
+              const sortable = col.sortable !== false && Boolean(onSortChange);
+              const activeSort =
+                config.sort?.key === col.key &&
+                config.sort?.source === col.source;
+              return (
+                <button
+                  key={col.id}
+                  type="button"
+                  disabled={!sortable}
+                  onClick={() => toggleSort(col)}
+                  className={cn(
+                    "flex items-center gap-1 px-2 py-2.5 text-left",
+                    col.align === "end" && "justify-end text-right",
+                    col.align === "center" && "justify-center text-center",
+                    sortable && "hover:text-ink-900",
+                    !sortable && "cursor-default",
+                  )}
+                  style={col.width ? { width: col.width } : undefined}
+                >
+                  <span>{colLabel(col, builtins, customDefs)}</span>
+                  {sortable ? (
+                    activeSort ? (
+                      config.sort?.dir === "asc" ? (
+                        <ArrowUp size={12} />
+                      ) : (
+                        <ArrowDown size={12} />
+                      )
+                    ) : (
+                      <ArrowUpDown size={12} className="opacity-40" />
+                    )
+                  ) : null}
+                </button>
+              );
+            })}
             <span className="px-2 py-2.5 text-right">Ενέργειες</span>
           </div>
 
@@ -510,24 +580,47 @@ export function ListExperienceRenderer({
               const pad = densityPad(density);
               const inner = (
                 <>
-                  {columns.map((col, idx) => (
-                    <div
-                      key={col.id}
-                      className={cn(
-                        "text-sm",
-                        idx === 0 || col.pin === "left"
-                          ? "font-medium text-ink-950"
-                          : "text-slate-600",
-                        col.align === "end" && "md:text-right",
-                        col.truncate && "truncate",
-                      )}
-                    >
-                      <span className="text-[10px] uppercase text-slate-400 md:hidden">
-                        {colLabel(col, builtins, customDefs)}{" "}
-                      </span>
-                      {cellText(col, row, builtins, customDefs)}
-                    </div>
-                  ))}
+                  {columns.map((col, idx) => {
+                    const text = cellText(col, row, builtins, customDefs);
+                    const isStatus =
+                      col.key === "status" && col.source === "system";
+                    return (
+                      <div
+                        key={col.id}
+                        className={cn(
+                          "text-sm",
+                          idx === 0 || col.pin === "left"
+                            ? "font-medium text-ink-950"
+                            : "text-slate-600",
+                          col.align === "end" && "md:text-right",
+                          col.truncate && "truncate",
+                        )}
+                      >
+                        <span className="text-[10px] uppercase text-slate-400 md:hidden">
+                          {colLabel(col, builtins, customDefs)}{" "}
+                        </span>
+                        {isStatus ? (
+                          <Badge
+                            tone={
+                              text === "ACTIVE"
+                                ? "emerald"
+                                : text === "INACTIVE"
+                                  ? "slate"
+                                  : "amber"
+                            }
+                          >
+                            {text === "ACTIVE"
+                              ? "Ενεργός"
+                              : text === "INACTIVE"
+                                ? "Ανενεργός"
+                                : text}
+                          </Badge>
+                        ) : (
+                          text
+                        )}
+                      </div>
+                    );
+                  })}
                 </>
               );
 

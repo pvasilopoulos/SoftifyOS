@@ -1,19 +1,28 @@
 "use client";
 
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useMemo, useState, useTransition } from "react";
-import { Plus, Search } from "lucide-react";
-import { Badge } from "@/shared/ui/badge";
+import { Plus, Settings2 } from "lucide-react";
 import { Button } from "@/shared/ui/button";
 import { ENTITY_REGISTRY } from "@/modules/entity-views/registry";
 import type { CustomFieldDef } from "@/modules/entity-views/dynamic-ui";
-import { ViewSwitcher } from "@/modules/entity-views/view-switcher";
 import {
   normalizeListConfig,
   type FormViewConfig,
   type ListViewConfig,
 } from "@/modules/entity-views/types";
+import type {
+  ListDensity,
+  ListFilter,
+  ListSort,
+} from "@/modules/entity-views/list-experience-types";
 import { ListExperienceRenderer } from "@/modules/entity-views/list-experience-renderer";
+import {
+  ListExperienceToolbar,
+  type StatusFilter,
+} from "@/modules/entity-views/list-experience-toolbar";
+import { applyListConfig } from "@/modules/entity-views/types";
 import { CustomerQuickDrawer } from "./customer-quick-drawer";
 import {
   CustomerPeekDrawer,
@@ -79,6 +88,24 @@ export function CustomersClient({
   const [nextCursor, setNextCursor] = useState(initialNextCursor);
   const [ms, setMs] = useState(initialMs);
   const [q, setQ] = useState("");
+  const [status, setStatus] = useState<StatusFilter>(() => {
+    const cfg = normalizeListConfig(defaultView?.config);
+    const locked = cfg.filters.find(
+      (f) => f.source === "system" && f.key === "status" && f.op === "eq",
+    );
+    if (locked?.value === "ACTIVE" || locked?.value === "INACTIVE") {
+      return locked.value;
+    }
+    return "ALL";
+  });
+  const [density, setDensity] = useState<ListDensity>(
+    () => normalizeListConfig(defaultView?.config).page?.density ?? "comfortable",
+  );
+  const [hiddenKeys, setHiddenKeys] = useState<Set<string>>(new Set());
+  const [interactiveFilters, setInteractiveFilters] = useState<
+    Record<string, string | null>
+  >({});
+  const [sortOverride, setSortOverride] = useState<ListSort | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
   const [quickOpen, setQuickOpen] = useState(false);
@@ -87,24 +114,103 @@ export function CustomersClient({
   );
 
   const activeView = listViews.find((v) => v.id === viewId) ?? defaultView;
-  const config = useMemo(
+  const builtins = ENTITY_REGISTRY.CUSTOMERS.builtins;
+
+  const baseConfig = useMemo(
     () => normalizeListConfig(activeView?.config),
     [activeView],
   );
-  const builtins = ENTITY_REGISTRY.CUSTOMERS.builtins;
 
-  async function search(nextViewId = viewId) {
-    setError(null);
+  const effectiveConfig = useMemo(() => {
+    const filters: ListFilter[] = [];
+
+    // Status: runtime chip wins over view lock when user picks ALL/ACTIVE/INACTIVE
+    if (status === "ACTIVE" || status === "INACTIVE") {
+      filters.push({
+        key: "status",
+        source: "system",
+        op: "eq",
+        value: status,
+        interactive: true,
+      });
+    }
+
+    // Keep non-status view filters
+    for (const f of baseConfig.filters ?? []) {
+      if (f.key === "status" && f.source === "system") continue;
+      filters.push(f);
+    }
+
+    // Interactive emptiness filters
+    for (const [compound, val] of Object.entries(interactiveFilters)) {
+      if (!val) continue;
+      const [source, key] = compound.split(":");
+      if (!key || (source !== "system" && source !== "custom")) continue;
+      filters.push({
+        key,
+        source,
+        op: val === "empty" ? "empty" : "not_empty",
+        value: null,
+        interactive: true,
+      });
+    }
+
+    const columns = (baseConfig.columns ?? []).map((col) => {
+      const id = `${col.source}:${col.key}`;
+      if (hiddenKeys.has(id)) return { ...col, hidden: true };
+      return col;
+    });
+
+    return {
+      ...baseConfig,
+      filters,
+      columns,
+      page: {
+        ...baseConfig.page,
+        density,
+      },
+      sort: sortOverride ?? baseConfig.sort,
+    } satisfies ListViewConfig;
+  }, [
+    baseConfig,
+    status,
+    interactiveFilters,
+    hiddenKeys,
+    density,
+    sortOverride,
+  ]);
+
+  function apiStatusParam(nextStatus = status, nextViewId = viewId) {
+    if (nextStatus === "ACTIVE" || nextStatus === "INACTIVE") return nextStatus;
     const view = listViews.find((v) => v.id === nextViewId);
     const cfg = normalizeListConfig(view?.config);
-    const statusFilter = cfg.filters.find(
+    const locked = cfg.filters.find(
       (f) => f.source === "system" && f.key === "status" && f.op === "eq",
     );
+    if (locked?.value === "ACTIVE" || locked?.value === "INACTIVE") {
+      return String(locked.value);
+    }
+    return null;
+  }
+
+  async function search(opts?: {
+    nextViewId?: string;
+    nextStatus?: StatusFilter;
+    nextQ?: string;
+  }) {
+    setError(null);
+    const nextViewId = opts?.nextViewId ?? viewId;
+    const nextStatus = opts?.nextStatus ?? status;
+    const nextQ = opts?.nextQ ?? q;
+    const view = listViews.find((v) => v.id === nextViewId);
+    const cfg = normalizeListConfig(view?.config);
     const params = new URLSearchParams({
       limit: String(cfg.pageSize ?? 50),
     });
-    if (q.trim()) params.set("q", q.trim());
-    if (statusFilter?.value) params.set("status", String(statusFilter.value));
+    if (nextQ.trim()) params.set("q", nextQ.trim());
+    const st = apiStatusParam(nextStatus, nextViewId);
+    if (st) params.set("status", st);
+
     const res = await fetch(`/api/customers?${params}`, { cache: "no-store" });
     const data = (await res.json()) as ListResponse;
     if (!res.ok) {
@@ -121,10 +227,12 @@ export function CustomersClient({
   async function loadMore() {
     if (!nextCursor) return;
     const params = new URLSearchParams({
-      limit: String(config.pageSize ?? 50),
+      limit: String(effectiveConfig.pageSize ?? 50),
       cursor: nextCursor,
     });
     if (q.trim()) params.set("q", q.trim());
+    const st = apiStatusParam();
+    if (st) params.set("status", st);
     const res = await fetch(`/api/customers?${params}`, { cache: "no-store" });
     const data = (await res.json()) as ListResponse;
     if (!res.ok) {
@@ -172,51 +280,120 @@ export function CustomersClient({
     );
   }
 
+  async function bulkStatus(ids: string[], nextStatus: string) {
+    setError(null);
+    const results = await Promise.all(
+      ids.map((id) =>
+        fetch(`/api/customers/${id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ status: nextStatus }),
+        }),
+      ),
+    );
+    const failed = results.find((r) => !r.ok);
+    if (failed) {
+      const data = await failed.json().catch(() => ({}));
+      setError(
+        (data as { error?: string }).error || "Αποτυχία μαζικής ενημέρωσης",
+      );
+      return;
+    }
+    setItems((prev) =>
+      prev.map((c) =>
+        ids.includes(c.id) ? { ...c, status: nextStatus } : c,
+      ),
+    );
+  }
+
+  function clearFilters() {
+    setQ("");
+    setStatus("ALL");
+    setInteractiveFilters({});
+    void search({ nextStatus: "ALL", nextQ: "" });
+  }
+
   const rows = items as unknown as Array<
     Record<string, unknown> & { id: string }
   >;
+  const visibleCount = applyListConfig(rows, effectiveConfig).length;
 
   return (
     <div className="space-y-3">
-      <div className="flex flex-col gap-2 lg:flex-row lg:items-center">
-        {config.page?.showSearch !== false ? (
-          <label className="soft-surface flex flex-1 items-center gap-2 px-3 py-2.5">
-            <Search size={16} className="text-slate-400" />
-            <input
-              value={q}
-              onChange={(e) => setQ(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") void search();
-              }}
-              placeholder="Αναζήτηση ονόματος, κωδικού ή ΑΦΜ..."
-              className="w-full bg-transparent text-sm outline-none"
-            />
-          </label>
-        ) : (
-          <div className="flex-1" />
-        )}
-        <ViewSwitcher
-          views={listViews}
-          value={viewId}
-          onChange={(id) => {
-            setViewId(id);
-            void search(id);
-          }}
-        />
-        <Button
-          variant="secondary"
-          onClick={() => void search()}
-          disabled={isPending}
-        >
-          Αναζήτηση
-        </Button>
-        {formViews.length > 0 ? (
-          <Button variant="secondary" onClick={() => setQuickOpen(true)}>
-            <Plus size={14} /> Γρήγορα
-          </Button>
-        ) : null}
-        <Badge tone={ms < 200 ? "emerald" : "amber"}>{ms} ms</Badge>
-      </div>
+      <ListExperienceToolbar
+        q={q}
+        onQChange={setQ}
+        onSearch={() => void search()}
+        showSearch={effectiveConfig.page?.showSearch !== false}
+        searchPlaceholder="Αναζήτηση ονόματος, κωδικού ή ΑΦΜ…"
+        views={listViews}
+        viewId={viewId}
+        onViewChange={(id) => {
+          setViewId(id);
+          setSortOverride(null);
+          const cfg = normalizeListConfig(
+            listViews.find((v) => v.id === id)?.config,
+          );
+          setDensity(cfg.page?.density ?? "comfortable");
+          const locked = cfg.filters.find(
+            (f) => f.source === "system" && f.key === "status" && f.op === "eq",
+          );
+          const nextStatus: StatusFilter =
+            locked?.value === "ACTIVE" || locked?.value === "INACTIVE"
+              ? locked.value
+              : status;
+          if (locked?.value === "ACTIVE" || locked?.value === "INACTIVE") {
+            setStatus(locked.value);
+          }
+          void search({ nextViewId: id, nextStatus });
+        }}
+        status={status}
+        onStatusChange={(s) => {
+          setStatus(s);
+          void search({ nextStatus: s });
+        }}
+        density={density}
+        onDensityChange={setDensity}
+        config={effectiveConfig}
+        builtins={builtins}
+        customDefs={customFields}
+        hiddenKeys={hiddenKeys}
+        onHiddenKeysChange={setHiddenKeys}
+        interactiveFilters={interactiveFilters}
+        onInteractiveFilterChange={(key, value) => {
+          setInteractiveFilters((prev) => {
+            const next = { ...prev };
+            if (value == null) delete next[key];
+            else next[key] = value;
+            return next;
+          });
+        }}
+        onClearFilters={clearFilters}
+        resultCount={visibleCount}
+        totalLoaded={items.length}
+        ms={ms}
+        pending={isPending}
+        extraActions={
+          <>
+            {formViews.length > 0 ? (
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => setQuickOpen(true)}
+              >
+                <Plus size={14} /> Γρήγορα
+              </Button>
+            ) : null}
+            <Link
+              href="/settings/entity-views"
+              className="inline-flex h-8 items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 text-xs font-medium text-slate-600 hover:bg-slate-50"
+              title="Σχεδίαση προβολών"
+            >
+              <Settings2 size={14} />
+            </Link>
+          </>
+        }
+      />
 
       {error ? (
         <p className="rounded-xl bg-rose-50 px-3 py-2 text-sm text-rose-700">
@@ -225,7 +402,7 @@ export function CustomersClient({
       ) : null}
 
       <ListExperienceRenderer
-        config={config}
+        config={effectiveConfig}
         builtins={builtins}
         customDefs={customFields}
         rows={rows}
@@ -235,6 +412,8 @@ export function CustomersClient({
         onQuickCreate={() => setQuickOpen(true)}
         onNavigateNew={() => router.push("/customers/new")}
         onKanbanMove={(row, next) => void moveKanban(row, next)}
+        onBulkStatus={(ids, st) => bulkStatus(ids, st)}
+        onSortChange={(sort) => setSortOverride(sort)}
         emptyActionLabel="Νέος πελάτης"
       />
 
@@ -245,9 +424,13 @@ export function CustomersClient({
             disabled={isPending}
             onClick={() => void loadMore()}
           >
-            Περισσότερα
+            Περισσότερα · {items.length} φορτωμένα
           </Button>
         </div>
+      ) : items.length > 0 ? (
+        <p className="text-center text-xs text-slate-400">
+          Τέλος αποτελεσμάτων · {items.length} εγγραφές
+        </p>
       ) : null}
 
       <CustomerQuickDrawer
@@ -262,7 +445,8 @@ export function CustomersClient({
         formViews={formViews}
         customFields={customFields}
         preferredFormCode={
-          config.page?.editFormCode ?? config.page?.peekFormCode
+          effectiveConfig.page?.editFormCode ??
+          effectiveConfig.page?.peekFormCode
         }
         onClose={() => setPeekCustomer(null)}
         onSaved={(patch) => {
