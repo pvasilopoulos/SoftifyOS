@@ -6,6 +6,12 @@ import { prisma } from "@/server/db";
 import { encodeCursor } from "@/shared/lib/cursor";
 import { PageHeader } from "@/shared/ui/page-header";
 import { toNumber } from "@/modules/sales/invoice-utils";
+import {
+  listCustomFields,
+  listEntityListViews,
+  serializeListView,
+} from "@/modules/entity-views/service";
+import { parseCustomFields } from "@/modules/entity-views/types";
 import { OrdersClient } from "@/app/(app)/orders/orders-client";
 
 export const metadata = { title: "Προσφορές" };
@@ -36,6 +42,7 @@ async function loadQuotes(tenantId: string) {
     customerCode: o.customer.code,
     branchName: o.branch?.name ?? null,
     lineCount: o._count.lines,
+    customFields: parseCustomFields(o.customFields),
   }));
   const last = items[items.length - 1];
   return {
@@ -52,13 +59,17 @@ export default async function QuotesPage() {
   const session = await getSession();
   if (!session) redirect("/login");
 
-  const first = await loadQuotes(session.tenantId);
+  const [first, listViews, customFields] = await Promise.all([
+    loadQuotes(session.tenantId),
+    listEntityListViews(prisma, session.tenantId, "QUOTES", true),
+    listCustomFields(prisma, session.tenantId, "QUOTES", true),
+  ]);
 
   return (
     <div className="space-y-5">
       <PageHeader
         title="Προσφορές"
-        description="Προσφορά → μετατροπή σε παραγγελία"
+        description="Προσφορά → μετατροπή σε παραγγελία · δυναμικές προβολές"
         actions={
           <Link
             href="/quotes/new"
@@ -76,6 +87,15 @@ export default async function QuotesPage() {
         kind="SALES_QUOTE"
         detailBasePath="/orders"
         emptyLabel="Δεν βρέθηκαν προσφορές"
+        entity="QUOTES"
+        listViews={listViews.map(serializeListView)}
+        customFields={customFields.map((f) => ({
+          code: f.code,
+          label: f.label,
+          type: f.type,
+          optionsJson: f.optionsJson,
+          required: f.required,
+        }))}
       />
     </div>
   );

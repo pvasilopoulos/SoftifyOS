@@ -111,11 +111,12 @@ export async function GET(request: NextRequest) {
         customerCode: string;
         branchName: string | null;
         spaceName: string | null;
+        customFields: unknown;
       }>
     >`
       SELECT
         i.id, i.number, i.status, i.kind, i."issuedAt", i."dueAt",
-        i.total, i."paidAmount", i."createdAt",
+        i.total, i."paidAmount", i."createdAt", i."customFields",
         i."customerId", c.name AS "customerName", c.code AS "customerCode",
         b.name AS "branchName", s.name AS "spaceName"
       FROM invoices i
@@ -184,6 +185,10 @@ export async function GET(request: NextRequest) {
         customerCode: row.customerCode,
         branchName: row.branchName,
         spaceName: row.spaceName,
+        customFields:
+          row.customFields && typeof row.customFields === "object"
+            ? row.customFields
+            : {},
       };
     });
     const last = items[items.length - 1];

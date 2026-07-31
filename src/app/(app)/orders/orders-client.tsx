@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useState, useTransition } from "react";
+import { useMemo, useState, useTransition } from "react";
 import { Pencil, Search } from "lucide-react";
 import { Badge } from "@/shared/ui/badge";
 import { Button } from "@/shared/ui/button";
@@ -12,6 +12,17 @@ import {
   orderStatusTone,
   type OrderStatusKey,
 } from "@/modules/sales/order-utils";
+import { ENTITY_REGISTRY } from "@/modules/entity-views/registry";
+import {
+  DynamicListCells,
+  DynamicListHeader,
+  type CustomFieldDef,
+} from "@/modules/entity-views/dynamic-ui";
+import { ViewSwitcher } from "@/modules/entity-views/view-switcher";
+import {
+  matchesFilters,
+  type ListViewConfig,
+} from "@/modules/entity-views/types";
 
 export type OrderListItem = {
   id: string;
@@ -25,6 +36,15 @@ export type OrderListItem = {
   customerCode: string;
   branchName: string | null;
   lineCount: number;
+  customFields?: Record<string, unknown>;
+};
+
+type ListViewOpt = {
+  id: string;
+  code: string;
+  name: string;
+  isDefault: boolean;
+  config: ListViewConfig;
 };
 
 type ListResponse = {
@@ -41,6 +61,9 @@ export function OrdersClient({
   kind = "SALES_ORDER",
   detailBasePath = "/orders",
   emptyLabel = "Δεν βρέθηκαν παραγγελίες",
+  entity = "ORDERS",
+  listViews = [],
+  customFields = [],
 }: {
   initialItems: OrderListItem[];
   initialNextCursor: string | null;
@@ -48,13 +71,31 @@ export function OrdersClient({
   kind?: "SALES_ORDER" | "SALES_QUOTE";
   detailBasePath?: string;
   emptyLabel?: string;
+  entity?: "ORDERS" | "QUOTES";
+  listViews?: ListViewOpt[];
+  customFields?: CustomFieldDef[];
 }) {
+  const defaultView =
+    listViews.find((v) => v.isDefault) ?? listViews[0] ?? null;
+  const [viewId, setViewId] = useState(defaultView?.id ?? "");
   const [items, setItems] = useState(initialItems);
   const [nextCursor, setNextCursor] = useState(initialNextCursor);
   const [ms, setMs] = useState(initialMs);
   const [q, setQ] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
+
+  const activeView = listViews.find((v) => v.id === viewId) ?? defaultView;
+  const config = activeView?.config;
+  const useDynamic = Boolean(config?.columns?.length);
+  const builtins = ENTITY_REGISTRY[entity].builtins;
+
+  const visibleItems = useMemo(() => {
+    if (!config?.filters?.length) return items;
+    return items.filter((row) =>
+      matchesFilters(row as unknown as Record<string, unknown>, config.filters),
+    );
+  }, [items, config]);
 
   async function search() {
     setError(null);
@@ -96,7 +137,7 @@ export function OrdersClient({
 
   return (
     <div className="space-y-3">
-      <div className="flex flex-col gap-2 sm:flex-row">
+      <div className="flex flex-col gap-2 lg:flex-row lg:items-center">
         <label className="soft-surface flex flex-1 items-center gap-2 px-3 py-2.5">
           <Search size={16} className="text-slate-400" />
           <input
@@ -109,6 +150,11 @@ export function OrdersClient({
             className="w-full bg-transparent text-sm outline-none"
           />
         </label>
+        <ViewSwitcher
+          views={listViews}
+          value={viewId}
+          onChange={setViewId}
+        />
         <Button
           variant="secondary"
           onClick={() => void search()}
@@ -126,17 +172,42 @@ export function OrdersClient({
       ) : null}
 
       <section className="soft-panel overflow-hidden">
-        <div className="hidden border-b border-slate-100 px-4 py-2.5 text-xs font-medium uppercase tracking-wide text-slate-400 md:grid md:grid-cols-[0.9fr_1.3fr_0.7fr_0.6fr_0.7fr_auto] md:gap-3">
-          <span>Αριθμός</span>
-          <span>Πελάτης</span>
-          <span className="text-right">Ποσό</span>
-          <span>Γραμμές</span>
-          <span>Κατάσταση</span>
-          <span />
-        </div>
+        {useDynamic && config ? (
+          <DynamicListHeader
+            columns={config.columns}
+            builtins={builtins}
+            customDefs={customFields}
+          />
+        ) : (
+          <div className="hidden border-b border-slate-100 px-4 py-2.5 text-xs font-medium uppercase tracking-wide text-slate-400 md:grid md:grid-cols-[0.9fr_1.3fr_0.7fr_0.6fr_0.7fr_auto] md:gap-3">
+            <span>Αριθμός</span>
+            <span>Πελάτης</span>
+            <span className="text-right">Ποσό</span>
+            <span>Γραμμές</span>
+            <span>Κατάσταση</span>
+            <span />
+          </div>
+        )}
         <ul className="divide-y divide-slate-100">
-          {items.map((o) => {
+          {visibleItems.map((o) => {
             const status = o.status as OrderStatusKey;
+            if (useDynamic && config) {
+              return (
+                <li key={o.id} className="soft-row">
+                  <Link
+                    href={`${detailBasePath}/${o.id}`}
+                    className="flex w-full items-center gap-3 px-4 py-3 hover:bg-slate-50/80"
+                  >
+                    <DynamicListCells
+                      columns={config.columns}
+                      builtins={builtins}
+                      customDefs={customFields}
+                      row={o as unknown as Record<string, unknown>}
+                    />
+                  </Link>
+                </li>
+              );
+            }
             return (
               <li key={o.id} className="soft-row">
                 <div className="grid grid-cols-[1fr_auto] gap-3 px-4 py-3 md:grid-cols-[0.9fr_1.3fr_0.7fr_0.6fr_0.7fr_auto] md:items-center">
@@ -181,7 +252,7 @@ export function OrdersClient({
               </li>
             );
           })}
-          {items.length === 0 ? (
+          {visibleItems.length === 0 ? (
             <li className="px-4 py-8 text-center text-sm text-slate-500">
               {emptyLabel}
             </li>

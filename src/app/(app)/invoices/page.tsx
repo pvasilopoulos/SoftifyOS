@@ -6,6 +6,11 @@ import { prisma } from "@/server/db";
 import { encodeCursor } from "@/shared/lib/cursor";
 import { PageHeader } from "@/shared/ui/page-header";
 import { toNumber } from "@/modules/sales/invoice-utils";
+import {
+  listCustomFields,
+  listEntityListViews,
+  serializeListView,
+} from "@/modules/entity-views/service";
 import { InvoicesWorkspace } from "./invoices-workspace";
 
 export const metadata = { title: "Τιμολόγια" };
@@ -60,6 +65,10 @@ async function loadFirstPage(tenantId: string) {
     customerCode: inv.customer.code,
     branchName: inv.branch?.name ?? null,
     spaceName: inv.space?.name ?? null,
+    customFields:
+      inv.customFields && typeof inv.customFields === "object"
+        ? (inv.customFields as Record<string, unknown>)
+        : {},
   }));
 
   const last = items[items.length - 1];
@@ -79,12 +88,16 @@ export default async function InvoicesPage() {
   if (!session) redirect("/login");
 
   const first = await loadFirstPage(session.tenantId);
+  const [listViews, customFields] = await Promise.all([
+    listEntityListViews(prisma, session.tenantId, "INVOICES", true),
+    listCustomFields(prisma, session.tenantId, "INVOICES", true),
+  ]);
 
   return (
     <div className="space-y-5">
       <PageHeader
         title="Παραστατικά"
-        description="Τιμολόγια · πιστωτικά · ΑΠΥ · πελάτης / υποκατάστημα / χώρος"
+        description="Τιμολόγια · πιστωτικά · ΑΠΥ · δυναμικές προβολές"
         actions={
           <div className="flex flex-wrap gap-2">
             <Link
@@ -108,6 +121,14 @@ export default async function InvoicesPage() {
         initialNextCursor={first.nextCursor}
         initialCounts={first.counts}
         initialMs={first.ms}
+        listViews={listViews.map(serializeListView)}
+        customFields={customFields.map((f) => ({
+          code: f.code,
+          label: f.label,
+          type: f.type,
+          optionsJson: f.optionsJson,
+          required: f.required,
+        }))}
       />
     </div>
   );

@@ -116,12 +116,13 @@ export async function GET(request: NextRequest) {
         customerCode: string;
         branchName: string | null;
         lineCount: bigint;
+        customFields: unknown;
       }>
     >`
       SELECT
         o.id, o.number, o.status, o.kind, o."orderedAt", o.total, o."createdAt",
         o."customerId", c.name AS "customerName", c.code AS "customerCode",
-        b.name AS "branchName",
+        b.name AS "branchName", o."customFields",
         (SELECT COUNT(*) FROM order_lines ol WHERE ol."orderId" = o.id) AS "lineCount"
       FROM orders o
       JOIN customers c ON c.id = o."customerId"
@@ -161,6 +162,10 @@ export async function GET(request: NextRequest) {
       customerCode: row.customerCode,
       branchName: row.branchName,
       lineCount: Number(row.lineCount),
+      customFields:
+        row.customFields && typeof row.customFields === "object"
+          ? row.customFields
+          : {},
     }));
     const last = items[items.length - 1];
     const nextCursor =

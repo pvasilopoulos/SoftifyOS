@@ -5,7 +5,14 @@ import { getSession } from "@/platform/auth/session";
 import { prisma } from "@/server/db";
 import { PageHeader } from "@/shared/ui/page-header";
 import { Badge } from "@/shared/ui/badge";
+import {
+  listCustomFields,
+  listEntityFormViews,
+  serializeFormView,
+} from "@/modules/entity-views/service";
+import { parseCustomFields } from "@/modules/entity-views/types";
 import { CustomerHierarchyClient } from "./customer-hierarchy-client";
+import { CustomerEditPanel } from "./customer-edit-panel";
 
 export const dynamic = "force-dynamic";
 
@@ -31,17 +38,21 @@ export default async function CustomerDetailPage({
   if (!session) redirect("/login");
 
   const { id } = await params;
-  const customer = await prisma.customer.findFirst({
-    where: { id, tenantId: session.tenantId },
-    include: {
-      branches: {
-        orderBy: [{ isPrimary: "desc" }, { name: "asc" }],
-        include: {
-          spaces: { orderBy: [{ type: "asc" }, { name: "asc" }] },
+  const [customer, formViews, customFields] = await Promise.all([
+    prisma.customer.findFirst({
+      where: { id, tenantId: session.tenantId },
+      include: {
+        branches: {
+          orderBy: [{ isPrimary: "desc" }, { name: "asc" }],
+          include: {
+            spaces: { orderBy: [{ type: "asc" }, { name: "asc" }] },
+          },
         },
       },
-    },
-  });
+    }),
+    listEntityFormViews(prisma, session.tenantId, "CUSTOMERS", true),
+    listCustomFields(prisma, session.tenantId, "CUSTOMERS", true),
+  ]);
 
   if (!customer) notFound();
 
@@ -61,6 +72,14 @@ export default async function CustomerDetailPage({
       })),
     })),
   };
+
+  const fieldDefs = customFields.map((f) => ({
+    code: f.code,
+    label: f.label,
+    type: f.type,
+    optionsJson: f.optionsJson,
+    required: f.required,
+  }));
 
   return (
     <div className="space-y-5">
@@ -83,29 +102,28 @@ export default async function CustomerDetailPage({
         />
       </div>
 
-      <div className="grid gap-3 sm:grid-cols-3">
-        <Info label="Email" value={customer.email || "—"} />
-        <Info label="Τηλέφωνο" value={customer.phone || "—"} />
-        <Info
-          label="Υποκαταστήματα"
-          value={String(customer.branches.length)}
-        />
-      </div>
+      <CustomerEditPanel
+        customerId={customer.id}
+        canEdit={session.role !== "VIEWER"}
+        formViews={formViews.map(serializeFormView)}
+        customFields={fieldDefs}
+        initial={{
+          code: customer.code,
+          name: customer.name,
+          vatNumber: customer.vatNumber,
+          email: customer.email,
+          phone: customer.phone,
+          notes: customer.notes,
+          status: customer.status,
+          customFields: parseCustomFields(customer.customFields),
+        }}
+      />
 
       <CustomerHierarchyClient
         customerId={customer.id}
         initialBranches={payload.branches}
         canEdit={session.role !== "VIEWER"}
       />
-    </div>
-  );
-}
-
-function Info({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="soft-panel px-4 py-3">
-      <p className="text-xs text-slate-500">{label}</p>
-      <p className="mt-1 text-sm font-medium text-ink-900">{value}</p>
     </div>
   );
 }
