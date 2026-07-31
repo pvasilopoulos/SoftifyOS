@@ -72,6 +72,8 @@ model Tenant {
   scriptHttpAllowlist          ScriptHttpAllowlist[]
   scriptRunLogs                ScriptRunLog[]
   scriptSettings               ScriptSettings?
+  stockBalances                StockBalance[]
+  stockMovements               StockMovement[]
 
   @@map("tenants")
 }
@@ -230,6 +232,8 @@ model Product {
   vatRate   Decimal       @default(24) @db.Decimal(5, 2)
   price     Decimal       @db.Decimal(14, 2)
   status    ProductStatus @default(ACTIVE)
+  /// When false, stock movements skip this product (services)
+  trackInventory Boolean  @default(true)
   notes     String?
   customFields Json?
   createdAt DateTime      @default(now())
@@ -239,6 +243,8 @@ model Product {
   unitOfMeasure UnitOfMeasure? @relation(fields: [unitId], references: [id], onDelete: SetNull)
   lines         OrderLine[]
   invoiceLines  InvoiceLine[]
+  stockBalances StockBalance[]
+  stockMovements StockMovement[]
 
   @@unique([tenantId, sku])
   @@unique([tenantId, barcode])
@@ -247,6 +253,68 @@ model Product {
   @@index([tenantId, createdAt(sort: Desc), id(sort: Desc)])
   @@index([tenantId, status, createdAt(sort: Desc)])
   @@map("products")
+}
+
+enum StockMovementType {
+  IN
+  OUT
+  ADJUST
+}
+
+enum StockMovementSource {
+  MANUAL
+  INVOICE
+  CREDIT
+  ADJUSTMENT
+  OPENING
+}
+
+/// Υπόλοιπο αποθέματος ανά προϊόν × υποκατάστημα (Site)
+model StockBalance {
+  id        String   @id @default(cuid())
+  tenantId  String
+  siteId    String
+  productId String
+  qtyOnHand Decimal  @default(0) @db.Decimal(14, 3)
+  updatedAt DateTime @updatedAt
+
+  tenant  Tenant  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  site    Site    @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, siteId, productId])
+  @@index([tenantId, productId])
+  @@index([tenantId, siteId])
+  @@map("stock_balances")
+}
+
+/// Κίνηση αποθήκης (αμετάβλητο ιστορικό)
+model StockMovement {
+  id        String              @id @default(cuid())
+  tenantId  String
+  siteId    String
+  productId String
+  type      StockMovementType
+  source    StockMovementSource @default(MANUAL)
+  /// Absolute quantity of the movement (always ≥ 0)
+  qty       Decimal             @db.Decimal(14, 3)
+  qtyBefore Decimal             @db.Decimal(14, 3)
+  qtyAfter  Decimal             @db.Decimal(14, 3)
+  note      String?
+  refType   String?
+  refId     String?
+  userId    String?
+  createdAt DateTime            @default(now())
+
+  tenant  Tenant  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  site    Site    @relation(fields: [siteId], references: [id], onDelete: Restrict)
+  product Product @relation(fields: [productId], references: [id], onDelete: Restrict)
+
+  @@index([tenantId, createdAt(sort: Desc), id(sort: Desc)])
+  @@index([tenantId, productId, createdAt(sort: Desc)])
+  @@index([tenantId, siteId, createdAt(sort: Desc)])
+  @@index([tenantId, refType, refId])
+  @@map("stock_movements")
 }
 
 enum UnitOfMeasureKind {
@@ -512,6 +580,8 @@ model Site {
   orders   Order[]
   posSessions PosSession[]
   posTerminals PosTerminal[]
+  stockBalances  StockBalance[]
+  stockMovements StockMovement[]
 
   @@unique([tenantId, code])
   @@index([tenantId, kind, isActive])

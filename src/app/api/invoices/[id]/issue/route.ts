@@ -30,6 +30,15 @@ export async function POST(
             glDebitAccount: true,
             glCreditAccount: true,
             glVatAccount: true,
+            affectsInventory: true,
+            siteId: true,
+          },
+        },
+        lines: {
+          select: {
+            productId: true,
+            quantity: true,
+            description: true,
           },
         },
       },
@@ -101,13 +110,41 @@ export async function POST(
       journalId = null;
     }
 
+    let stockMeta: {
+      applied: number;
+      skipped: number;
+      movements: string[];
+      siteId?: string;
+    } | null = null;
+    try {
+      const { applyInvoiceInventoryEffect } = await import(
+        "@/modules/inventory/service"
+      );
+      stockMeta = await applyInvoiceInventoryEffect(prisma, {
+        tenantId: session.tenantId,
+        invoiceId: invoice.id,
+        invoiceNumber: updated.number,
+        siteId: invoice.siteId ?? invoice.series?.siteId,
+        effect: invoice.series?.affectsInventory ?? "NONE",
+        lines: invoice.lines.map((l) => ({
+          productId: l.productId,
+          quantity: toNumber(l.quantity),
+          description: l.description,
+        })),
+        userId: session.sub,
+        allowNegative: true,
+      });
+    } catch {
+      stockMeta = null;
+    }
+
     await writeAuditEvent({
       tenantId: session.tenantId,
       userId: session.sub,
       action: "invoice.issue",
       entity: "invoice",
       entityId: invoice.id,
-      meta: { number: updated.number, journalId },
+      meta: { number: updated.number, journalId, stock: stockMeta },
     });
 
     const after = await dispatchScriptEvent(prisma, {
@@ -131,14 +168,24 @@ export async function POST(
 
     if (after.failed) {
       return NextResponse.json({
-        item: { id: updated.id, status: updated.status, journalId },
+        item: {
+          id: updated.id,
+          status: updated.status,
+          journalId,
+          stock: stockMeta,
+        },
         warning: after.failed.message,
         script: after.failed.scriptCode,
       });
     }
 
     return NextResponse.json({
-      item: { id: updated.id, status: updated.status, journalId },
+      item: {
+        id: updated.id,
+        status: updated.status,
+        journalId,
+        stock: stockMeta,
+      },
     });
   } catch (error) {
     return NextResponse.json(

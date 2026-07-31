@@ -72,6 +72,7 @@ export const productCreateSchema = z.object({
   price: z.coerce.number().nonnegative().max(10_000_000),
   notes: z.string().trim().max(2000).optional().nullable(),
   status: z.enum(["ACTIVE", "INACTIVE"]).optional(),
+  trackInventory: z.boolean().optional(),
   customFields: z
     .record(
       z.string(),
@@ -85,6 +86,8 @@ export const productCreateSchema = z.object({
     )
     .optional(),
 });
+
+export const productUpdateSchema = productCreateSchema.partial();
 
 export const productStatusLabel = {
   ACTIVE: "Ενεργό",

@@ -159,6 +159,7 @@ export async function POST(request: Request) {
       price: body.price,
       notes: body.notes || null,
       status: body.status ?? "ACTIVE",
+      trackInventory: body.trackInventory ?? true,
       customFields,
     };
 
@@ -186,6 +187,7 @@ export async function POST(request: Request) {
       "price",
       "notes",
       "status",
+      "trackInventory",
       "customFields",
     ]);
     if (
@@ -213,6 +215,10 @@ export async function POST(request: Request) {
         price: Number(patched.price),
         notes: (patched.notes as string | null) || null,
         status: (patched.status as "ACTIVE" | "INACTIVE") ?? "ACTIVE",
+        trackInventory:
+          typeof patched.trackInventory === "boolean"
+            ? patched.trackInventory
+            : true,
         customFields,
       },
     });
