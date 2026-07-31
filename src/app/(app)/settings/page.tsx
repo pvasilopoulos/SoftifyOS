@@ -72,6 +72,13 @@ const links = [
     badge: "Platform",
   },
   {
+    href: "/settings/scripts",
+    title: "Script Hooks",
+    description:
+      "Custom JavaScript ανά event (before/after create/update) · sandbox · HTTP allow-list & secrets για marketplace.",
+    badge: "Platform",
+  },
+  {
     href: "/settings/series",
     title: "Σειρές & Τύποι",
     description:

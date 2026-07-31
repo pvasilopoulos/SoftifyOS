@@ -67,6 +67,11 @@ model Tenant {
   customFieldDefinitions       CustomFieldDefinition[]
   entityListViews              EntityListView[]
   entityFormViews              EntityFormView[]
+  scriptDefinitions            ScriptDefinition[]
+  scriptSecrets                ScriptSecret[]
+  scriptHttpAllowlist          ScriptHttpAllowlist[]
+  scriptRunLogs                ScriptRunLog[]
+  scriptSettings               ScriptSettings?
 
   @@map("tenants")
 }
@@ -1190,4 +1195,110 @@ model EntityFormView {
   @@unique([tenantId, entity, code])
   @@index([tenantId, entity, isActive, sortOrder])
   @@map("entity_form_views")
+}
+
+// ─── Script Hooks Engine ────────────────────────────────────────────
+
+enum ScriptRuntime {
+  SERVER
+  UI
+  BOTH
+}
+
+enum ScriptLifecycle {
+  DRAFT
+  PUBLISHED
+}
+
+/// Per-tenant kill switch & defaults for custom scripts
+model ScriptSettings {
+  id              String   @id @default(cuid())
+  tenantId        String   @unique
+  scriptsEnabled  Boolean  @default(true)
+  maxTimeoutMs    Int      @default(3000)
+  maxHttpCalls    Int      @default(5)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@map("script_settings")
+}
+
+/// Custom JS hooks per module event
+model ScriptDefinition {
+  id          String          @id @default(cuid())
+  tenantId    String
+  module      EntityModule
+  code        String
+  name        String
+  description String?
+  /// e.g. before.create, after.update, form.beforeSubmit
+  eventKey    String
+  runtime     ScriptRuntime   @default(SERVER)
+  source      String          @db.Text
+  lifecycle   ScriptLifecycle @default(DRAFT)
+  isActive    Boolean         @default(true)
+  sortOrder   Int             @default(0)
+  timeoutMs   Int             @default(3000)
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+  updatedById String?
+
+  tenant Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  runs   ScriptRunLog[]
+
+  @@unique([tenantId, module, code])
+  @@index([tenantId, module, eventKey, isActive, lifecycle])
+  @@map("script_definitions")
+}
+
+/// Encrypted secrets for script HTTP auth (MARKETPLACE_TOKEN, …)
+model ScriptSecret {
+  id        String   @id @default(cuid())
+  tenantId  String
+  key       String
+  valueEnc  String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, key])
+  @@index([tenantId])
+  @@map("script_secrets")
+}
+
+/// Allow-listed hosts for api.http.* outbound calls
+model ScriptHttpAllowlist {
+  id        String   @id @default(cuid())
+  tenantId  String
+  host      String
+  createdAt DateTime @default(now())
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, host])
+  @@index([tenantId])
+  @@map("script_http_allowlist")
+}
+
+model ScriptRunLog {
+  id         String   @id @default(cuid())
+  tenantId   String
+  scriptId   String?
+  module     EntityModule
+  eventKey   String
+  success    Boolean
+  durationMs Int
+  error      String?
+  httpCalls  Int      @default(0)
+  createdAt  DateTime @default(now())
+
+  tenant Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  script ScriptDefinition? @relation(fields: [scriptId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, createdAt])
+  @@index([tenantId, module, eventKey])
+  @@map("script_run_logs")
 }

@@ -87,6 +87,11 @@ export async function PATCH(
     }
 
     const body = customerUpdateSchema.parse(await request.json());
+    const {
+      applyRecordPatch,
+      dispatchScriptEvent,
+    } = await import("@/modules/scripts/service");
+
     let customFields: Prisma.InputJsonValue | undefined;
     if (body.customFields !== undefined) {
       customFields = await mergeCustomFields(
@@ -98,18 +103,81 @@ export async function PATCH(
       );
     }
 
+    const previous: Record<string, unknown> = {
+      id: existing.id,
+      code: existing.code,
+      name: existing.name,
+      vatNumber: existing.vatNumber,
+      email: existing.email,
+      phone: existing.phone,
+      notes: existing.notes,
+      status: existing.status,
+      customFields: existing.customFields,
+    };
+
+    const draftRecord: Record<string, unknown> = {
+      ...previous,
+      ...(body.code !== undefined ? { code: body.code } : {}),
+      ...(body.name !== undefined ? { name: body.name } : {}),
+      ...(body.vatNumber !== undefined
+        ? { vatNumber: body.vatNumber || null }
+        : {}),
+      ...(body.email !== undefined ? { email: body.email || null } : {}),
+      ...(body.phone !== undefined ? { phone: body.phone || null } : {}),
+      ...(body.notes !== undefined ? { notes: body.notes || null } : {}),
+      ...(body.status !== undefined ? { status: body.status } : {}),
+      ...(customFields !== undefined ? { customFields } : {}),
+    };
+
+    const before = await dispatchScriptEvent(prisma, {
+      tenantId: session.tenantId,
+      module: "CUSTOMERS",
+      eventKey: "before.update",
+      record: draftRecord,
+      previous,
+      user: { id: session.sub, role: session.role },
+    });
+    if (before.failed) {
+      return NextResponse.json(
+        { error: before.failed.message, script: before.failed.scriptCode },
+        { status: 400 },
+      );
+    }
+
+    const patched = applyRecordPatch(draftRecord, before.record, [
+      "code",
+      "name",
+      "vatNumber",
+      "email",
+      "phone",
+      "notes",
+      "status",
+      "customFields",
+    ]);
+
+    if (
+      body.customFields !== undefined ||
+      patched.customFields !== draftRecord.customFields
+    ) {
+      customFields = await mergeCustomFields(
+        prisma,
+        session.tenantId,
+        "CUSTOMERS",
+        existing.customFields,
+        (patched.customFields as Record<string, unknown>) ?? {},
+      );
+    }
+
     const customer = await prisma.customer.update({
       where: { id },
       data: {
-        ...(body.code !== undefined ? { code: body.code } : {}),
-        ...(body.name !== undefined ? { name: body.name } : {}),
-        ...(body.vatNumber !== undefined
-          ? { vatNumber: body.vatNumber || null }
-          : {}),
-        ...(body.email !== undefined ? { email: body.email || null } : {}),
-        ...(body.phone !== undefined ? { phone: body.phone || null } : {}),
-        ...(body.notes !== undefined ? { notes: body.notes || null } : {}),
-        ...(body.status !== undefined ? { status: body.status } : {}),
+        code: String(patched.code),
+        name: String(patched.name),
+        vatNumber: (patched.vatNumber as string | null) || null,
+        email: (patched.email as string | null) || null,
+        phone: (patched.phone as string | null) || null,
+        notes: (patched.notes as string | null) || null,
+        status: (patched.status as "ACTIVE" | "INACTIVE") ?? existing.status,
         ...(customFields !== undefined ? { customFields } : {}),
       },
     });
@@ -122,6 +190,32 @@ export async function PATCH(
       entityId: customer.id,
       meta: { code: customer.code },
     });
+
+    const after = await dispatchScriptEvent(prisma, {
+      tenantId: session.tenantId,
+      module: "CUSTOMERS",
+      eventKey: "after.update",
+      record: {
+        id: customer.id,
+        code: customer.code,
+        name: customer.name,
+        vatNumber: customer.vatNumber,
+        email: customer.email,
+        phone: customer.phone,
+        notes: customer.notes,
+        status: customer.status,
+        customFields: customer.customFields,
+      },
+      previous,
+      user: { id: session.sub, role: session.role },
+    });
+    if (after.failed) {
+      return NextResponse.json({
+        item: customer,
+        warning: after.failed.message,
+        script: after.failed.scriptCode,
+      });
+    }
 
     return NextResponse.json({ item: customer });
   } catch (error) {
