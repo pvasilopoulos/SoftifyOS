@@ -1080,6 +1080,94 @@ export function ScriptsSettingsClient({
                       <li>http.get|post|put|patch|delete</li>
                     </ul>
                   </div>
+
+                  <div className="space-y-2">
+                    <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+                      Παραδείγματα
+                    </p>
+                    {(
+                      [
+                        {
+                          id: "api_fail",
+                          title: "Validation · api.fail",
+                          code: `async function run(ctx, api) {
+  const vat = String(ctx.record.vatNumber || "").trim();
+  if (!/^\\d{9}$/.test(vat)) {
+    api.fail("Απαιτείται έγκυρο ΑΦΜ (9 ψηφία)");
+  }
+}`,
+                        },
+                        {
+                          id: "api_set",
+                          title: "Defaults · api.set",
+                          code: `async function run(ctx, api) {
+  if (!ctx.record.status) api.set("status", "ACTIVE");
+  api.set("customFields.source", "script");
+  api.log("defaults", ctx.record.code);
+}`,
+                        },
+                        {
+                          id: "api_diff",
+                          title: "Update · previous → record",
+                          code: `async function run(ctx, api) {
+  const prev = ctx.previous || {};
+  if (prev.status === "ACTIVE" && ctx.record.status === "INACTIVE") {
+    api.log("deactivating", ctx.record.code, ctx.user);
+  }
+}`,
+                        },
+                        {
+                          id: "api_http",
+                          title: "Marketplace · secrets + http",
+                          code: `async function run(ctx, api) {
+  const token = await api.secrets.get("MARKETPLACE_TOKEN");
+  const res = await api.http.post(
+    "https://api.marketplace.example/v1/customers",
+    { id: ctx.record.id, name: ctx.record.name },
+    { headers: { Authorization: "Bearer " + token } },
+  );
+  if (!res.ok) api.fail("Sync failed: " + res.status);
+  api.log("synced", res.status);
+}`,
+                        },
+                        {
+                          id: "api_form",
+                          title: "Form · onFieldChange",
+                          code: `async function run(ctx, api) {
+  if (ctx.field === "vatNumber") {
+    const vat = String(ctx.value || "").trim();
+    if (vat && !/^\\d{9}$/.test(vat)) {
+      api.fail("Το ΑΦΜ πρέπει να έχει 9 ψηφία");
+    }
+  }
+}`,
+                        },
+                      ] as const
+                    ).map((ex) => (
+                      <div
+                        key={ex.id}
+                        className="overflow-hidden rounded-xl border border-slate-200"
+                      >
+                        <div className="flex items-center justify-between gap-2 border-b border-slate-100 bg-white px-2.5 py-1.5">
+                          <p className="text-[11px] font-medium text-ink-950">
+                            {ex.title}
+                          </p>
+                          <button
+                            type="button"
+                            disabled={!selected}
+                            onClick={() => insertSnippet(ex.code + "\n")}
+                            className="rounded-md px-1.5 py-0.5 text-[10px] font-medium text-teal-700 hover:bg-teal-50 disabled:opacity-40"
+                          >
+                            Εισαγωγή
+                          </button>
+                        </div>
+                        <pre className="overflow-x-auto bg-slate-950 p-2.5 font-mono text-[10px] leading-relaxed text-slate-200">
+                          {ex.code}
+                        </pre>
+                      </div>
+                    ))}
+                  </div>
+
                   <div className="flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 p-3 text-amber-900">
                     <Shield size={14} className="mt-0.5 shrink-0" />
                     <p>
