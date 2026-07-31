@@ -390,6 +390,12 @@ export function ScriptsSettingsClient({
         title="Script Hooks"
         description="Custom JS ανά module event · sandbox server · api.http + secrets"
       />
+      <p className="text-sm text-slate-600">
+        Πλήρης οδηγός με παραδείγματα για όλα τα events:{" "}
+        <code className="rounded bg-slate-100 px-1.5 py-0.5 text-xs">
+          docs/script-hooks-engine.md
+        </code>
+      </p>
 
       {message ? (
         <div className="rounded-lg border border-teal-200 bg-teal-50 px-3 py-2 text-sm text-teal-900">
