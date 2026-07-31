@@ -14,6 +14,7 @@ import {
 } from "@/modules/sales/order-utils";
 import { OrderIssueInvoice } from "./order-issue-invoice";
 import { QuoteConvertOrder } from "./quote-convert-order";
+import { OrderEditPanel } from "./order-edit-panel";
 
 export const dynamic = "force-dynamic";
 
@@ -206,12 +207,12 @@ export default async function OrderDetailPage({
         </section>
       ) : null}
 
-      {order.notes ? (
-        <section className="soft-panel p-5">
-          <h2 className="mb-2 text-sm font-semibold text-ink-950">Σημειώσεις</h2>
-          <p className="whitespace-pre-wrap text-sm text-slate-600">{order.notes}</p>
-        </section>
-      ) : null}
+      <OrderEditPanel
+        orderId={order.id}
+        status={order.status}
+        notes={order.notes}
+        canWrite={session.role !== "VIEWER"}
+      />
     </div>
   );
 }

@@ -4,6 +4,8 @@ import { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/server/db";
 import { getSession } from "@/platform/auth/session";
 import { writeAuditEvent } from "@/platform/tenancy/audit";
+import { buildChangeMeta } from "@/platform/tenancy/audit-diff";
+import { orderAuditSnapshot } from "@/modules/sales/order-audit";
 import {
   decodeCursor,
   encodeCursor,
@@ -356,7 +358,15 @@ export async function POST(request: Request) {
       action: docKind === "SALES_QUOTE" ? "quote.create" : "order.create",
       entity: "order",
       entityId: order.id,
-      meta: { number: order.number, status: order.status, kind: order.kind },
+      meta: buildChangeMeta({
+        before: null,
+        after: orderAuditSnapshot(order),
+        extra: {
+          number: order.number,
+          status: order.status,
+          kind: order.kind,
+        },
+      }),
     });
 
     const item = {

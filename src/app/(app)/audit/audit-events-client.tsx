@@ -75,6 +75,7 @@ const ACTION_PRESETS = [
   { value: "product.", label: "Προϊόντα" },
   { value: "invoice.", label: "Τιμολόγια" },
   { value: "order.", label: "Παραγγελίες" },
+  { value: "quote.", label: "Προσφορές" },
   { value: "script.", label: "Scripts" },
 ] as const;
 
@@ -621,6 +622,17 @@ const FIELD_LABELS: Record<string, string> = {
   subtotal: "Καθαρή",
   vatAmount: "ΦΠΑ",
   lineCount: "Γραμμές",
+  kind: "Τύπος",
+  customerId: "Πελάτης",
+  seriesId: "Σειρά",
+  orderedAt: "Ημ. παραγγελίας",
+  quantityInvoiced: "Τιμολογημένη ποσ.",
+  invoiceId: "Τιμολόγιο",
+  invoiceNumber: "Αρ. τιμολογίου",
+  invoiceTotal: "Σύνολο τιμολογίου",
+  convertedOrderId: "Παραγγελία",
+  quote: "Προσφορά",
+  order: "Παραγγελία",
 };
 
 function fieldLabel(path: string) {

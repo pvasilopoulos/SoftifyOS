@@ -40,4 +40,13 @@ export const quoteConvertSchema = z.object({
   notes: z.string().trim().max(2000).optional().nullable(),
 });
 
+export const orderUpdateSchema = z.object({
+  branchId: z.string().trim().min(1).optional().nullable(),
+  spaceId: z.string().trim().min(1).optional().nullable(),
+  notes: z.string().trim().max(2000).optional().nullable(),
+  status: z.enum(["DRAFT", "CONFIRMED", "CANCELLED"]).optional(),
+  lines: z.array(orderLineCreateSchema).min(1).max(100).optional(),
+});
+
 export type OrderCreateInput = z.infer<typeof orderCreateSchema>;
+export type OrderUpdateInput = z.infer<typeof orderUpdateSchema>;
