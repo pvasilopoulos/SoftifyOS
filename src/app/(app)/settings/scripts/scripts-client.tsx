@@ -45,6 +45,7 @@ import type { ScriptEventDef } from "@/modules/scripts/events";
 import {
   ScriptCodeEditor,
   SCRIPT_SNIPPETS,
+  SCRIPT_SNIPPET_CATEGORIES,
 } from "@/modules/scripts/script-code-editor";
 import { ScriptRunsPanel } from "@/modules/scripts/script-runs-panel";
 
@@ -150,6 +151,7 @@ export function ScriptsSettingsClient({
   const [pane, setPane] = useState<EditorPane>("props");
   const [cursor, setCursor] = useState({ line: 1, col: 1 });
   const [scriptQuery, setScriptQuery] = useState("");
+  const [snippetQuery, setSnippetQuery] = useState("");
   const editorRef = useRef<editor.IStandaloneCodeEditor | null>(null);
 
   const [secretKey, setSecretKey] = useState("MARKETPLACE_TOKEN");
@@ -196,6 +198,18 @@ export function ScriptsSettingsClient({
     }
     return [...map.entries()].filter(([, list]) => list.length > 0 || !q);
   }, [moduleScripts, events, scriptQuery]);
+
+  const filteredSnippets = useMemo(() => {
+    const q = snippetQuery.trim().toLowerCase();
+    if (!q) return SCRIPT_SNIPPETS;
+    return SCRIPT_SNIPPETS.filter(
+      (s) =>
+        s.label.toLowerCase().includes(q) ||
+        s.description.toLowerCase().includes(q) ||
+        s.category.toLowerCase().includes(q) ||
+        s.id.toLowerCase().includes(q),
+    );
+  }, [snippetQuery]);
 
   function flash(msg: string) {
     setMessage(msg);
@@ -973,25 +987,53 @@ export function ScriptsSettingsClient({
               {pane === "snippets" ? (
                 <div className="space-y-2">
                   <p className="text-xs text-slate-500">
-                    Εισαγωγή στο σημείο του cursor.
+                    Εισαγωγή στο σημείο του cursor · {filteredSnippets.length}{" "}
+                    snippets
                   </p>
-                  {SCRIPT_SNIPPETS.map((sn) => (
-                    <button
-                      key={sn.id}
-                      type="button"
-                      disabled={!selected}
-                      onClick={() => {
-                        insertSnippet(sn.code);
-                        setPane("props");
-                      }}
-                      className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-left hover:border-teal-300 hover:bg-teal-50/40 disabled:opacity-40"
-                    >
-                      <p className="text-sm font-medium text-ink-950">
-                        {sn.label}
-                      </p>
-                      <p className="text-xs text-slate-500">{sn.description}</p>
-                    </button>
-                  ))}
+                  <input
+                    type="search"
+                    placeholder="Αναζήτηση…"
+                    value={snippetQuery}
+                    onChange={(e) => setSnippetQuery(e.target.value)}
+                    className="w-full rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs outline-none focus:border-teal-300 focus:ring-2 focus:ring-teal-500/20"
+                  />
+                  {SCRIPT_SNIPPET_CATEGORIES.map((cat) => {
+                    const items = filteredSnippets.filter(
+                      (s) => s.category === cat,
+                    );
+                    if (items.length === 0) return null;
+                    return (
+                      <div key={cat} className="space-y-1.5">
+                        <p className="sticky top-0 z-[1] bg-white/95 px-0.5 pt-1 text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+                          {cat}
+                        </p>
+                        {items.map((sn) => (
+                          <button
+                            key={sn.id}
+                            type="button"
+                            disabled={!selected}
+                            onClick={() => {
+                              insertSnippet(sn.code);
+                              setPane("props");
+                            }}
+                            className="w-full rounded-xl border border-slate-200 px-3 py-2.5 text-left hover:border-teal-300 hover:bg-teal-50/40 disabled:opacity-40"
+                          >
+                            <p className="text-sm font-medium text-ink-950">
+                              {sn.label}
+                            </p>
+                            <p className="text-xs text-slate-500">
+                              {sn.description}
+                            </p>
+                          </button>
+                        ))}
+                      </div>
+                    );
+                  })}
+                  {filteredSnippets.length === 0 ? (
+                    <p className="text-xs text-slate-500">
+                      Κανένα snippet για «{snippetQuery}».
+                    </p>
+                  ) : null}
                 </div>
               ) : null}
 
