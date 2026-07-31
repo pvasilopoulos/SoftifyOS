@@ -44,6 +44,7 @@ const fieldRefSchema = z.object({
   key: z.string().min(1).max(60),
   source: z.enum(["system", "custom"]),
   required: z.boolean().optional(),
+  label: z.string().trim().max(120).optional(),
 });
 
 export const listViewConfigSchema = z.object({
@@ -53,7 +54,7 @@ export const listViewConfigSchema = z.object({
       z.object({
         key: z.string().min(1).max(60),
         source: z.enum(["system", "custom"]),
-        op: z.enum(["eq", "neq", "contains", "gt", "gte", "lt", "lte"]).default("eq"),
+        op: z.enum(["eq", "neq", "contains", "gt", "gte", "lt", "lte", "empty", "not_empty"]).default("eq"),
         value: z.union([z.string(), z.number(), z.boolean(), z.null()]),
       }),
     )

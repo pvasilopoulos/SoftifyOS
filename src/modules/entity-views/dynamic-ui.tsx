@@ -1,6 +1,7 @@
 "use client";
 
 import type { CustomFieldType } from "@/generated/prisma/client";
+import { cn } from "@/shared/lib/cn";
 import type { BuiltinField } from "./registry";
 import type { CustomFieldsMap, FormViewConfig } from "./types";
 import { formatFieldValue } from "./types";
@@ -27,6 +28,7 @@ export function DynamicFormSections({
   onSystemChange,
   onCustomChange,
   disabled,
+  compact,
 }: {
   config: FormViewConfig;
   builtins: BuiltinField[];
@@ -36,12 +38,13 @@ export function DynamicFormSections({
   onSystemChange: (key: string, value: string) => void;
   onCustomChange: (key: string, value: string | string[]) => void;
   disabled?: boolean;
+  compact?: boolean;
 }) {
   const builtinMap = new Map(builtins.map((b) => [b.key, b]));
   const customMap = new Map(customDefs.map((d) => [d.code, d]));
 
   return (
-    <div className="space-y-5">
+    <div className={cn("space-y-5", compact && "space-y-3")}>
       {config.sections.map((section) => (
         <section key={section.id} className="space-y-3">
           <h3 className="text-sm font-semibold text-ink-950">{section.title}</h3>
@@ -55,7 +58,7 @@ export function DynamicFormSections({
                 return (
                   <FieldControl
                     key={`s:${ref.key}`}
-                    label={field.label}
+                    label={ref.label || field.label}
                     required={required}
                     type={field.type}
                     options={field.options}
@@ -70,40 +73,71 @@ export function DynamicFormSections({
               if (!def) return null;
               const required = ref.required ?? def.required;
               const cur = customValues[ref.key];
+              if (def.type === "MULTI_SELECT") {
+                const selected = Array.isArray(cur)
+                  ? cur
+                  : cur
+                    ? String(cur).split(",").map((s) => s.trim()).filter(Boolean)
+                    : [];
+                return (
+                  <div key={`c:${ref.key}`} className="block text-sm sm:col-span-2">
+                    <span className="mb-1.5 block font-medium">
+                      {ref.label || def.label}
+                      {required ? " *" : ""}
+                    </span>
+                    <div className="flex flex-wrap gap-2 rounded-xl border border-slate-200 bg-slate-50/50 p-2.5">
+                      {optionsOf(def).map((opt) => {
+                        const on = selected.includes(opt);
+                        return (
+                          <label
+                            key={opt}
+                            className={cn(
+                              "inline-flex cursor-pointer items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium",
+                              on
+                                ? "border-teal-600 bg-teal-600 text-white"
+                                : "border-slate-200 bg-white text-slate-600",
+                              disabled && "opacity-60",
+                            )}
+                          >
+                            <input
+                              type="checkbox"
+                              className="sr-only"
+                              checked={on}
+                              disabled={disabled}
+                              onChange={() => {
+                                const next = on
+                                  ? selected.filter((x) => x !== opt)
+                                  : [...selected, opt];
+                                onCustomChange(ref.key, next);
+                              }}
+                            />
+                            {opt}
+                          </label>
+                        );
+                      })}
+                      {optionsOf(def).length === 0 ? (
+                        <span className="text-xs text-slate-400">Χωρίς επιλογές</span>
+                      ) : null}
+                    </div>
+                  </div>
+                );
+              }
               return (
                 <FieldControl
                   key={`c:${ref.key}`}
-                  label={def.label}
+                  label={ref.label || def.label}
                   required={required}
                   type={mapCustomType(def.type)}
                   options={optionsOf(def).map((o) => ({ value: o, label: o }))}
-                  value={
-                    Array.isArray(cur)
-                      ? cur.join(",")
-                      : cur == null
-                        ? ""
-                        : String(cur)
-                  }
+                  value={cur == null ? "" : String(cur)}
                   disabled={disabled}
-                  onChange={(v) => {
-                    if (def.type === "MULTI_SELECT") {
-                      onCustomChange(
-                        ref.key,
-                        v
-                          .split(",")
-                          .map((s) => s.trim())
-                          .filter(Boolean),
-                      );
-                    } else {
-                      onCustomChange(ref.key, v);
-                    }
-                  }}
+                  onChange={(v) => onCustomChange(ref.key, v)}
                 />
               );
             })}
           </div>
           {section.fields.length === 0 ? (
-            <p className="text-xs text-slate-400">Κενή ενότητα</p>
+            <p className="text-xs text-slate-400">Κενή ενότητα — πρόσθεσε πεδία από τον builder.</p>
           ) : null}
         </section>
       ))}
@@ -111,9 +145,7 @@ export function DynamicFormSections({
   );
 }
 
-function mapCustomType(
-  t: CustomFieldType,
-): BuiltinField["type"] {
+function mapCustomType(t: CustomFieldType): BuiltinField["type"] {
   switch (t) {
     case "NUMBER":
       return "number";
@@ -123,8 +155,6 @@ function mapCustomType(
       return "boolean";
     case "SELECT":
       return "select";
-    case "MULTI_SELECT":
-      return "text";
     default:
       return "text";
   }
@@ -150,7 +180,7 @@ function FieldControl({
   wide?: boolean;
 }) {
   const cls =
-    "h-11 w-full rounded-xl border border-slate-200 px-3 text-sm outline-none focus:border-teal-400";
+    "h-11 w-full rounded-xl border border-slate-200 px-3 text-sm outline-none focus:border-teal-400 disabled:bg-slate-50";
   return (
     <label className={wide ? "block text-sm sm:col-span-2" : "block text-sm"}>
       <span className="mb-1.5 block font-medium">
@@ -159,7 +189,7 @@ function FieldControl({
       </span>
       {type === "textarea" ? (
         <textarea
-          className="min-h-[88px] w-full rounded-xl border border-slate-200 px-3 py-2 text-sm"
+          className="min-h-[88px] w-full rounded-xl border border-slate-200 px-3 py-2 text-sm disabled:bg-slate-50"
           value={value}
           disabled={disabled}
           onChange={(e) => onChange(e.target.value)}
@@ -216,12 +246,14 @@ function FieldControl({
   );
 }
 
+type ColRef = { key: string; source: "system" | "custom"; label?: string };
+
 export function DynamicListHeader({
   columns,
   builtins,
   customDefs,
 }: {
-  columns: Array<{ key: string; source: "system" | "custom" }>;
+  columns: ColRef[];
   builtins: BuiltinField[];
   customDefs: CustomFieldDef[];
 }) {
@@ -236,9 +268,10 @@ export function DynamicListHeader({
     >
       {columns.map((col) => {
         const label =
-          col.source === "system"
+          col.label ||
+          (col.source === "system"
             ? builtinMap.get(col.key)?.label ?? col.key
-            : customMap.get(col.key)?.label ?? col.key;
+            : customMap.get(col.key)?.label ?? col.key);
         return <span key={`${col.source}:${col.key}`}>{label}</span>;
       })}
     </div>
@@ -251,7 +284,7 @@ export function DynamicListCells({
   customDefs,
   row,
 }: {
-  columns: Array<{ key: string; source: "system" | "custom" }>;
+  columns: ColRef[];
   builtins: BuiltinField[];
   customDefs: CustomFieldDef[];
   row: Record<string, unknown>;
@@ -270,20 +303,19 @@ export function DynamicListCells({
       {columns.map((col, idx) => {
         const builtin = builtinMap.get(col.key);
         const custom = customMap.get(col.key);
-        const raw =
-          col.source === "custom" ? cf[col.key] : row[col.key];
-        const type =
-          col.source === "system" ? builtin?.type : custom?.type;
+        const raw = col.source === "custom" ? cf[col.key] : row[col.key];
+        const type = col.source === "system" ? builtin?.type : custom?.type;
         const text = formatFieldValue(raw, type);
+        const label =
+          col.label ||
+          (col.source === "system" ? builtin?.label : custom?.label);
         return (
           <div
             key={`${col.source}:${col.key}`}
             className={idx === 0 ? "font-medium text-ink-950" : "text-slate-600"}
           >
-            <span className="md:hidden text-[10px] uppercase text-slate-400">
-              {col.source === "system"
-                ? builtin?.label
-                : custom?.label}{" "}
+            <span className="text-[10px] uppercase text-slate-400 md:hidden">
+              {label}{" "}
             </span>
             {text}
           </div>

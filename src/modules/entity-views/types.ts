@@ -1,9 +1,14 @@
 export type ListViewConfig = {
-  columns: Array<{ key: string; source: "system" | "custom" }>;
+  columns: Array<{
+    key: string;
+    source: "system" | "custom";
+    /** Optional display override */
+    label?: string;
+  }>;
   filters: Array<{
     key: string;
     source: "system" | "custom";
-    op: "eq" | "neq" | "contains" | "gt" | "gte" | "lt" | "lte";
+    op: "eq" | "neq" | "contains" | "gt" | "gte" | "lt" | "lte" | "empty" | "not_empty";
     value: string | number | boolean | null;
   }>;
   sort?: {
@@ -22,9 +27,30 @@ export type FormViewConfig = {
       key: string;
       source: "system" | "custom";
       required?: boolean;
+      /** Optional display override */
+      label?: string;
     }>;
   }>;
 };
+
+export const FILTER_OP_LABELS: Record<
+  ListViewConfig["filters"][number]["op"],
+  string
+> = {
+  eq: "=",
+  neq: "≠",
+  contains: "περιέχει",
+  gt: ">",
+  gte: "≥",
+  lt: "<",
+  lte: "≤",
+  empty: "κενό",
+  not_empty: "όχι κενό",
+};
+
+export const FILTER_OPS = Object.keys(FILTER_OP_LABELS) as Array<
+  ListViewConfig["filters"][number]["op"]
+>;
 
 export type CustomFieldsMap = Record<
   string,
@@ -97,7 +123,17 @@ export function matchesFilters(
   for (const f of filters) {
     const raw = readRowValue(row, f.key, f.source);
     const val = f.value;
+    const empty =
+      raw == null ||
+      raw === "" ||
+      (Array.isArray(raw) && raw.length === 0);
     switch (f.op) {
+      case "empty":
+        if (!empty) return false;
+        break;
+      case "not_empty":
+        if (empty) return false;
+        break;
       case "eq":
         if (String(raw ?? "") !== String(val ?? "")) return false;
         break;
@@ -127,4 +163,65 @@ export function matchesFilters(
     }
   }
   return true;
+}
+
+export function sortRows<T extends Record<string, unknown>>(
+  rows: T[],
+  sort?: ListViewConfig["sort"],
+): T[] {
+  if (!sort?.key) return rows;
+  const dir = sort.dir === "asc" ? 1 : -1;
+  return [...rows].sort((a, b) => {
+    const av = readRowValue(a, sort.key, sort.source);
+    const bv = readRowValue(b, sort.key, sort.source);
+    if (av == null && bv == null) return 0;
+    if (av == null) return 1;
+    if (bv == null) return -1;
+    const an = Number(av);
+    const bn = Number(bv);
+    if (!Number.isNaN(an) && !Number.isNaN(bn)) {
+      return (an - bn) * dir;
+    }
+    return String(av).localeCompare(String(bv), "el") * dir;
+  });
+}
+
+export function collectRequiredErrors(
+  config: FormViewConfig,
+  builtins: Array<{ key: string; label: string; required?: boolean }>,
+  customDefs: Array<{ code: string; label: string; required: boolean }>,
+  values: Record<string, unknown>,
+  customValues: CustomFieldsMap,
+): string[] {
+  const errors: string[] = [];
+  const builtinMap = new Map(builtins.map((b) => [b.key, b]));
+  const customMap = new Map(customDefs.map((d) => [d.code, d]));
+  for (const section of config.sections) {
+    for (const ref of section.fields) {
+      if (ref.source === "system") {
+        const field = builtinMap.get(ref.key);
+        if (!field) continue;
+        const required = ref.required ?? field.required;
+        if (!required) continue;
+        const v = values[ref.key];
+        if (v == null || String(v).trim() === "") {
+          errors.push(field.label);
+        }
+      } else {
+        const def = customMap.get(ref.key);
+        if (!def) continue;
+        const required = ref.required ?? def.required;
+        if (!required) continue;
+        const v = customValues[ref.key];
+        if (
+          v == null ||
+          v === "" ||
+          (Array.isArray(v) && v.length === 0)
+        ) {
+          errors.push(def.label);
+        }
+      }
+    }
+  }
+  return errors;
 }
