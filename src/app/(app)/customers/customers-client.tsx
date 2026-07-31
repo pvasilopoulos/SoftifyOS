@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useMemo, useState, useTransition } from "react";
 import { Plus, Search } from "lucide-react";
@@ -16,6 +15,10 @@ import {
 } from "@/modules/entity-views/types";
 import { ListExperienceRenderer } from "@/modules/entity-views/list-experience-renderer";
 import { CustomerQuickDrawer } from "./customer-quick-drawer";
+import {
+  CustomerPeekDrawer,
+  type CustomerPeekData,
+} from "./customer-peek-drawer";
 
 export type CustomerListItem = {
   id: string;
@@ -79,6 +82,9 @@ export function CustomersClient({
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
   const [quickOpen, setQuickOpen] = useState(false);
+  const [peekCustomer, setPeekCustomer] = useState<CustomerPeekData | null>(
+    null,
+  );
 
   const activeView = listViews.find((v) => v.id === viewId) ?? defaultView;
   const config = useMemo(
@@ -130,6 +136,40 @@ export function CustomersClient({
       setNextCursor(data.nextCursor);
       setMs(data.meta.ms);
     });
+  }
+
+  function openPeek(row: Record<string, unknown> & { id: string }) {
+    const found = items.find((c) => c.id === row.id);
+    if (!found) return;
+    setPeekCustomer({
+      id: found.id,
+      code: found.code,
+      name: found.name,
+      vatNumber: found.vatNumber,
+      email: found.email,
+      phone: found.phone,
+      status: found.status,
+      customFields: found.customFields,
+    });
+  }
+
+  async function moveKanban(
+    row: Record<string, unknown> & { id: string },
+    nextValue: string,
+  ) {
+    const res = await fetch(`/api/customers/${row.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ status: nextValue }),
+    });
+    if (!res.ok) {
+      const data = await res.json();
+      setError(data.error || "Αποτυχία μετακίνησης");
+      return;
+    }
+    setItems((prev) =>
+      prev.map((c) => (c.id === row.id ? { ...c, status: nextValue } : c)),
+    );
   }
 
   const rows = items as unknown as Array<
@@ -190,9 +230,11 @@ export function CustomersClient({
         customDefs={customFields}
         rows={rows}
         hrefForRow={(row) => `/customers/${row.id}`}
-        onPeek={() => setQuickOpen(true)}
+        onPeek={openPeek}
+        onEdit={openPeek}
         onQuickCreate={() => setQuickOpen(true)}
         onNavigateNew={() => router.push("/customers/new")}
+        onKanbanMove={(row, next) => void moveKanban(row, next)}
         emptyActionLabel="Νέος πελάτης"
       />
 
@@ -214,6 +256,41 @@ export function CustomersClient({
         formViews={formViews}
         customFields={customFields}
       />
+      <CustomerPeekDrawer
+        open={Boolean(peekCustomer)}
+        customer={peekCustomer}
+        formViews={formViews}
+        customFields={customFields}
+        preferredFormCode={
+          config.page?.editFormCode ?? config.page?.peekFormCode
+        }
+        onClose={() => setPeekCustomer(null)}
+        onSaved={(patch) => {
+          setItems((prev) =>
+            prev.map((c) =>
+              c.id === patch.id
+                ? {
+                    ...c,
+                    code: patch.code,
+                    name: patch.name,
+                    vatNumber: patch.vatNumber,
+                    email: patch.email,
+                    phone: patch.phone,
+                    status: patch.status,
+                    customFields: parseCustomFieldsSafe(patch.customFields),
+                  }
+                : c,
+            ),
+          );
+        }}
+      />
     </div>
   );
+}
+
+function parseCustomFieldsSafe(
+  raw: unknown,
+): Record<string, unknown> | undefined {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return undefined;
+  return raw as Record<string, unknown>;
 }

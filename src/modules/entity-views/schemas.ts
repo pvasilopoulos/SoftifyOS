@@ -54,7 +54,7 @@ export const listViewConfigSchema = z.preprocess(
   z.object({
     schemaVersion: z.literal(2),
     mode: z
-      .enum(["browse", "select", "compact", "peek", "cards"])
+      .enum(["browse", "select", "compact", "peek", "cards", "kanban"])
       .optional()
       .default("browse"),
     lifecycle: z.enum(["draft", "published"]).optional().default("published"),
@@ -62,11 +62,14 @@ export const listViewConfigSchema = z.preprocess(
       .object({
         density: z.enum(["compact", "comfortable", "detailed"]).optional(),
         peekFormCode: z.string().nullable().optional(),
+        editFormCode: z.string().nullable().optional(),
         rowClick: z.enum(["navigate", "peek", "none"]).optional(),
         emptyTitle: z.string().optional(),
         emptyDescription: z.string().optional(),
         emptyCta: z.enum(["form_quick", "navigate_new", "none"]).optional(),
         showSearch: z.boolean().optional(),
+        groupByKey: z.string().optional(),
+        groupBySource: z.enum(["system", "custom"]).optional(),
       })
       .optional(),
     columns: z.array(z.record(z.string(), z.unknown())).min(1).max(30),

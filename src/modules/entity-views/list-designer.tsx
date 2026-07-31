@@ -79,14 +79,15 @@ type Selection =
   | { kind: "bulkAction"; id: string }
   | { kind: "rule"; id: string };
 
-const MODES: ListMode[] = ["browse", "select", "compact", "peek", "cards"];
+const MODES: ListMode[] = ["browse", "select", "compact", "peek", "cards", "kanban"];
 
 const MODE_LABELS: Record<ListMode, string> = {
-  browse: "Browse",
-  select: "Select",
+  browse: "Λίστα",
+  select: "Επιλογή",
   compact: "Compact",
   peek: "Peek",
   cards: "Cards",
+  kanban: "Kanban",
 };
 
 const RULE_ACTIONS: ListRule["then"]["action"][] = [
@@ -974,6 +975,53 @@ export function ListExperienceDesigner({
                   {formViews.map((fv) => (
                     <option key={fv.id} value={fv.code}>
                       {fv.name} ({fv.code})
+                    </option>
+                  ))}
+                </select>
+              </FieldInput>
+              <FieldInput label="Edit form (peek edit)">
+                <select
+                  className={inputCls}
+                  value={draft.page?.editFormCode ?? ""}
+                  onChange={(e) =>
+                    patchPage({
+                      editFormCode: e.target.value || null,
+                    })
+                  }
+                >
+                  <option value="">— (ίδιο με peek)</option>
+                  {formViews.map((fv) => (
+                    <option key={fv.id} value={fv.code}>
+                      {fv.name} ({fv.code})
+                    </option>
+                  ))}
+                </select>
+              </FieldInput>
+              <FieldInput label="Kanban group by">
+                <select
+                  className={inputCls}
+                  value={`${draft.page?.groupBySource ?? "system"}:${draft.page?.groupByKey ?? "status"}`}
+                  onChange={(e) => {
+                    const [source, key] = e.target.value.split(":") as [
+                      "system" | "custom",
+                      string,
+                    ];
+                    patchPage({ groupBySource: source, groupByKey: key });
+                  }}
+                >
+                  {builtins
+                    .filter((b) => b.listable)
+                    .map((b) => (
+                      <option key={`system:${b.key}`} value={`system:${b.key}`}>
+                        {b.label} (system)
+                      </option>
+                    ))}
+                  {customFields.map((f) => (
+                    <option
+                      key={`custom:${f.code}`}
+                      value={`custom:${f.code}`}
+                    >
+                      {f.label} (custom)
                     </option>
                   ))}
                 </select>

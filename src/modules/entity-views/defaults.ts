@@ -51,6 +51,12 @@ function defaultListConfig(entity: EntityModule): ListViewConfig {
       ...(entity === "CUSTOMERS"
         ? [
             {
+              id: "edit",
+              label: "Επεξεργασία",
+              type: "form_edit" as const,
+              formCode: "default",
+            },
+            {
               id: "peek",
               label: "Γρήγορη προβολή",
               type: "form_peek" as const,
@@ -174,6 +180,47 @@ function extraListViews(entity: EntityModule): Array<{
           ...defaultListConfig(entity),
           filters: [
             { key: "status", source: "system", op: "eq", value: "ACTIVE" },
+          ],
+        },
+      },
+      {
+        code: "kanban_status",
+        name: "Kanban · Κατάσταση",
+        description: "Ομαδοποίηση ACTIVE / INACTIVE",
+        config: {
+          ...defaultListConfig(entity),
+          mode: "kanban",
+          page: {
+            ...defaultListConfig(entity).page,
+            groupByKey: "status",
+            groupBySource: "system",
+            rowClick: "peek",
+            peekFormCode: "default",
+            editFormCode: "default",
+            density: "comfortable",
+          },
+          rowActions: [
+            { id: "edit", label: "Επεξεργασία", type: "form_edit", formCode: "default" },
+            { id: "open", label: "Άνοιγμα", type: "navigate" },
+          ],
+        },
+      },
+      {
+        code: "peek_edit",
+        name: "Λίστα + Peek edit",
+        description: "Κλικ ανοίγει side panel επεξεργασίας",
+        config: {
+          ...defaultListConfig(entity),
+          mode: "peek",
+          page: {
+            ...defaultListConfig(entity).page,
+            rowClick: "peek",
+            peekFormCode: "default",
+            editFormCode: "default",
+          },
+          rowActions: [
+            { id: "edit", label: "Επεξεργασία", type: "form_edit" },
+            { id: "open", label: "Καρτέλα", type: "navigate" },
           ],
         },
       },

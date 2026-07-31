@@ -1,6 +1,12 @@
 /** List Experience Engine — schema v2 */
 
-export type ListMode = "browse" | "select" | "compact" | "peek" | "cards";
+export type ListMode =
+  | "browse"
+  | "select"
+  | "compact"
+  | "peek"
+  | "cards"
+  | "kanban";
 export type ListLifecycle = "draft" | "published";
 export type ListDensity = "compact" | "comfortable" | "detailed";
 export type ListRowClick = "navigate" | "peek" | "none";
@@ -94,11 +100,15 @@ export type ListViewConfig = {
   page?: {
     density?: ListDensity;
     peekFormCode?: string | null;
+    editFormCode?: string | null;
     rowClick?: ListRowClick;
     emptyTitle?: string;
     emptyDescription?: string;
     emptyCta?: "form_quick" | "navigate_new" | "none";
     showSearch?: boolean;
+    /** Kanban grouping field */
+    groupByKey?: string;
+    groupBySource?: "system" | "custom";
   };
   columns: ListColumn[];
   filters: ListFilter[];
@@ -146,9 +156,12 @@ export function emptyListConfig(): ListViewConfig {
       density: "comfortable",
       rowClick: "navigate",
       peekFormCode: null,
+      editFormCode: null,
       emptyTitle: "Δεν βρέθηκαν εγγραφές",
       emptyCta: "none",
       showSearch: true,
+      groupByKey: "status",
+      groupBySource: "system",
     },
     columns: [],
     filters: [],
