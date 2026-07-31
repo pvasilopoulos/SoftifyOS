@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { normalizeFormConfig } from "./form-experience-types";
 
 export const entityModuleSchema = z.enum([
   "CUSTOMERS",
@@ -70,18 +71,26 @@ export const listViewConfigSchema = z.object({
   pageSize: z.coerce.number().int().min(10).max(100).optional().default(50),
 });
 
-export const formViewConfigSchema = z.object({
-  sections: z
-    .array(
-      z.object({
-        id: z.string().min(1).max(40),
-        title: z.string().trim().min(1).max(120),
-        fields: z.array(fieldRefSchema).max(40),
-      }),
-    )
-    .min(1)
-    .max(20),
-});
+/** Accepts v1 sections or v2 page blocks; normalizes to Form Experience v2 */
+export const formViewConfigSchema = z.preprocess(
+  (val) => normalizeFormConfig(val),
+  z.object({
+    schemaVersion: z.literal(2),
+    mode: z
+      .enum(["create", "edit", "view", "quick", "wizard"])
+      .optional()
+      .default("edit"),
+    lifecycle: z.enum(["draft", "published"]).optional().default("published"),
+    page: z.object({
+      title: z.string().trim().max(120).optional(),
+      showHeader: z.boolean().optional(),
+      showSide: z.boolean().optional(),
+      sideContent: z.enum(["summary", "none"]).optional(),
+      root: z.array(z.record(z.string(), z.unknown())).max(60),
+    }),
+    rules: z.array(z.record(z.string(), z.unknown())).max(80).optional().default([]),
+  }),
+);
 
 export const listViewUpsertSchema = z.object({
   entity: entityModuleSchema,

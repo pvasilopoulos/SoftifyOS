@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useMemo, useState, useTransition } from "react";
-import { Search } from "lucide-react";
+import { Plus, Search } from "lucide-react";
 import { Badge } from "@/shared/ui/badge";
 import { Button } from "@/shared/ui/button";
 import { ENTITY_REGISTRY } from "@/modules/entity-views/registry";
@@ -15,8 +15,10 @@ import { ViewSwitcher } from "@/modules/entity-views/view-switcher";
 import {
   matchesFilters,
   sortRows,
+  type FormViewConfig,
   type ListViewConfig,
 } from "@/modules/entity-views/types";
+import { CustomerQuickDrawer } from "./customer-quick-drawer";
 
 export type CustomerListItem = {
   id: string;
@@ -39,6 +41,14 @@ type ListViewOpt = {
   config: ListViewConfig;
 };
 
+type FormViewOpt = {
+  id: string;
+  code: string;
+  name: string;
+  isDefault: boolean;
+  config: FormViewConfig;
+};
+
 type ListResponse = {
   items: CustomerListItem[];
   nextCursor: string | null;
@@ -52,12 +62,14 @@ export function CustomersClient({
   initialMs,
   listViews,
   customFields,
+  formViews = [],
 }: {
   initialItems: CustomerListItem[];
   initialNextCursor: string | null;
   initialMs: number;
   listViews: ListViewOpt[];
   customFields: CustomFieldDef[];
+  formViews?: FormViewOpt[];
 }) {
   const defaultView =
     listViews.find((v) => v.isDefault) ?? listViews[0] ?? null;
@@ -68,6 +80,7 @@ export function CustomersClient({
   const [q, setQ] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
+  const [quickOpen, setQuickOpen] = useState(false);
 
   const activeView = listViews.find((v) => v.id === viewId) ?? defaultView;
   const config = activeView?.config;
@@ -118,7 +131,10 @@ export function CustomersClient({
     const statusFilter = view?.config.filters.find(
       (f) => f.source === "system" && f.key === "status" && f.op === "eq",
     );
-    const params = new URLSearchParams({ limit: "50", cursor: nextCursor });
+    const params = new URLSearchParams({
+      limit: String(view?.config.pageSize ?? config?.pageSize ?? 50),
+      cursor: nextCursor,
+    });
     if (q.trim()) params.set("q", q.trim());
     if (statusFilter?.value) params.set("status", String(statusFilter.value));
     const res = await fetch(`/api/customers?${params}`, { cache: "no-store" });
@@ -173,6 +189,11 @@ export function CustomersClient({
         >
           Αναζήτηση
         </Button>
+        {formViews.length > 0 ? (
+          <Button variant="secondary" onClick={() => setQuickOpen(true)}>
+            <Plus size={14} /> Γρήγορα
+          </Button>
+        ) : null}
         <Badge tone={ms < 200 ? "emerald" : "amber"}>{ms} ms</Badge>
       </div>
 
@@ -223,6 +244,13 @@ export function CustomersClient({
           </Button>
         </div>
       ) : null}
+
+      <CustomerQuickDrawer
+        open={quickOpen}
+        onClose={() => setQuickOpen(false)}
+        formViews={formViews}
+        customFields={customFields}
+      />
     </div>
   );
 }

@@ -1,6 +1,7 @@
 import type { EntityModule, Prisma } from "@/generated/prisma/client";
 import { ENTITY_REGISTRY } from "./registry";
 import type { FormViewConfig, ListViewConfig } from "./types";
+import { fxId } from "./form-experience-types";
 
 export type { FormViewConfig, ListViewConfig };
 
@@ -17,27 +18,77 @@ function defaultListConfig(entity: EntityModule): ListViewConfig {
 
 function defaultFormConfig(entity: EntityModule): FormViewConfig {
   const formable = ENTITY_REGISTRY[entity].builtins.filter((b) => b.formable);
+  const mainId = "main";
+  const customId = "custom";
   return {
-    sections: [
-      {
-        id: "main",
-        title: "Βασικά στοιχεία",
-        fields: formable.map((b) => ({
-          key: b.key,
-          source: "system" as const,
-          required: b.required,
-        })),
-      },
-      {
-        id: "custom",
-        title: "Πρόσθετα πεδία",
-        fields: [],
-      },
-    ],
+    schemaVersion: 2,
+    mode: "edit",
+    lifecycle: "published",
+    page: {
+      showHeader: true,
+      showSide: entity === "CUSTOMERS",
+      sideContent: entity === "CUSTOMERS" ? "summary" : "none",
+      root: [
+        {
+          type: "tabs",
+          id: "main_tabs",
+          variant: "tabs",
+          tabs: [
+            {
+              id: "tab_basic",
+              title: "Βασικά",
+              children: [
+                {
+                  type: "section",
+                  id: mainId,
+                  title: "Βασικά στοιχεία",
+                  children: [
+                    {
+                      type: "fields",
+                      id: `${mainId}_fields`,
+                      fields: formable.map((b, i) => ({
+                        id: `${mainId}_${b.key}_${i}`,
+                        key: b.key,
+                        source: "system" as const,
+                        required: b.required,
+                        width:
+                          b.type === "textarea"
+                            ? ("full" as const)
+                            : ("half" as const),
+                      })),
+                    },
+                  ],
+                },
+              ],
+            },
+            {
+              id: "tab_extra",
+              title: "Πρόσθετα",
+              children: [
+                {
+                  type: "callout",
+                  id: fxId("call"),
+                  tone: "info",
+                  text: "Πρόσθεσε custom πεδία από τις Ρυθμίσεις · Πεδία & Προβολές.",
+                },
+                {
+                  type: "section",
+                  id: customId,
+                  title: "Πρόσθετα πεδία",
+                  children: [
+                    { type: "fields", id: `${customId}_fields`, fields: [] },
+                  ],
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    },
+    rules: [],
   };
 }
 
-/** Extra starter list views per entity */
 function extraListViews(entity: EntityModule): Array<{
   code: string;
   name: string;
@@ -103,19 +154,119 @@ function extraFormViews(entity: EntityModule): Array<{
       {
         code: "quick",
         name: "Γρήγορη καταχώριση",
-        description: "Ελάχιστα υποχρεωτικά πεδία",
+        description: "Drawer / modal — ελάχιστα πεδία",
         config: {
-          sections: [
-            {
-              id: "quick",
-              title: "Γρήγορα",
-              fields: quick.map((b) => ({
-                key: b.key,
-                source: "system",
-                required: b.key === "code" || b.key === "name",
-              })),
-            },
-          ],
+          schemaVersion: 2,
+          mode: "quick",
+          lifecycle: "published",
+          page: {
+            showHeader: false,
+            showSide: false,
+            root: [
+              {
+                type: "section",
+                id: "quick",
+                title: "Γρήγορα",
+                children: [
+                  {
+                    type: "fields",
+                    id: "quick_fields",
+                    fields: quick.map((b, i) => ({
+                      id: `quick_${b.key}_${i}`,
+                      key: b.key,
+                      source: "system" as const,
+                      required: b.key === "code" || b.key === "name",
+                      width: "full" as const,
+                    })),
+                  },
+                ],
+              },
+            ],
+          },
+          rules: [],
+        },
+      },
+      {
+        code: "wizard",
+        name: "Οδηγός καταχώρισης",
+        description: "Wizard βήματα",
+        config: {
+          schemaVersion: 2,
+          mode: "wizard",
+          lifecycle: "published",
+          page: {
+            showHeader: true,
+            showSide: false,
+            root: [
+              {
+                type: "tabs",
+                id: "wiz",
+                variant: "wizard",
+                tabs: [
+                  {
+                    id: "w1",
+                    title: "Ταυτότητα",
+                    children: [
+                      {
+                        type: "fields",
+                        id: "w1_f",
+                        fields: ["code", "name", "vatNumber"].map((key, i) => ({
+                          id: `w1_${key}`,
+                          key,
+                          source: "system" as const,
+                          required: key !== "vatNumber",
+                          width: "full" as const,
+                        })),
+                      },
+                    ],
+                  },
+                  {
+                    id: "w2",
+                    title: "Επικοινωνία",
+                    children: [
+                      {
+                        type: "fields",
+                        id: "w2_f",
+                        fields: ["email", "phone", "notes"].map((key) => ({
+                          id: `w2_${key}`,
+                          key,
+                          source: "system" as const,
+                          width: key === "notes" ? ("full" as const) : ("half" as const),
+                        })),
+                      },
+                    ],
+                  },
+                  {
+                    id: "w3",
+                    title: "Κατάσταση",
+                    children: [
+                      {
+                        type: "callout",
+                        id: "w3_c",
+                        tone: "info",
+                        text: "Επίλεξε αν ο πελάτης είναι ενεργός.",
+                      },
+                      {
+                        type: "fields",
+                        id: "w3_f",
+                        fields: [
+                          {
+                            id: "w3_status",
+                            key: "status",
+                            source: "system",
+                            required: true,
+                            width: "half",
+                            defaultValue: "ACTIVE",
+                          },
+                        ],
+                      },
+                    ],
+                  },
+                ],
+              },
+            ],
+          },
+          rules: [],
         },
       },
     ];
@@ -148,7 +299,7 @@ export function defaultViewsSeed(entity: EntityModule) {
       {
         code: "default",
         name: `Πλήρης φόρμα · ${meta.labelSingular}`,
-        description: "Όλα τα βασικά πεδία",
+        description: "Form Experience · tabs + sections",
         isDefault: true,
         isSystem: true,
         config: defaultFormConfig(entity) as unknown as Prisma.InputJsonValue,

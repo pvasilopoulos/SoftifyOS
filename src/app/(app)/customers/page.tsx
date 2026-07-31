@@ -8,7 +8,9 @@ import { PageHeader } from "@/shared/ui/page-header";
 import { Badge } from "@/shared/ui/badge";
 import {
   listCustomFields,
+  listEntityFormViews,
   listEntityListViews,
+  serializeFormView,
   serializeListView,
 } from "@/modules/entity-views/service";
 import { parseCustomFields } from "@/modules/entity-views/types";
@@ -53,17 +55,22 @@ export default async function CustomersPage() {
   const session = await getSession();
   if (!session) redirect("/login");
 
-  const [data, listViews, customFields] = await Promise.all([
+  const [data, listViews, formViews, customFields] = await Promise.all([
     loadCustomers(session.tenantId),
     listEntityListViews(prisma, session.tenantId, "CUSTOMERS", true),
+    listEntityFormViews(prisma, session.tenantId, "CUSTOMERS", true),
     listCustomFields(prisma, session.tenantId, "CUSTOMERS", true),
   ]);
+
+  const publishedForms = formViews
+    .map(serializeFormView)
+    .filter((v) => (v.config.lifecycle ?? "published") === "published");
 
   return (
     <div className="space-y-5">
       <PageHeader
         title="Πελάτες"
-        description="Καρτέλες πελατών με δυναμικές προβολές λίστας και custom πεδία."
+        description="Καρτέλες πελατών με δυναμικές προβολές λίστας και Form Experience."
         actions={
           <div className="flex flex-wrap items-center gap-2">
             <Badge tone="teal">{data.items.length} στη σελίδα</Badge>
@@ -81,6 +88,7 @@ export default async function CustomersPage() {
         initialNextCursor={data.nextCursor}
         initialMs={data.ms}
         listViews={listViews.map(serializeListView)}
+        formViews={publishedForms}
         customFields={customFields.map((f) => ({
           code: f.code,
           label: f.label,

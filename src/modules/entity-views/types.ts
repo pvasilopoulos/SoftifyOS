@@ -19,19 +19,28 @@ export type ListViewConfig = {
   pageSize?: number;
 };
 
-export type FormViewConfig = {
-  sections: Array<{
-    id: string;
-    title: string;
-    fields: Array<{
-      key: string;
-      source: "system" | "custom";
-      required?: boolean;
-      /** Optional display override */
-      label?: string;
-    }>;
-  }>;
-};
+export type {
+  FormViewConfig,
+  FormViewConfigV1,
+  FormBlock,
+  FormFieldRef,
+  FormRule,
+  FormMode,
+  FormLifecycle,
+  FieldWidth,
+} from "./form-experience-types";
+
+export {
+  emptyFormConfig,
+  normalizeFormConfig,
+  migrateFormV1ToV2,
+  walkFormFields,
+  fxId,
+} from "./form-experience-types";
+
+import type { FormViewConfig } from "./form-experience-types";
+import { normalizeFormConfig, walkFormFields } from "./form-experience-types";
+import { collectFormRequiredErrors } from "./form-rules";
 
 export const FILTER_OP_LABELS: Record<
   ListViewConfig["filters"][number]["op"],
@@ -73,10 +82,7 @@ export function parseListConfig(raw: unknown): ListViewConfig {
 }
 
 export function parseFormConfig(raw: unknown): FormViewConfig {
-  const c = raw as Partial<FormViewConfig>;
-  return {
-    sections: Array.isArray(c.sections) ? c.sections : [],
-  };
+  return normalizeFormConfig(raw);
 }
 
 export function formatFieldValue(
@@ -192,36 +198,33 @@ export function collectRequiredErrors(
   customDefs: Array<{ code: string; label: string; required: boolean }>,
   values: Record<string, unknown>,
   customValues: CustomFieldsMap,
+  role?: string | null,
 ): string[] {
-  const errors: string[] = [];
-  const builtinMap = new Map(builtins.map((b) => [b.key, b]));
-  const customMap = new Map(customDefs.map((d) => [d.code, d]));
-  for (const section of config.sections) {
-    for (const ref of section.fields) {
-      if (ref.source === "system") {
-        const field = builtinMap.get(ref.key);
-        if (!field) continue;
-        const required = ref.required ?? field.required;
-        if (!required) continue;
-        const v = values[ref.key];
-        if (v == null || String(v).trim() === "") {
-          errors.push(field.label);
-        }
-      } else {
-        const def = customMap.get(ref.key);
-        if (!def) continue;
-        const required = ref.required ?? def.required;
-        if (!required) continue;
-        const v = customValues[ref.key];
-        if (
-          v == null ||
-          v === "" ||
-          (Array.isArray(v) && v.length === 0)
-        ) {
-          errors.push(def.label);
-        }
-      }
-    }
-  }
-  return errors;
+  return collectFormRequiredErrors(
+    config,
+    builtins,
+    customDefs,
+    values,
+    customValues,
+    role,
+  );
+}
+
+/** Flat field list helper for simple UIs */
+export function flattenFormFields(config: FormViewConfig) {
+  const out: Array<{
+    key: string;
+    source: "system" | "custom";
+    required?: boolean;
+    label?: string;
+  }> = [];
+  walkFormFields(config.page.root, (f) => {
+    out.push({
+      key: f.key,
+      source: f.source,
+      required: f.required,
+      label: f.label,
+    });
+  });
+  return out;
 }
