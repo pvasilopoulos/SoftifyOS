@@ -46,6 +46,7 @@ import {
   ScriptCodeEditor,
   SCRIPT_SNIPPETS,
 } from "@/modules/scripts/script-code-editor";
+import { ScriptRunsPanel } from "@/modules/scripts/script-runs-panel";
 
 type ScriptItem = {
   id: string;
@@ -1204,60 +1205,7 @@ export function ScriptsSettingsClient({
         </PanelCard>
       ) : null}
 
-      {tab === "logs" ? (
-        <PanelCard
-          title="Run history"
-          description="Τελευταίες εκτελέσεις scripts (παραγωγή + test όπου καταγράφονται)."
-        >
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[720px] text-left text-sm">
-              <thead className="text-[11px] uppercase tracking-wide text-slate-400">
-                <tr>
-                  <th className="pb-2 pr-3">Χρόνος</th>
-                  <th className="pb-2 pr-3">Module</th>
-                  <th className="pb-2 pr-3">Event</th>
-                  <th className="pb-2 pr-3">OK</th>
-                  <th className="pb-2 pr-3">ms</th>
-                  <th className="pb-2 pr-3">HTTP</th>
-                  <th className="pb-2">Error</th>
-                </tr>
-              </thead>
-              <tbody>
-                {logs.map((l) => (
-                  <tr key={l.id} className="border-t border-slate-100">
-                    <td className="py-2.5 pr-3 whitespace-nowrap text-slate-600">
-                      {new Date(l.createdAt).toLocaleString("el-GR")}
-                    </td>
-                    <td className="py-2.5 pr-3">{l.module}</td>
-                    <td className="py-2.5 pr-3 font-mono text-xs">
-                      {l.eventKey}
-                    </td>
-                    <td className="py-2.5 pr-3">
-                      {l.success ? (
-                        <CheckCircle2 size={14} className="text-emerald-600" />
-                      ) : (
-                        <XCircle size={14} className="text-rose-600" />
-                      )}
-                    </td>
-                    <td className="py-2.5 pr-3 tabular-nums">{l.durationMs}</td>
-                    <td className="py-2.5 pr-3 tabular-nums">{l.httpCalls}</td>
-                    <td className="max-w-xs truncate py-2.5 text-xs text-rose-700">
-                      {l.error}
-                    </td>
-                  </tr>
-                ))}
-                {logs.length === 0 ? (
-                  <tr>
-                    <td colSpan={7} className="py-6 text-slate-500">
-                      Δεν υπάρχουν runs ακόμα.
-                    </td>
-                  </tr>
-                ) : null}
-              </tbody>
-            </table>
-          </div>
-        </PanelCard>
-      ) : null}
+      {tab === "logs" ? <ScriptRunsPanel /> : null}
     </div>
   );
 }

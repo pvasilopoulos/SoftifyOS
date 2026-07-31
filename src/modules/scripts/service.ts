@@ -10,6 +10,7 @@ import {
   type ScriptRunResult,
   loadScriptRuntimeDeps,
 } from "./runtime";
+import { writeScriptRunLog, type ScriptActor } from "./run-log";
 
 export { ScriptFailError };
 
@@ -31,7 +32,7 @@ export async function dispatchScriptEvent(
     eventKey: string;
     record: Record<string, unknown>;
     previous?: Record<string, unknown> | null;
-    user?: { id: string; role?: string } | null;
+    user?: (ScriptActor & { id: string; role?: string }) | null;
     /** Only run SERVER-capable scripts (default). UI events skipped here. */
     runtime?: "SERVER" | "UI";
   },
@@ -69,7 +70,9 @@ export async function dispatchScriptEvent(
       eventKey: opts.eventKey,
       record,
       previous: opts.previous ?? null,
-      user: opts.user ?? null,
+      user: opts.user
+        ? { id: opts.user.id, role: opts.user.role }
+        : null,
     };
 
     const result = await runScriptSource({
@@ -87,17 +90,17 @@ export async function dispatchScriptEvent(
       scriptCode: script.code,
     });
 
-    await db.scriptRunLog.create({
-      data: {
-        tenantId: opts.tenantId,
-        scriptId: script.id,
-        module: opts.module,
-        eventKey: opts.eventKey,
-        success: result.ok,
-        durationMs: result.durationMs,
-        error: result.error ?? null,
-        httpCalls: result.httpCalls,
-      },
+    await writeScriptRunLog(db, {
+      tenantId: opts.tenantId,
+      scriptId: script.id,
+      scriptCode: script.code,
+      scriptName: script.name,
+      module: opts.module,
+      eventKey: opts.eventKey,
+      source: "PRODUCTION",
+      result,
+      user: opts.user,
+      record,
     });
 
     if (!result.ok) {

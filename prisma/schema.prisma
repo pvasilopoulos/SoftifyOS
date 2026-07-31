@@ -1210,6 +1210,11 @@ enum ScriptLifecycle {
   PUBLISHED
 }
 
+enum ScriptRunSource {
+  PRODUCTION
+  TEST
+}
+
 /// Per-tenant kill switch & defaults for custom scripts
 model ScriptSettings {
   id              String   @id @default(cuid())
@@ -1284,21 +1289,41 @@ model ScriptHttpAllowlist {
 }
 
 model ScriptRunLog {
-  id         String   @id @default(cuid())
-  tenantId   String
-  scriptId   String?
-  module     EntityModule
-  eventKey   String
-  success    Boolean
-  durationMs Int
-  error      String?
-  httpCalls  Int      @default(0)
-  createdAt  DateTime @default(now())
+  id             String          @id @default(cuid())
+  tenantId       String
+  scriptId       String?
+  module         EntityModule
+  eventKey       String
+  success        Boolean
+  durationMs     Int
+  error          String?
+  httpCalls      Int             @default(0)
+  /// PRODUCTION (API dispatch) or TEST (settings test run)
+  source         ScriptRunSource @default(PRODUCTION)
+  scriptCode     String?
+  scriptName     String?
+  userId         String?
+  userEmail      String?
+  userName       String?
+  userRole       String?
+  /// Related entity id when available (customer id, …)
+  recordId       String?
+  recordCode     String?
+  /// Truncated api.log lines
+  logsJson       Json?
+  /// Small snapshot of record keys for debugging
+  recordSnapshot Json?
+  createdAt      DateTime        @default(now())
 
   tenant Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   script ScriptDefinition? @relation(fields: [scriptId], references: [id], onDelete: SetNull)
 
   @@index([tenantId, createdAt])
   @@index([tenantId, module, eventKey])
+  @@index([tenantId, success, createdAt])
+  @@index([tenantId, source, createdAt])
+  @@index([tenantId, scriptCode])
+  @@index([tenantId, userId])
+  @@index([tenantId, recordId])
   @@map("script_run_logs")
 }

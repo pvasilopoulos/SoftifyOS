@@ -10,6 +10,7 @@ import {
   type ScriptContext,
 } from "@/modules/scripts/runtime";
 import { eventsForModule } from "@/modules/scripts/events";
+import { writeScriptRunLog } from "@/modules/scripts/run-log";
 
 export const dynamic = "force-dynamic";
 
@@ -61,6 +62,23 @@ export async function POST(request: Request) {
       maxHttpCalls: deps.settings.maxHttpCalls,
       allowedHosts: deps.allowedHosts,
       secrets: deps.secrets,
+    });
+
+    await writeScriptRunLog(prisma, {
+      tenantId: session!.tenantId,
+      scriptCode: "test_run",
+      scriptName: "Test run",
+      module: body.module,
+      eventKey: body.eventKey,
+      source: "TEST",
+      result,
+      user: {
+        id: session!.sub,
+        email: session!.email,
+        name: session!.name,
+        role: session!.role,
+      },
+      record: result.record,
     });
 
     return NextResponse.json({ result });

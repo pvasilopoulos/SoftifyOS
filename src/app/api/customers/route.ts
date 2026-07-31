@@ -150,7 +150,12 @@ export async function POST(request: Request) {
       module: "CUSTOMERS",
       eventKey: "before.create",
       record: draftRecord,
-      user: { id: session.sub, role: session.role },
+      user: {
+        id: session.sub,
+        role: session.role,
+        email: session.email,
+        name: session.name,
+      },
     });
     if (before.failed) {
       return NextResponse.json(
@@ -221,7 +226,12 @@ export async function POST(request: Request) {
       module: "CUSTOMERS",
       eventKey: "after.create",
       record: afterRecord,
-      user: { id: session.sub, role: session.role },
+      user: {
+        id: session.sub,
+        role: session.role,
+        email: session.email,
+        name: session.name,
+      },
     });
     if (after.failed) {
       return NextResponse.json(

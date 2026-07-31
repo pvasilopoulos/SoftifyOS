@@ -135,7 +135,12 @@ export async function PATCH(
       eventKey: "before.update",
       record: draftRecord,
       previous,
-      user: { id: session.sub, role: session.role },
+      user: {
+        id: session.sub,
+        role: session.role,
+        email: session.email,
+        name: session.name,
+      },
     });
     if (before.failed) {
       return NextResponse.json(
@@ -207,7 +212,12 @@ export async function PATCH(
         customFields: customer.customFields,
       },
       previous,
-      user: { id: session.sub, role: session.role },
+      user: {
+        id: session.sub,
+        role: session.role,
+        email: session.email,
+        name: session.name,
+      },
     });
     if (after.failed) {
       return NextResponse.json({
