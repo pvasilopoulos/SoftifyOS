@@ -68,7 +68,8 @@ export async function applyStockDelta(
       | "ADJUSTMENT"
       | "OPENING"
       | "PURCHASE"
-      | "RECEIPT";
+      | "RECEIPT"
+      | "DELIVERY";
     note?: string | null;
     refType?: string | null;
     refId?: string | null;

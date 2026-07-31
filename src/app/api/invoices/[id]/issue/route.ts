@@ -32,6 +32,9 @@ export async function POST(
             glVatAccount: true,
             affectsInventory: true,
             siteId: true,
+            myDataEnabled: true,
+            myDataInvoiceType: true,
+            myDataVatCategory: true,
           },
         },
         lines: {
@@ -138,13 +141,40 @@ export async function POST(
       stockMeta = null;
     }
 
+    let myDataId: string | null = null;
+    if (invoice.series?.myDataEnabled) {
+      try {
+        const { enqueueMyDataSubmission } = await import(
+          "@/modules/mydata/service"
+        );
+        const sub = await enqueueMyDataSubmission(prisma, {
+          tenantId: session.tenantId,
+          entityType: "invoice",
+          entityId: invoice.id,
+          entityNumber: updated.number,
+          invoiceType: invoice.series.myDataInvoiceType,
+          vatCategory: invoice.series.myDataVatCategory,
+          payload: {
+            number: updated.number,
+            kind: invoice.kind,
+            customerId: invoice.customerId,
+            total: toNumber(updated.total),
+            vatAmount: toNumber(updated.vatAmount),
+          },
+        });
+        myDataId = sub.id;
+      } catch {
+        myDataId = null;
+      }
+    }
+
     await writeAuditEvent({
       tenantId: session.tenantId,
       userId: session.sub,
       action: "invoice.issue",
       entity: "invoice",
       entityId: invoice.id,
-      meta: { number: updated.number, journalId, stock: stockMeta },
+      meta: { number: updated.number, journalId, stock: stockMeta, myDataId },
     });
 
     const after = await dispatchScriptEvent(prisma, {
@@ -161,6 +191,7 @@ export async function POST(
         vatAmount: toNumber(updated.vatAmount),
         issuedAt: updated.issuedAt?.toISOString() ?? null,
         journalId,
+        myDataId,
       },
       previous: issueRecord,
       user: scriptActorFromSession(session),
@@ -173,6 +204,7 @@ export async function POST(
           status: updated.status,
           journalId,
           stock: stockMeta,
+          myDataId,
         },
         warning: after.failed.message,
         script: after.failed.scriptCode,
@@ -185,6 +217,7 @@ export async function POST(
         status: updated.status,
         journalId,
         stock: stockMeta,
+        myDataId,
       },
     });
   } catch (error) {

@@ -194,6 +194,13 @@ export const defaultMenuTree: MenuNodeConfig[] = [
         icon: "FileText",
       },
       {
+        id: "delivery-notes",
+        type: "link",
+        label: "Δελτία αποστολής",
+        href: "/delivery-notes",
+        icon: "Truck",
+      },
+      {
         id: "pos",
         type: "link",
         label: "POS Λιανική",

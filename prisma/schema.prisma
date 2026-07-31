@@ -76,6 +76,9 @@ model Tenant {
   stockMovements               StockMovement[]
   suppliers                    Supplier[]
   purchaseOrders               PurchaseOrder[]
+  deliveryNotes                DeliveryNote[]
+  myDataSubmissions            MyDataSubmission[]
+  employees                    Employee[]
 
   @@map("tenants")
 }
@@ -155,6 +158,7 @@ model Customer {
   orders   Order[]
   giftCards GiftCard[]
   loyaltyAccounts LoyaltyAccount[]
+  deliveryNotes DeliveryNote[]
 
   @@unique([tenantId, code])
   @@index([tenantId, name])
@@ -248,6 +252,7 @@ model Product {
   stockBalances StockBalance[]
   stockMovements StockMovement[]
   purchaseOrderLines PurchaseOrderLine[]
+  deliveryNoteLines DeliveryNoteLine[]
 
   @@unique([tenantId, sku])
   @@unique([tenantId, barcode])
@@ -272,6 +277,7 @@ enum StockMovementSource {
   OPENING
   PURCHASE
   RECEIPT
+  DELIVERY
 }
 
 /// Υπόλοιπο αποθέματος ανά προϊόν × υποκατάστημα (Site)
@@ -410,6 +416,124 @@ model PurchaseOrderLine {
   @@map("purchase_order_lines")
 }
 
+enum DeliveryNoteStatus {
+  DRAFT
+  ISSUED
+  CANCELLED
+}
+
+/// Δελτίο αποστολής — έξοδος εμπορευμάτων προς πελάτη
+model DeliveryNote {
+  id               String             @id @default(cuid())
+  tenantId         String
+  customerId       String
+  siteId           String?
+  seriesId         String?
+  invoiceId        String?
+  number           String
+  status           DeliveryNoteStatus @default(DRAFT)
+  issuedAt         DateTime?
+  shippingAddress  String?
+  notes            String?
+  createdAt        DateTime           @default(now())
+  updatedAt        DateTime           @updatedAt
+
+  tenant   Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  customer Customer        @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  site     Site?           @relation(fields: [siteId], references: [id], onDelete: SetNull)
+  series   DocumentSeries? @relation(fields: [seriesId], references: [id], onDelete: SetNull)
+  invoice  Invoice?        @relation(fields: [invoiceId], references: [id], onDelete: SetNull)
+  lines    DeliveryNoteLine[]
+
+  @@unique([tenantId, number])
+  @@index([tenantId, status, issuedAt(sort: Desc)])
+  @@index([tenantId, customerId, createdAt(sort: Desc)])
+  @@index([tenantId, createdAt(sort: Desc), id(sort: Desc)])
+  @@map("delivery_notes")
+}
+
+model DeliveryNoteLine {
+  id             String  @id @default(cuid())
+  tenantId       String
+  deliveryNoteId String
+  productId      String?
+  position       Int
+  description    String
+  quantity       Decimal @db.Decimal(14, 3)
+  unit           String  @default("τεμ")
+
+  deliveryNote DeliveryNote @relation(fields: [deliveryNoteId], references: [id], onDelete: Cascade)
+  product      Product?     @relation(fields: [productId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, deliveryNoteId, position])
+  @@index([tenantId, productId])
+  @@map("delivery_note_lines")
+}
+
+enum MyDataSubmissionStatus {
+  PENDING
+  SENT
+  ACCEPTED
+  REJECTED
+  CANCELLED
+}
+
+/// Ουρά διαβίβασης myDATA / ΑΑΔΕ (τοπική · χωρίς live AADE client ακόμη)
+model MyDataSubmission {
+  id           String                 @id @default(cuid())
+  tenantId     String
+  entityType   String
+  entityId     String
+  entityNumber String?
+  invoiceType  String?
+  vatCategory  String?
+  status       MyDataSubmissionStatus @default(PENDING)
+  payload      Json?
+  response     Json?
+  mark         String?
+  uid          String?
+  errorMessage String?
+  attempts     Int                    @default(0)
+  lastAttemptAt DateTime?
+  createdAt    DateTime               @default(now())
+  updatedAt    DateTime               @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, status, createdAt(sort: Desc)])
+  @@index([tenantId, entityType, entityId])
+  @@map("mydata_submissions")
+}
+
+enum EmployeeStatus {
+  ACTIVE
+  INACTIVE
+}
+
+model Employee {
+  id         String         @id @default(cuid())
+  tenantId   String
+  code       String
+  firstName  String
+  lastName   String
+  email      String?
+  phone      String?
+  title      String?
+  department String?
+  hireDate   DateTime?
+  status     EmployeeStatus @default(ACTIVE)
+  notes      String?
+  createdAt  DateTime       @default(now())
+  updatedAt  DateTime       @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, code])
+  @@index([tenantId, lastName, firstName])
+  @@index([tenantId, status, createdAt(sort: Desc)])
+  @@map("employees")
+}
+
 enum UnitOfMeasureKind {
   COUNT
   WEIGHT
@@ -503,6 +627,7 @@ model Invoice {
   creditNotes     Invoice[]        @relation("InvoiceCredits")
   lines           InvoiceLine[]
   payments        InvoicePayment[]
+  deliveryNotes   DeliveryNote[]
 
   @@unique([tenantId, number])
   @@index([tenantId, status, issuedAt(sort: Desc)])
@@ -676,6 +801,7 @@ model Site {
   stockBalances  StockBalance[]
   stockMovements StockMovement[]
   purchaseOrders PurchaseOrder[]
+  deliveryNotes  DeliveryNote[]
 
   @@unique([tenantId, code])
   @@index([tenantId, kind, isActive])
@@ -751,6 +877,7 @@ model DocumentSeries {
   invoices       Invoice[]
   orders         Order[]
   purchaseOrders PurchaseOrder[]
+  deliveryNotes  DeliveryNote[]
   paymentMethods DocumentSeriesPaymentMethod[]
   printForms     DocumentSeriesPrintForm[]
 

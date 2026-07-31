@@ -241,3 +241,42 @@ export async function tryPostInvoiceIssue(
     lines,
   });
 }
+
+/** Best-effort cash collection: Dr Cash / Cr AR */
+export async function tryPostInvoiceCollect(
+  db: Db,
+  input: {
+    tenantId: string;
+    invoiceId: string;
+    invoiceNumber: string;
+    amount: number;
+    glCashAccount?: string | null;
+    glArAccount?: string | null;
+    userId?: string | null;
+  },
+) {
+  if (input.amount <= 0) return null;
+  const cash = await findAccountByCode(
+    db,
+    input.tenantId,
+    input.glCashAccount ?? "38.00.00",
+  );
+  const ar = await findAccountByCode(
+    db,
+    input.tenantId,
+    input.glArAccount ?? "30.00.00",
+  );
+  if (!cash || !ar) return null;
+
+  return createAndPostJournal(db, {
+    tenantId: input.tenantId,
+    description: `Είσπραξη ${input.invoiceNumber}`,
+    sourceType: "invoice.collect",
+    sourceId: input.invoiceId,
+    createdByUserId: input.userId,
+    lines: [
+      { glAccountId: cash.id, debit: input.amount, memo: "Ταμείο / Τράπεζα" },
+      { glAccountId: ar.id, credit: input.amount, memo: "Πελάτες" },
+    ],
+  });
+}
