@@ -56,12 +56,14 @@ export function NotificationsButton() {
           setOpen(true);
           void load();
         }}
-        className="relative inline-flex h-10 w-10 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-700 shadow-sm hover:bg-slate-50"
+        className="relative inline-flex h-10 w-10 shrink-0 items-center justify-center overflow-visible rounded-xl border border-slate-200 bg-white text-slate-700 shadow-sm hover:bg-slate-50"
         aria-label="Ειδοποιήσεις"
+        aria-expanded={open}
+        aria-haspopup="dialog"
       >
-        <Bell size={18} />
+        <Bell size={18} strokeWidth={1.75} className="pointer-events-none" />
         {count > 0 ? (
-          <span className="absolute right-1.5 top-1.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-rose-500 px-1 text-[10px] font-bold text-white ring-2 ring-white">
+          <span className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-rose-500 px-1 text-[10px] font-bold leading-none text-white ring-2 ring-[#F1F4F7]">
             {count > 9 ? "9+" : count}
           </span>
         ) : null}
@@ -77,6 +79,16 @@ export function NotificationsButton() {
             : "Καμία εκκρεμότητα"
         }
         widthClass="max-w-md"
+        headerExtra={
+          <button
+            type="button"
+            onClick={() => void load()}
+            className="rounded-md px-1.5 py-0.5 text-[11px] font-medium text-teal-700 hover:bg-teal-50"
+            disabled={loading}
+          >
+            {loading ? "…" : "Ανανέωση"}
+          </button>
+        }
       >
         {loading && items.length === 0 ? (
           <div className="flex items-center justify-center gap-2 py-16 text-sm text-slate-500">

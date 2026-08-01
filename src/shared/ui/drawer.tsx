@@ -1,5 +1,7 @@
 "use client";
 
+import { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import { X } from "lucide-react";
 import { cn } from "@/shared/lib/cn";
 
@@ -22,21 +24,47 @@ export function Drawer({
   footer?: React.ReactNode;
   headerExtra?: React.ReactNode;
 }) {
-  if (!open) return null;
+  const [mounted, setMounted] = useState(false);
 
-  return (
-    <div className="fixed inset-0 z-50 flex justify-end bg-ink-950/25 backdrop-blur-[1px]">
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    window.addEventListener("keydown", onKey);
+    return () => {
+      document.body.style.overflow = prevOverflow;
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [open, onClose]);
+
+  if (!open || !mounted) return null;
+
+  return createPortal(
+    <div
+      className="fixed inset-0 z-[100] flex justify-end"
+      role="dialog"
+      aria-modal="true"
+      aria-label={title}
+    >
       <button
         type="button"
-        className="absolute inset-0 cursor-default"
+        className="absolute inset-0 cursor-default bg-ink-950/30 backdrop-blur-[1px]"
         aria-label="Κλείσιμο"
         onClick={onClose}
       />
       <aside
         className={cn(
-          "relative flex h-full w-full flex-col border-l border-slate-200/80 bg-white shadow-xl animate-fade-in",
+          "relative z-[1] flex h-full w-full flex-col border-l border-slate-200/80 bg-white shadow-2xl shadow-ink-950/15 animate-fade-in",
           widthClass,
         )}
+        onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-start gap-3 border-b border-slate-100 px-4 py-3.5 sm:px-5">
           <div className="min-w-0 flex-1 pt-0.5">
@@ -63,13 +91,16 @@ export function Drawer({
             <X size={16} strokeWidth={1.75} />
           </button>
         </div>
-        <div className="flex-1 overflow-y-auto px-4 py-3 sm:px-5">{children}</div>
+        <div className="flex-1 overflow-y-auto overscroll-contain px-4 py-3 sm:px-5">
+          {children}
+        </div>
         {footer ? (
           <div className="border-t border-slate-100 px-4 py-3 sm:px-5">
             {footer}
           </div>
         ) : null}
       </aside>
-    </div>
+    </div>,
+    document.body,
   );
 }
