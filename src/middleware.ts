@@ -42,6 +42,12 @@ export async function middleware(request: NextRequest) {
     return NextResponse.redirect(url);
   }
 
+  if (pathname === "/audit" || pathname.startsWith("/audit/")) {
+    const url = request.nextUrl.clone();
+    url.pathname = "/settings/audit";
+    return NextResponse.redirect(url);
+  }
+
   const response = NextResponse.next();
   if (session) {
     response.headers.set("x-softify-tenant", session.tenantId);
