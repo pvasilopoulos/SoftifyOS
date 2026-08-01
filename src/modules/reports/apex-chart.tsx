@@ -55,10 +55,13 @@ export function SoftifyApexChart({
     });
   }, [chart.categories, chart.labels, chart.type, isPieLike]);
 
+  const apexType =
+    chart.type === "table" ? "bar" : chart.type;
+
   return (
     <div className={className}>
       <ReactApexChart
-        type={chart.type}
+        type={apexType}
         options={options}
         series={chart.series as never}
         height={height}

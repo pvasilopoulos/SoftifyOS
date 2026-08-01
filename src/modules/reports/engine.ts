@@ -28,6 +28,16 @@ import {
   runSalesWeekday,
   runSalesYoY,
 } from "./advanced-sales";
+import {
+  runGridApOpen,
+  runGridArOpen,
+  runGridCollections,
+  runGridCustomerAnalysis,
+  runGridInvoiceRegister,
+  runGridSalesLines,
+  runGridStockBalances,
+  runGridVatRegister,
+} from "./grid-reports";
 import { resolvePeriod } from "./period";
 import type { ReportRunInput } from "./schemas";
 
@@ -37,9 +47,29 @@ export type ReportKpi = {
   hint?: string;
 };
 
+export type ReportColumnType =
+  | "string"
+  | "number"
+  | "currency"
+  | "percent"
+  | "date"
+  | "int";
+
+export type ReportTableColumn = {
+  key: string;
+  label: string;
+  type?: ReportColumnType;
+  align?: "start" | "end" | "center";
+  sortable?: boolean;
+};
+
 export type ReportTable = {
-  columns: Array<{ key: string; label: string }>;
+  columns: ReportTableColumn[];
   rows: Array<Record<string, string | number | null>>;
+  /** Footer aggregates keyed by column */
+  totals?: Record<string, string | number | null>;
+  /** Preferred page size for grid UI */
+  pageSize?: number;
 };
 
 export type ReportChartPayload = {
@@ -54,7 +84,9 @@ export type ReportResult = {
   title: string;
   description?: string;
   periodLabel: string;
-  chart: ReportChartPayload;
+  /** Omitted or type=table → grid-first presentation */
+  chart?: ReportChartPayload | null;
+  presentation?: "chart" | "table" | "both";
   kpis?: ReportKpi[];
   table?: ReportTable;
   generatedAt: string;
@@ -681,10 +713,16 @@ async function runBuilder(
   const period = input.period ?? "ytd";
   const groupBy = input.groupBy ?? "month";
   const metrics = input.metrics ?? ["revenue"];
+  const viewMode = input.viewMode ?? "both";
+  const includeTotals = input.includeTotals !== false;
   const chartType = (input.chartType ??
-    (groupBy === "month" ? "area" : "bar")) as ChartKind;
+    (viewMode === "table"
+      ? "table"
+      : groupBy === "month"
+        ? "area"
+        : "bar")) as ChartKind;
   const { start, end, label } = resolvePeriod(period);
-  const limit = input.limit ?? 12;
+  const limit = input.limit ?? (viewMode === "table" ? 100 : 12);
 
   const series: Array<{ name: string; data: number[] }> = [];
   let categories: string[] = [];
@@ -843,28 +881,54 @@ async function runBuilder(
     });
   } else if (groupBy === "product") {
     const productReport = await runSalesByProduct(db, tenantId, period, limit);
+    const presentation =
+      viewMode === "table"
+        ? "table"
+        : viewMode === "chart"
+          ? "chart"
+          : "both";
     return {
       ...productReport,
       id: "builder",
       title: "Προσαρμοσμένη αναφορά",
       description: `Μετρήσεις: ${metrics.join(", ")} · Ομαδοποίηση: είδος`,
-      chart: {
-        ...productReport.chart,
-        type: chartType === "donut" ? "bar" : chartType,
-      },
+      presentation,
+      chart:
+        presentation === "table"
+          ? null
+          : {
+              ...productReport.chart!,
+              type:
+                chartType === "donut" || chartType === "table"
+                  ? "bar"
+                  : chartType,
+            },
     };
   } else if (groupBy === "site") {
     const stock = await runStockBySite(db, tenantId);
+    const presentation =
+      viewMode === "table"
+        ? "table"
+        : viewMode === "chart"
+          ? "chart"
+          : "both";
     return {
       ...stock,
       id: "builder",
       title: "Προσαρμοσμένη αναφορά",
       description: `Μετρήσεις: ${metrics.join(", ")} · Ομαδοποίηση: εγκατάσταση`,
       periodLabel: label,
-      chart: {
-        ...stock.chart,
-        type: chartType === "donut" ? "bar" : chartType,
-      },
+      presentation,
+      chart:
+        presentation === "table"
+          ? null
+          : {
+              ...stock.chart!,
+              type:
+                chartType === "donut" || chartType === "table"
+                  ? "bar"
+                  : chartType,
+            },
     };
   }
 
@@ -872,31 +936,67 @@ async function runBuilder(
     series.push({ name: "—", data: categories.map(() => 0) });
   }
 
+  const moneyMetric = (name: string) =>
+    name.includes("Έσοδα") ||
+    name.includes("ΦΠΑ") ||
+    name.includes("Ταμείο");
+
+  const columns: ReportTableColumn[] = [
+    { key: "dim", label: "Διάσταση", type: "string", sortable: true },
+    ...series.map((s) => ({
+      key: s.name,
+      label: s.name,
+      type: (moneyMetric(s.name) ? "currency" : "number") as ReportColumnType,
+      align: "end" as const,
+      sortable: true,
+    })),
+  ];
+
+  const totals: Record<string, string | number | null> | undefined =
+    includeTotals
+      ? {
+          dim: `${tableRows.length} γραμμές`,
+          ...Object.fromEntries(
+            series.map((s) => [
+              s.name,
+              Math.round(s.data.reduce((a, b) => a + b, 0) * 1000) / 1000,
+            ]),
+          ),
+        }
+      : undefined;
+
+  const presentation =
+    viewMode === "table"
+      ? "table"
+      : viewMode === "chart"
+        ? "chart"
+        : "both";
+
   return {
     id: "builder",
     title: "Προσαρμοσμένη αναφορά",
     description: `Μετρήσεις: ${metrics.join(", ")} · ${groupBy}`,
     periodLabel: label,
-    chart: {
-      type: chartType,
-      categories,
-      series,
-    },
+    presentation,
+    chart:
+      presentation === "table" || chartType === "table"
+        ? null
+        : {
+            type: chartType,
+            categories,
+            series,
+          },
     kpis: series.map((s) => ({
       label: s.name,
-      value:
-        s.name.includes("Έσοδα") ||
-        s.name.includes("ΦΠΑ") ||
-        s.name.includes("Ταμείο")
-          ? money(s.data.reduce((a, b) => a + b, 0))
-          : Math.round(s.data.reduce((a, b) => a + b, 0) * 1000) / 1000,
+      value: moneyMetric(s.name)
+        ? money(s.data.reduce((a, b) => a + b, 0))
+        : Math.round(s.data.reduce((a, b) => a + b, 0) * 1000) / 1000,
     })),
     table: {
-      columns: [
-        { key: "dim", label: "Διάσταση" },
-        ...series.map((s) => ({ key: s.name, label: s.name })),
-      ],
+      columns,
       rows: tableRows,
+      totals,
+      pageSize: viewMode === "table" ? 50 : 25,
     },
     generatedAt: new Date().toISOString(),
   };
@@ -971,6 +1071,22 @@ export async function runReport(
       return runDeliveryVolume(db, tenantId, period);
     case "hr-headcount":
       return runHrHeadcount(db, tenantId);
+    case "grid-invoice-register":
+      return runGridInvoiceRegister(db, tenantId, period);
+    case "grid-sales-lines":
+      return runGridSalesLines(db, tenantId, period);
+    case "grid-customer-analysis":
+      return runGridCustomerAnalysis(db, tenantId, period);
+    case "grid-ar-open":
+      return runGridArOpen(db, tenantId);
+    case "grid-ap-open":
+      return runGridApOpen(db, tenantId);
+    case "grid-vat-register":
+      return runGridVatRegister(db, tenantId, period);
+    case "grid-collections":
+      return runGridCollections(db, tenantId, period);
+    case "grid-stock-balances":
+      return runGridStockBalances(db, tenantId);
     default:
       throw new Error(`Μη υλοποιημένη αναφορά: ${def.id}`);
   }

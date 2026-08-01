@@ -7,6 +7,7 @@ import {
   Loader2,
   Play,
   Sparkles,
+  Table2,
   Wrench,
 } from "lucide-react";
 import { cn } from "@/shared/lib/cn";
@@ -124,8 +125,8 @@ export function ReportsWorkspace({
                   BI Engine · ApexCharts
                 </p>
                 <p className="text-xs text-slate-500">
-                  Enterprise sales BI: YoY, σύγκριση περιόδων, TTM, Pareto,
-                  AOV, conversion — συν AR/AP, αποθήκη και HR.
+                  Charts + advanced Grids: μητρώα τιμολογίων/ΦΠΑ, AR/AP πίνακες,
+                  γραμμές πωλήσεων — συν YoY, Pareto και Builder.
                 </p>
               </div>
             </div>
@@ -201,26 +202,48 @@ export function ReportsWorkspace({
             </div>
 
             <ul className="soft-panel divide-y divide-slate-100 overflow-hidden">
-              {filtered.map((def) => (
-                <li key={def.id}>
-                  <button
-                    type="button"
-                    disabled={pending}
-                    onClick={() => runCatalogReport(def)}
-                    className="flex w-full items-start gap-2 px-3 py-3 text-left hover:bg-slate-50 disabled:opacity-50"
-                  >
-                    <Play size={14} className="mt-0.5 shrink-0 text-teal-700" />
-                    <span>
-                      <span className="block text-sm font-medium text-ink-950">
-                        {def.title}
+              {filtered.map((def) => {
+                const isGrid =
+                  def.chartType === "table" ||
+                  def.presentation === "table" ||
+                  def.category === "grids";
+                return (
+                  <li key={def.id}>
+                    <button
+                      type="button"
+                      disabled={pending}
+                      onClick={() => runCatalogReport(def)}
+                      className="flex w-full items-start gap-2 px-3 py-3 text-left hover:bg-slate-50 disabled:opacity-50"
+                    >
+                      {isGrid ? (
+                        <Table2
+                          size={14}
+                          className="mt-0.5 shrink-0 text-teal-700"
+                        />
+                      ) : (
+                        <Play
+                          size={14}
+                          className="mt-0.5 shrink-0 text-teal-700"
+                        />
+                      )}
+                      <span>
+                        <span className="block text-sm font-medium text-ink-950">
+                          {def.title}
+                          {isGrid ? (
+                            <span className="ml-1.5 rounded bg-teal-50 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-teal-800">
+                              Grid
+                            </span>
+                          ) : null}
+                        </span>
+                        <span className="mt-0.5 block text-xs text-slate-500">
+                          {REPORT_CATEGORY_LABEL[def.category]} ·{" "}
+                          {isGrid ? "πίνακας" : def.chartType}
+                        </span>
                       </span>
-                      <span className="mt-0.5 block text-xs text-slate-500">
-                        {REPORT_CATEGORY_LABEL[def.category]} · {def.chartType}
-                      </span>
-                    </span>
-                  </button>
-                </li>
-              ))}
+                    </button>
+                  </li>
+                );
+              })}
             </ul>
           </aside>
 
@@ -239,9 +262,8 @@ export function ReportsWorkspace({
                   Επιλέξτε αναφορά από τον κατάλογο
                 </p>
                 <p className="mt-1 max-w-sm text-xs text-slate-500">
-                  {catalog.length} έτοιμα BI reports (συμπ. Advanced Sales:
-                  YoY, περίοδοι, Pareto, AOV, conversion) με ApexCharts, KPIs
-                  και CSV.
+                  {catalog.length} έτοιμα reports — charts και advanced Grids
+                  (μητρώα, AR/AP, ΦΠΑ, γραμμές) με sort, σύνολα και CSV.
                 </p>
               </div>
             )}

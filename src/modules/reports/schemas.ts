@@ -13,9 +13,12 @@ export const reportRunSchema = z.object({
   groupBy: z.enum(["month", "customer", "product", "site"]).optional(),
   period: reportPeriodSchema.optional().default("ytd"),
   chartType: z
-    .enum(["line", "area", "bar", "donut", "radialBar"])
+    .enum(["line", "area", "bar", "donut", "radialBar", "table"])
     .optional(),
-  limit: z.coerce.number().int().min(3).max(50).optional().default(12),
+  /** Builder presentation: chart-only, table grid, or both */
+  viewMode: z.enum(["chart", "table", "both"]).optional().default("both"),
+  includeTotals: z.boolean().optional().default(true),
+  limit: z.coerce.number().int().min(3).max(500).optional().default(12),
 });
 
 export type ReportRunInput = z.infer<typeof reportRunSchema>;

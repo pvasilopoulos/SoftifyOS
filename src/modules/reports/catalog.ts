@@ -4,7 +4,8 @@ export type ReportCategory =
   | "finance"
   | "inventory"
   | "operations"
-  | "hr";
+  | "hr"
+  | "grids";
 
 export type ChartKind =
   | "line"
@@ -12,7 +13,10 @@ export type ChartKind =
   | "bar"
   | "donut"
   | "radialBar"
-  | "heatmap";
+  | "heatmap"
+  | "table";
+
+export type ReportPresentation = "chart" | "table" | "both";
 
 export type ReportDefinition = {
   id: string;
@@ -20,6 +24,8 @@ export type ReportDefinition = {
   description: string;
   category: ReportCategory;
   chartType: ChartKind;
+  /** Prefer table-first rendering in catalog/result panel */
+  presentation?: ReportPresentation;
   /** Default period hint for UI */
   defaultPeriod?: "mtd" | "qtd" | "ytd" | "12m";
 };
@@ -31,6 +37,7 @@ export const REPORT_CATEGORY_LABEL: Record<ReportCategory, string> = {
   inventory: "Αποθήκη",
   operations: "Λειτουργίες",
   hr: "HR",
+  grids: "Grids / Πίνακες",
 };
 
 export const REPORT_CATALOG: ReportDefinition[] = [
@@ -250,6 +257,79 @@ export const REPORT_CATALOG: ReportDefinition[] = [
     description: "Ενεργοί εργαζόμενοι, κάρτες εργασίας και άδειες σε αναμονή.",
     category: "hr",
     chartType: "radialBar",
+  },
+
+  // ── Advanced grids (tabular) ────────────────────────────────
+  {
+    id: "grid-invoice-register",
+    title: "Μητρώο τιμολογίων",
+    description:
+      "Αναλυτικός πίνακας παραστατικών πώλησης με καθαρές, ΦΠΑ, σύνολο, είσπραξη.",
+    category: "grids",
+    chartType: "table",
+    presentation: "table",
+    defaultPeriod: "ytd",
+  },
+  {
+    id: "grid-sales-lines",
+    title: "Γραμμές πωλήσεων",
+    description: "Ανάλυση ανά γραμμή τιμολογίου — είδος, ποσότητα, αξία, ΦΠΑ.",
+    category: "grids",
+    chartType: "table",
+    presentation: "table",
+    defaultPeriod: "ytd",
+  },
+  {
+    id: "grid-customer-analysis",
+    title: "Ανάλυση πελατών (grid)",
+    description:
+      "Πίνακας πελατών: παραστατικά, καθαρά, ΦΠΑ, μέσος όρος, τελευταία αγορά.",
+    category: "grids",
+    chartType: "table",
+    presentation: "table",
+    defaultPeriod: "ytd",
+  },
+  {
+    id: "grid-ar-open",
+    title: "Ανοιχτές απαιτήσεις (AR grid)",
+    description: "Υπόλοιπα πελατών με aging bucket, ημέρες καθυστέρησης, due date.",
+    category: "grids",
+    chartType: "table",
+    presentation: "table",
+  },
+  {
+    id: "grid-ap-open",
+    title: "Ανοιχτές υποχρεώσεις (AP grid)",
+    description: "Παραγγελίες αγοράς ανοιχτές — προμηθευτής, κατάσταση, αξία.",
+    category: "grids",
+    chartType: "table",
+    presentation: "table",
+  },
+  {
+    id: "grid-vat-register",
+    title: "Μητρώο ΦΠΑ",
+    description: "ΦΠΑ ανά παραστατικό και συντελεστή — βάση για δήλωση.",
+    category: "grids",
+    chartType: "table",
+    presentation: "table",
+    defaultPeriod: "ytd",
+  },
+  {
+    id: "grid-collections",
+    title: "Εισπράξεις αναλυτικά",
+    description: "Κάθε είσπραξη τιμολογίου: πελάτης, ποσό, μέθοδος, ημερομηνία.",
+    category: "grids",
+    chartType: "table",
+    presentation: "table",
+    defaultPeriod: "ytd",
+  },
+  {
+    id: "grid-stock-balances",
+    title: "Υπόλοιπα αποθήκης (grid)",
+    description: "On-hand ανά είδος × εγκατάσταση με αξία κόστους όπου υπάρχει.",
+    category: "grids",
+    chartType: "table",
+    presentation: "table",
   },
 ];
 

@@ -16,6 +16,9 @@ type Saved = {
     groupBy?: string;
     period?: string;
     chartType?: string;
+    viewMode?: string;
+    includeTotals?: boolean;
+    limit?: number;
   };
   updatedAt: string;
 };
@@ -43,6 +46,12 @@ const CHARTS = [
   { id: "donut", label: "Donut" },
 ];
 
+const VIEWS = [
+  { id: "both", label: "Chart + Grid" },
+  { id: "table", label: "Μόνο Grid" },
+  { id: "chart", label: "Μόνο Chart" },
+] as const;
+
 export function ReportBuilder() {
   const [saved, setSaved] = useState<Saved[]>([]);
   const [loading, setLoading] = useState(true);
@@ -51,6 +60,9 @@ export function ReportBuilder() {
   const [groupBy, setGroupBy] = useState("month");
   const [period, setPeriod] = useState("ytd");
   const [chartType, setChartType] = useState("area");
+  const [viewMode, setViewMode] = useState<"chart" | "table" | "both">("both");
+  const [includeTotals, setIncludeTotals] = useState(true);
+  const [limit, setLimit] = useState(50);
   const [result, setResult] = useState<ReportResult | null>(null);
   const [pending, startTransition] = useTransition();
 
@@ -86,16 +98,36 @@ export function ReportBuilder() {
     setGroupBy(item.payload.groupBy || "month");
     setPeriod(item.payload.period || "ytd");
     setChartType(item.payload.chartType || "area");
+    setViewMode(
+      (item.payload.viewMode as "chart" | "table" | "both") || "both",
+    );
+    setIncludeTotals(item.payload.includeTotals !== false);
+    setLimit(item.payload.limit ?? 50);
     toast.message(`Φορτώθηκε: ${item.name}`);
   }
 
-  function run(override?: Saved["payload"]) {
-    const body = {
+  function buildBody(override?: Saved["payload"]) {
+    const mode =
+      (override?.viewMode as typeof viewMode | undefined) || viewMode;
+    return {
       metrics: override?.metrics || metrics,
       groupBy: override?.groupBy || groupBy,
       period: override?.period || period,
-      chartType: override?.chartType || chartType,
+      chartType:
+        mode === "table"
+          ? "table"
+          : override?.chartType || chartType,
+      viewMode: mode,
+      includeTotals:
+        override?.includeTotals !== undefined
+          ? override.includeTotals
+          : includeTotals,
+      limit: override?.limit ?? limit,
     };
+  }
+
+  function run(override?: Saved["payload"]) {
+    const body = buildBody(override);
     startTransition(async () => {
       try {
         const res = await fetch("/api/reports/run", {
@@ -116,13 +148,14 @@ export function ReportBuilder() {
   function save() {
     startTransition(async () => {
       try {
+        const payload = buildBody();
         const res = await fetch("/api/saved-filters", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             module: "reports",
             name,
-            payload: { metrics, groupBy, period, chartType },
+            payload,
           }),
         });
         const data = await res.json().catch(() => ({}));
@@ -163,7 +196,7 @@ export function ReportBuilder() {
             Προσαρμοσμένο BI
           </h2>
           <p className="mt-1 text-sm text-slate-500">
-            Μετρήσεις × διάσταση × περίοδος → live ApexCharts.
+            Charts και advanced Grids — μετρήσεις × διάσταση × περίοδος.
           </p>
         </div>
 
@@ -174,6 +207,25 @@ export function ReportBuilder() {
             value={name}
             onChange={(e) => setName(e.target.value)}
           />
+        </label>
+
+        <label className="block text-sm">
+          <span className="mb-1 block font-medium text-slate-600">
+            Προβολή
+          </span>
+          <select
+            className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3"
+            value={viewMode}
+            onChange={(e) =>
+              setViewMode(e.target.value as typeof viewMode)
+            }
+          >
+            {VIEWS.map((v) => (
+              <option key={v.id} value={v.id}>
+                {v.label}
+              </option>
+            ))}
+          </select>
         </label>
 
         <label className="block text-sm">
@@ -207,21 +259,49 @@ export function ReportBuilder() {
           </select>
         </label>
 
+        {viewMode !== "table" ? (
+          <label className="block text-sm">
+            <span className="mb-1 block font-medium text-slate-600">
+              Τύπος γραφήματος
+            </span>
+            <select
+              className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3"
+              value={chartType}
+              onChange={(e) => setChartType(e.target.value)}
+            >
+              {CHARTS.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.label}
+                </option>
+              ))}
+            </select>
+          </label>
+        ) : null}
+
         <label className="block text-sm">
           <span className="mb-1 block font-medium text-slate-600">
-            Τύπος γραφήματος
+            Όριο γραμμών (grid)
           </span>
           <select
             className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3"
-            value={chartType}
-            onChange={(e) => setChartType(e.target.value)}
+            value={limit}
+            onChange={(e) => setLimit(Number(e.target.value))}
           >
-            {CHARTS.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.label}
-              </option>
-            ))}
+            <option value={25}>25</option>
+            <option value={50}>50</option>
+            <option value={100}>100</option>
+            <option value={250}>250</option>
+            <option value={500}>500</option>
           </select>
+        </label>
+
+        <label className="flex items-center gap-2 text-sm text-slate-600">
+          <input
+            type="checkbox"
+            checked={includeTotals}
+            onChange={(e) => setIncludeTotals(e.target.checked)}
+          />
+          Σύνολα στο footer του grid
         </label>
 
         <div>
@@ -300,8 +380,8 @@ export function ReportBuilder() {
                     {item.name}
                     <span className="mt-0.5 block text-xs font-normal text-slate-500">
                       {(item.payload.metrics || []).join(", ") || "—"} ·{" "}
-                      {item.payload.groupBy || "month"} ·{" "}
-                      {item.payload.period || "ytd"}
+                      {item.payload.viewMode || "both"} ·{" "}
+                      {item.payload.groupBy || "month"}
                     </span>
                   </button>
                   <div className="flex gap-1">
@@ -350,8 +430,8 @@ export function ReportBuilder() {
               Δεν υπάρχει ακόμη αποτέλεσμα
             </p>
             <p className="mt-1 max-w-sm text-xs">
-              Επιλέξτε μετρήσεις και πατήστε «Εκτέλεση» για live γράφημα,
-              KPIs και πίνακα δεδομένων.
+              Επίλεξε «Μόνο Grid» για advanced tabular report με sort, σύνολα
+              και CSV — ή Chart + Grid για συνδυασμό.
             </p>
           </div>
         )}
