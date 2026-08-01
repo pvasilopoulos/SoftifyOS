@@ -124,8 +124,8 @@ export function ReportsWorkspace({
                   BI Engine · ApexCharts
                 </p>
                 <p className="text-xs text-slate-500">
-                  Ζωντανά aggregates από τιμολόγια, AR/AP, αποθήκη, παραγγελίες
-                  και HR. Ανοίξτε τον κατάλογο ή τον Builder για προσαρμογή.
+                  Enterprise sales BI: YoY, σύγκριση περιόδων, TTM, Pareto,
+                  AOV, conversion — συν AR/AP, αποθήκη και HR.
                 </p>
               </div>
             </div>
@@ -239,8 +239,9 @@ export function ReportsWorkspace({
                   Επιλέξτε αναφορά από τον κατάλογο
                 </p>
                 <p className="mt-1 max-w-sm text-xs text-slate-500">
-                  11 έτοιμα BI reports με ApexCharts, KPIs, πίνακα και CSV
-                  εξαγωγή.
+                  {catalog.length} έτοιμα BI reports (συμπ. Advanced Sales:
+                  YoY, περίοδοι, Pareto, AOV, conversion) με ApexCharts, KPIs
+                  και CSV.
                 </p>
               </div>
             )}

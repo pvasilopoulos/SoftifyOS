@@ -10,6 +10,25 @@ import {
   type ChartKind,
   type ReportDefinition,
 } from "./catalog";
+import {
+  runSalesAov,
+  runSalesByKind,
+  runSalesBySite,
+  runSalesCollectionEfficiency,
+  runSalesCreditRatio,
+  runSalesCustomerGrowth,
+  runSalesNewVsReturning,
+  runSalesPareto,
+  runSalesPeriodCompare,
+  runSalesProductVelocity,
+  runSalesQuarterly,
+  runSalesQuoteConversion,
+  runSalesRepeatRate,
+  runSalesTtm,
+  runSalesWeekday,
+  runSalesYoY,
+} from "./advanced-sales";
+import { resolvePeriod } from "./period";
 import type { ReportRunInput } from "./schemas";
 
 export type ReportKpi = {
@@ -62,39 +81,7 @@ function monthLabel(key: string) {
   });
 }
 
-export function resolvePeriod(period: ReportRunInput["period"]) {
-  const now = new Date();
-  const end = new Date(now);
-  let start: Date;
-  let label: string;
-  switch (period) {
-    case "mtd": {
-      start = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
-      label = "Τρέχων μήνας";
-      break;
-    }
-    case "qtd": {
-      const q = Math.floor(now.getUTCMonth() / 3) * 3;
-      start = new Date(Date.UTC(now.getUTCFullYear(), q, 1));
-      label = "Τρέχον τρίμηνο";
-      break;
-    }
-    case "12m": {
-      start = new Date(
-        Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 11, 1),
-      );
-      label = "12 μήνες";
-      break;
-    }
-    case "ytd":
-    default: {
-      start = new Date(Date.UTC(now.getUTCFullYear(), 0, 1));
-      label = "Έτος έως σήμερα";
-      break;
-    }
-  }
-  return { start, end, label };
-}
+export { resolvePeriod };
 
 function buildMonthBuckets(start: Date, end: Date) {
   const keys: string[] = [];
@@ -936,6 +923,38 @@ export async function runReport(
       return runSalesByCustomer(db, tenantId, period, limit);
     case "sales-by-product":
       return runSalesByProduct(db, tenantId, period, limit);
+    case "sales-by-site":
+      return runSalesBySite(db, tenantId, period);
+    case "sales-by-kind":
+      return runSalesByKind(db, tenantId, period);
+    case "sales-yoy":
+      return runSalesYoY(db, tenantId);
+    case "sales-period-compare":
+      return runSalesPeriodCompare(db, tenantId, period);
+    case "sales-ttm":
+      return runSalesTtm(db, tenantId);
+    case "sales-quarterly":
+      return runSalesQuarterly(db, tenantId);
+    case "sales-pareto":
+      return runSalesPareto(db, tenantId, period);
+    case "sales-aov":
+      return runSalesAov(db, tenantId, period);
+    case "sales-new-vs-returning":
+      return runSalesNewVsReturning(db, tenantId, period);
+    case "sales-customer-growth":
+      return runSalesCustomerGrowth(db, tenantId, period);
+    case "sales-credit-ratio":
+      return runSalesCreditRatio(db, tenantId, period);
+    case "sales-weekday":
+      return runSalesWeekday(db, tenantId, period);
+    case "sales-collection-efficiency":
+      return runSalesCollectionEfficiency(db, tenantId, period);
+    case "sales-quote-conversion":
+      return runSalesQuoteConversion(db, tenantId, period);
+    case "sales-product-velocity":
+      return runSalesProductVelocity(db, tenantId, period, limit);
+    case "sales-repeat-rate":
+      return runSalesRepeatRate(db, tenantId, period);
     case "ar-aging":
       return runArAging(db, tenantId);
     case "vat-breakdown":
@@ -971,18 +990,22 @@ export async function loadDashboardBundle(
 
   const [
     salesTrend,
+    salesYoY,
+    periodCompare,
     arAging,
     topCustomers,
-    ordersPipeline,
+    pareto,
     arRows,
     apRows,
     vat,
     issuedMonth,
   ] = await Promise.all([
     runSalesTrend(db, tenantId, "12m"),
+    runSalesYoY(db, tenantId),
+    runSalesPeriodCompare(db, tenantId, "ytd"),
     runArAging(db, tenantId),
     runSalesByCustomer(db, tenantId, "mtd", 8),
-    runOrdersPipeline(db, tenantId),
+    runSalesPareto(db, tenantId, "ytd"),
     loadArRows(db, tenantId),
     loadApRows(db, tenantId),
     loadVatSummary(db, tenantId, yearStart, now),
@@ -1014,7 +1037,14 @@ export async function loadDashboardBundle(
       },
       { label: "ΦΠΑ χρήσης", value: money(vat.netVatPayable) },
     ],
-    reports: [salesTrend, arAging, topCustomers, ordersPipeline],
+    reports: [
+      salesTrend,
+      salesYoY,
+      periodCompare,
+      pareto,
+      arAging,
+      topCustomers,
+    ],
     catalog: (await import("./catalog")).REPORT_CATALOG,
   };
 }
