@@ -157,8 +157,8 @@ const SECTIONS: SettingsSection[] = [
         icon: "Shield",
       },
       {
-        href: "/audit",
-        title: "Audit log",
+        href: "/settings/audit",
+        title: "Καταγραφή ενεργειών",
         description: "Ιστορικό ενεργειών — ποιος άλλαξε τι και πότε.",
         badge: "Ασφάλεια",
         tone: "rose",

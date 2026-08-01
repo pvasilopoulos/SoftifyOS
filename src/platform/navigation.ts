@@ -289,14 +289,6 @@ export const defaultMenuTree: MenuNodeConfig[] = [
         icon: "BarChart3",
       },
       {
-        id: "audit",
-        type: "link",
-        label: "Audit log",
-        href: "/audit",
-        icon: "ScrollText",
-        roles: ["OWNER", "ADMIN"],
-      },
-      {
         id: "settings",
         type: "link",
         label: "Ρυθμίσεις",
