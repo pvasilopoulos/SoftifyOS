@@ -11,6 +11,7 @@ export function Drawer({
   children,
   widthClass = "max-w-md",
   footer,
+  headerExtra,
 }: {
   open: boolean;
   onClose: () => void;
@@ -19,6 +20,7 @@ export function Drawer({
   children: React.ReactNode;
   widthClass?: string;
   footer?: React.ReactNode;
+  headerExtra?: React.ReactNode;
 }) {
   if (!open) return null;
 
@@ -36,19 +38,23 @@ export function Drawer({
           widthClass,
         )}
       >
-        <div className="flex items-start justify-between gap-3 border-b border-slate-100 px-5 py-4">
+        <div className="flex items-center justify-between gap-3 border-b border-slate-200/80 px-5 py-4">
           <div className="min-w-0">
-            <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">
-              {subtitle || "Λεπτομέρειες"}
-            </p>
-            <h2 className="mt-1 truncate text-lg font-semibold text-ink-950">
-              {title}
-            </h2>
+            <div className="flex flex-wrap items-center gap-2">
+              <h2 className="truncate text-base font-semibold tracking-tight text-ink-950 sm:text-lg">
+                {title}
+              </h2>
+              {headerExtra}
+            </div>
+            {subtitle ? (
+              <p className="mt-0.5 truncate text-sm text-slate-500">{subtitle}</p>
+            ) : null}
           </div>
           <button
             type="button"
             onClick={onClose}
-            className="rounded-lg p-2 text-slate-400 hover:bg-slate-100 hover:text-ink-900"
+            className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-500 transition hover:bg-slate-50 hover:text-ink-900"
+            aria-label="Κλείσιμο"
           >
             <X size={16} />
           </button>

@@ -71,17 +71,39 @@ export function NotificationsButton() {
         open={open}
         onClose={() => setOpen(false)}
         title="Ειδοποιήσεις"
-        subtitle="Ζωντανά alerts"
+        subtitle={
+          count > 0
+            ? `${count} ενεργ${count === 1 ? "ή" : "ές"} · ανανέωση κάθε λεπτό`
+            : "Καμία εκκρεμότητα αυτή τη στιγμή"
+        }
         widthClass="max-w-md"
+        headerExtra={
+          count > 0 ? (
+            <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-rose-500 px-1.5 text-[11px] font-semibold text-white">
+              {count > 99 ? "99+" : count}
+            </span>
+          ) : (
+            <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-medium text-emerald-800">
+              <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+              Ήρεμα
+            </span>
+          )
+        }
       >
         {loading && items.length === 0 ? (
           <div className="flex items-center justify-center gap-2 py-16 text-sm text-slate-500">
             <Loader2 size={16} className="animate-spin" /> Φόρτωση…
           </div>
         ) : items.length === 0 ? (
-          <p className="py-16 text-center text-sm text-slate-500">
-            Όλα ήρεμα — δεν υπάρχουν ειδοποιήσεις.
-          </p>
+          <div className="flex flex-col items-center justify-center gap-2 py-16 text-center">
+            <span className="flex h-10 w-10 items-center justify-center rounded-2xl bg-slate-100 text-slate-400">
+              <Bell size={18} />
+            </span>
+            <p className="text-sm font-medium text-ink-900">Όλα εντάξει</p>
+            <p className="max-w-[220px] text-xs text-slate-500">
+              Δεν υπάρχουν ειδοποιήσεις προς ενέργεια.
+            </p>
+          </div>
         ) : (
           <ul className="space-y-2">
             {items.map((n) => (
@@ -92,7 +114,7 @@ export function NotificationsButton() {
                     setOpen(false);
                     router.push(n.href);
                   }}
-                  className="flex w-full gap-3 rounded-xl border border-slate-100 bg-slate-50/60 px-3 py-3 text-left hover:border-teal-200 hover:bg-teal-50/40"
+                  className="flex w-full gap-3 rounded-2xl border border-slate-200/80 bg-white px-3.5 py-3 text-left shadow-sm transition hover:border-teal-300 hover:bg-teal-50/50"
                 >
                   <span
                     className={cn(
@@ -104,7 +126,9 @@ export function NotificationsButton() {
                     <p className="text-sm font-semibold text-ink-900">
                       {n.title}
                     </p>
-                    <p className="mt-0.5 text-xs text-slate-600">{n.body}</p>
+                    <p className="mt-0.5 text-xs leading-relaxed text-slate-600">
+                      {n.body}
+                    </p>
                   </div>
                 </button>
               </li>
