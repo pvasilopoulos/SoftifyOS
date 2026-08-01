@@ -36,6 +36,7 @@ export type OrderDetailPayload = {
   id: string;
   number: string;
   status: string;
+  statusLabel: string;
   kind: string;
   kindLabel: string;
   orderedAt: string;
@@ -217,7 +218,7 @@ export function OrderDetailClient({
           <section className="soft-panel p-4 sm:p-5">
             <div className="flex flex-wrap items-center gap-2">
               <Badge tone={orderStatusTone[status]}>
-                {orderStatusLabel[status]}
+                {order.statusLabel || orderStatusLabel[status]}
               </Badge>
               <Badge tone={order.isQuote ? "amber" : "slate"}>
                 {order.kindLabel || orderKindLabel[kind]}

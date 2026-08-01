@@ -86,6 +86,7 @@ model Tenant {
   bankAccounts                 BankAccount[]
   bankStatementLines           BankStatementLine[]
   stockLots                    StockLot[]
+  orderStatusOptions           OrderStatusOption[]
 
   @@map("tenants")
 }
@@ -888,6 +889,31 @@ enum OrderStatus {
   CANCELLED
 }
 
+/// Παραμετρικές καταστάσεις παραγγελίας/προσφοράς (ετικέτα + workflow)
+model OrderStatusOption {
+  id                 String      @id @default(cuid())
+  tenantId           String
+  code               String
+  name               String
+  /// Workflow value stored on Order.status
+  workflow           OrderStatus
+  sortOrder          Int         @default(0)
+  isActive           Boolean     @default(true)
+  isSystem           Boolean     @default(false)
+  selectableOnCreate Boolean     @default(false)
+  tone               String      @default("slate")
+  createdAt          DateTime    @default(now())
+  updatedAt          DateTime    @updatedAt
+
+  tenant Tenant  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  orders Order[]
+
+  @@unique([tenantId, code])
+  @@index([tenantId, isActive, sortOrder])
+  @@index([tenantId, selectableOnCreate, isActive])
+  @@map("order_status_options")
+}
+
 enum OrderKind {
   SALES_ORDER
   SALES_QUOTE
@@ -906,6 +932,7 @@ model Order {
   kind          OrderKind   @default(SALES_ORDER)
   number        String
   status        OrderStatus @default(DRAFT)
+  statusOptionId String?
   orderedAt     DateTime    @default(now())
   currency      String      @default("EUR")
   subtotal      Decimal     @db.Decimal(14, 2)
@@ -916,10 +943,11 @@ model Order {
   createdAt     DateTime    @default(now())
   updatedAt     DateTime    @updatedAt
 
-  tenant      Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  customer    Customer        @relation(fields: [customerId], references: [id], onDelete: Restrict)
-  branch      Branch?         @relation(fields: [branchId], references: [id], onDelete: SetNull)
-  space       Space?          @relation(fields: [spaceId], references: [id], onDelete: SetNull)
+  tenant       Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  statusOption OrderStatusOption? @relation(fields: [statusOptionId], references: [id], onDelete: SetNull)
+  customer     Customer           @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  branch       Branch?            @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  space        Space?             @relation(fields: [spaceId], references: [id], onDelete: SetNull)
   series      DocumentSeries? @relation(fields: [seriesId], references: [id], onDelete: SetNull)
   site        Site?           @relation(fields: [siteId], references: [id], onDelete: SetNull)
   sourceQuote Order?          @relation("QuoteToOrder", fields: [sourceQuoteId], references: [id], onDelete: SetNull)
@@ -934,6 +962,7 @@ model Order {
   @@index([tenantId, seriesId])
   @@index([tenantId, kind, createdAt(sort: Desc)])
   @@index([tenantId, sourceQuoteId])
+  @@index([tenantId, statusOptionId])
   @@map("orders")
 }
 

@@ -5,6 +5,7 @@ import { prisma } from "@/server/db";
 import { toNumber } from "@/modules/sales/invoice-utils";
 import {
   orderKindLabel,
+  orderStatusLabel,
   type OrderStatusKey,
 } from "@/modules/sales/order-utils";
 import {
@@ -65,6 +66,7 @@ export default async function OrderDetailPage({
         },
       },
       sourceQuote: { select: { id: true, number: true } },
+      statusOption: { select: { id: true, name: true, tone: true } },
       convertedOrders: {
         where: { kind: "SALES_ORDER" },
         select: { id: true, number: true, status: true, total: true },
@@ -121,6 +123,7 @@ export default async function OrderDetailPage({
     id: order.id,
     number: order.number,
     status: order.status,
+    statusLabel: order.statusOption?.name ?? orderStatusLabel[status] ?? order.status,
     kind: order.kind,
     kindLabel: orderKindLabel[order.kind],
     orderedAt: order.orderedAt.toISOString(),

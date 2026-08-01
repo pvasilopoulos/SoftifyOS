@@ -133,6 +133,23 @@ export async function PATCH(
 
     const totals = body.lines ? calcInvoiceTotals(body.lines) : null;
 
+    let nextStatusOptionId: string | undefined;
+    if (body.status) {
+      const { ensureOrderStatusOptions } = await import(
+        "@/modules/sales/order-status-options"
+      );
+      await ensureOrderStatusOptions(prisma, session.tenantId);
+      const opt = await prisma.orderStatusOption.findFirst({
+        where: {
+          tenantId: session.tenantId,
+          code: body.status,
+          isSystem: true,
+        },
+        select: { id: true },
+      });
+      nextStatusOptionId = opt?.id;
+    }
+
     const updated = await prisma.$transaction(async (tx) => {
       if (body.lines) {
         await tx.orderLine.deleteMany({ where: { orderId: existing.id } });
@@ -143,7 +160,14 @@ export async function PATCH(
           ...(body.branchId !== undefined ? { branchId: body.branchId } : {}),
           ...(body.spaceId !== undefined ? { spaceId: body.spaceId } : {}),
           ...(body.notes !== undefined ? { notes: body.notes || null } : {}),
-          ...(body.status !== undefined ? { status: body.status } : {}),
+          ...(body.status !== undefined
+            ? {
+                status: body.status,
+                ...(nextStatusOptionId
+                  ? { statusOptionId: nextStatusOptionId }
+                  : {}),
+              }
+            : {}),
           ...(totals
             ? {
                 subtotal: totals.subtotal,

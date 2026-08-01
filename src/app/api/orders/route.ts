@@ -15,6 +15,10 @@ import { getErrorMessage } from "@/shared/lib/safe";
 import { calcInvoiceTotals, toNumber } from "@/modules/sales/invoice-utils";
 import { orderCreateSchema } from "@/modules/sales/order-schemas";
 import {
+  OrderStatusOptionError,
+  resolveOrderStatusOption,
+} from "@/modules/sales/order-status-options";
+import {
   allocateFromSeries,
   resolveDefaultSeries,
 } from "@/modules/documents/series";
@@ -199,6 +203,25 @@ export async function POST(request: Request) {
     }
 
     const body = orderCreateSchema.parse(await request.json());
+    let statusOption;
+    try {
+      statusOption = await resolveOrderStatusOption(prisma, session.tenantId, {
+        statusOptionId: body.statusOptionId,
+        statusCode: body.status,
+      });
+    } catch (error) {
+      if (error instanceof OrderStatusOptionError) {
+        return NextResponse.json({ error: error.message }, { status: error.status });
+      }
+      throw error;
+    }
+    if (!statusOption.selectableOnCreate) {
+      return NextResponse.json(
+        { error: "Αυτή η κατάσταση δεν επιτρέπεται στη δημιουργία" },
+        { status: 400 },
+      );
+    }
+
     const hierarchy = await resolveHierarchy(
       session.tenantId,
       body.customerId,
@@ -269,7 +292,8 @@ export async function POST(request: Request) {
       seriesId: series?.id ?? body.seriesId ?? null,
       kind: docKind,
       number: body.number?.trim() || null,
-      status: body.status ?? "DRAFT",
+      status: statusOption.workflow,
+      statusOptionId: statusOption.id,
       notes: body.notes || null,
       subtotal: totals.subtotal,
       vatAmount: totals.vatAmount,
@@ -326,7 +350,8 @@ export async function POST(request: Request) {
           siteId,
           kind: docKind,
           number,
-          status: (patched.status as typeof body.status) ?? body.status ?? "DRAFT",
+          status: statusOption.workflow,
+          statusOptionId: statusOption.id,
           currency: "EUR",
           subtotal: totals.subtotal,
           vatAmount: totals.vatAmount,

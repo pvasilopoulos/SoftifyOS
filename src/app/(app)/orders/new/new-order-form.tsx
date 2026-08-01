@@ -31,6 +31,12 @@ type ProductOption = {
   price: number;
   vatRate: number;
 };
+type StatusOption = {
+  id: string;
+  code: string;
+  name: string;
+  workflow: string;
+};
 type LineDraft = {
   key: string;
   productId: string;
@@ -65,7 +71,8 @@ export function NewOrderForm({ kind = "SALES_ORDER" }: { kind?: OrderDocKind }) 
   const [branchId, setBranchId] = useState("");
   const [spaceId, setSpaceId] = useState("");
   const [seriesId, setSeriesId] = useState("");
-  const [status, setStatus] = useState<"DRAFT" | "CONFIRMED">("CONFIRMED");
+  const [statusOptionId, setStatusOptionId] = useState("");
+  const [statusOptions, setStatusOptions] = useState<StatusOption[]>([]);
   const [notes, setNotes] = useState("");
   const [lines, setLines] = useState<LineDraft[]>([newLine()]);
   const [loadingCustomers, setLoadingCustomers] = useState(true);
@@ -76,15 +83,26 @@ export function NewOrderForm({ kind = "SALES_ORDER" }: { kind?: OrderDocKind }) 
     (async () => {
       setLoadingCustomers(true);
       try {
-        const [custRes, prodRes] = await Promise.all([
+        const [custRes, prodRes, statusRes] = await Promise.all([
           fetch("/api/customers?limit=50&status=ACTIVE"),
           fetch("/api/products?limit=100&status=ACTIVE"),
+          fetch("/api/settings/order-statuses?selectableOnCreate=1"),
         ]);
         const custData = (await custRes.json()) as { items?: CustomerOption[] };
         const prodData = (await prodRes.json()) as { items?: ProductOption[] };
+        const statusData = (await statusRes.json()) as {
+          items?: StatusOption[];
+        };
         if (!cancelled) {
           setCustomers(custData.items ?? []);
           setProducts(prodData.items ?? []);
+          const opts = statusData.items ?? [];
+          setStatusOptions(opts);
+          const preferred =
+            opts.find((o) => o.code === "CONFIRMED") ??
+            opts.find((o) => o.workflow === "CONFIRMED") ??
+            opts[0];
+          if (preferred) setStatusOptionId(preferred.id);
         }
       } catch {
         if (!cancelled) setError("Αποτυχία φόρτωσης δεδομένων");
@@ -162,6 +180,13 @@ export function NewOrderForm({ kind = "SALES_ORDER" }: { kind?: OrderDocKind }) 
       setPending(false);
       return;
     }
+    if (!statusOptionId) {
+      setError("Επιλέξτε κατάσταση");
+      setPending(false);
+      return;
+    }
+
+    const selectedStatus = statusOptions.find((s) => s.id === statusOptionId);
 
     const res = await fetch("/api/orders", {
       method: "POST",
@@ -172,7 +197,8 @@ export function NewOrderForm({ kind = "SALES_ORDER" }: { kind?: OrderDocKind }) 
         spaceId: spaceId || null,
         seriesId: seriesId || null,
         kind,
-        status,
+        statusOptionId,
+        status: selectedStatus?.code ?? "DRAFT",
         notes: notes.trim() || null,
         lines: lines.map((line) => ({
           productId: line.productId || null,
@@ -280,16 +306,28 @@ export function NewOrderForm({ kind = "SALES_ORDER" }: { kind?: OrderDocKind }) 
               </select>
             </label>
             <label className="block">
-              <span className="mb-1.5 block text-sm font-medium">Κατάσταση</span>
+              <span className="mb-1.5 flex items-center justify-between gap-2 text-sm font-medium">
+                <span>Κατάσταση</span>
+                <Link
+                  href="/settings/order-statuses"
+                  className="text-xs font-normal text-teal-700 hover:underline"
+                >
+                  Διαχείριση
+                </Link>
+              </span>
               <select
-                value={status}
-                onChange={(e) =>
-                  setStatus(e.target.value as "DRAFT" | "CONFIRMED")
-                }
+                value={statusOptionId}
+                onChange={(e) => setStatusOptionId(e.target.value)}
                 className="h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm outline-none ring-teal-500/30 focus:ring-2"
               >
-                <option value="DRAFT">Πρόχειρη</option>
-                <option value="CONFIRMED">Επιβεβαιωμένη</option>
+                {statusOptions.length === 0 ? (
+                  <option value="">— Φόρτωση —</option>
+                ) : null}
+                {statusOptions.map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.name}
+                  </option>
+                ))}
               </select>
             </label>
             <label className="block sm:col-span-2">

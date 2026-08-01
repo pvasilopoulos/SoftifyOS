@@ -14,6 +14,14 @@ export const orderStatusTone = {
   CANCELLED: "slate",
 } as const;
 
+export const ORDER_WORKFLOWS = [
+  "DRAFT",
+  "CONFIRMED",
+  "PARTIAL_INVOICED",
+  "INVOICED",
+  "CANCELLED",
+] as const;
+
 export const orderKindLabel = {
   SALES_ORDER: "Παραγγελία",
   SALES_QUOTE: "Προσφορά",
