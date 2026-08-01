@@ -1,9 +1,11 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { BankingPanel } from "./banking-panel";
 import { toast } from "@/shared/ui/toaster";
+import { Button } from "@/shared/ui/button";
+import { Badge } from "@/shared/ui/badge";
 
 type ArRow = {
   id: string;
@@ -65,25 +67,51 @@ const PO_STATUS: Record<string, string> = {
   RECEIVED: "Παραληφθείσα",
 };
 
+type PurchaseInvoiceRow = {
+  id: string;
+  number: string;
+  status: string;
+  total: number;
+  paidAmount: number;
+  supplierName: string;
+  issueDate: string;
+};
+
 export function FinanceOpsClient({
   arRows,
   apRows,
   vat,
   myData,
   canWrite,
+  forcedTab,
+  hideTabBar,
+  myDataEnv = "simulator",
+  purchaseInvoices = [],
 }: {
   arRows: ArRow[];
   apRows: ApRow[];
   vat: VatSummary;
   myData: MyDataRow[];
   canWrite: boolean;
+  forcedTab?: "ar" | "ap" | "vat" | "mydata" | "banking";
+  hideTabBar?: boolean;
+  myDataEnv?: "simulator" | "test" | "prod";
+  purchaseInvoices?: PurchaseInvoiceRow[];
 }) {
   const [tab, setTab] = useState<"ar" | "ap" | "vat" | "mydata" | "banking">(
-    "ar",
+    forcedTab ?? "ar",
   );
   const [rows, setRows] = useState(myData);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (forcedTab) setTab(forcedTab);
+  }, [forcedTab]);
+
+  useEffect(() => {
+    setRows(myData);
+  }, [myData]);
 
   const arTotal = useMemo(
     () => arRows.reduce((s, r) => s + r.balance, 0),
@@ -92,6 +120,14 @@ export function FinanceOpsClient({
   const apTotal = useMemo(
     () => apRows.reduce((s, r) => s + r.total, 0),
     [apRows],
+  );
+  const apInvoiceOpen = useMemo(
+    () =>
+      purchaseInvoices.reduce(
+        (s, r) => s + Math.max(0, r.total - r.paidAmount),
+        0,
+      ),
+    [purchaseInvoices],
   );
 
   async function processMyData(id: string) {
@@ -153,31 +189,56 @@ export function FinanceOpsClient({
   }
 
   return (
-    <div className="space-y-3">
-      <div className="flex flex-wrap gap-2 border-b border-slate-200 pb-2">
-        {(
-          [
-            ["ar", `Απαιτήσεις (AR) · ${money(arTotal)}`],
-            ["ap", `Υποχρεώσεις (AP) · ${money(apTotal)}`],
-            ["vat", "ΦΠΑ περιόδου"],
-            ["banking", "Τράπεζες"],
-            ["mydata", `myDATA · ${rows.length}`],
-          ] as const
-        ).map(([key, label]) => (
-          <button
-            key={key}
-            type="button"
-            onClick={() => setTab(key)}
-            className={`rounded-md px-3 py-1.5 text-sm font-medium ${
-              tab === key
-                ? "bg-slate-900 text-white"
-                : "bg-slate-100 text-slate-700"
-            }`}
-          >
-            {label}
-          </button>
-        ))}
-      </div>
+    <div className="soft-panel space-y-3 p-4">
+      {!hideTabBar ? (
+        <div className="flex flex-wrap gap-2 border-b border-slate-200 pb-2">
+          {(
+            [
+              ["ar", `Απαιτήσεις (AR) · ${money(arTotal)}`],
+              ["ap", `Υποχρεώσεις (AP) · ${money(apTotal)}`],
+              ["vat", "ΦΠΑ περιόδου"],
+              ["banking", "Τράπεζες"],
+              ["mydata", `myDATA · ${rows.length}`],
+            ] as const
+          ).map(([key, label]) => (
+            <button
+              key={key}
+              type="button"
+              onClick={() => setTab(key)}
+              className={`rounded-xl px-3 py-1.5 text-sm font-medium ${
+                tab === key
+                  ? "bg-slate-900 text-white"
+                  : "bg-slate-100 text-slate-700"
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      ) : (
+        <div>
+          <h2 className="text-base font-semibold text-ink-950">
+            {tab === "ar"
+              ? "Απαιτήσεις (AR)"
+              : tab === "ap"
+                ? "Υποχρεώσεις (AP)"
+                : tab === "vat"
+                  ? "ΦΠΑ περιόδου"
+                  : tab === "banking"
+                    ? "Τράπεζες"
+                    : "myDATA / ΑΑΔΕ"}
+          </h2>
+          <p className="text-xs text-slate-500">
+            {tab === "ar"
+              ? `Ανοιχτό υπόλοιπο ${money(arTotal)}`
+              : tab === "ap"
+                ? `PO ${money(apTotal)} · αγορές FI ανοιχτές ${money(apInvoiceOpen)}`
+                : tab === "mydata"
+                  ? `Περιβάλλον: ${myDataEnv}`
+                  : "Λειτουργική ενότητα"}
+          </p>
+        </div>
+      )}
 
       {error ? (
         <div className="rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-800">
@@ -240,48 +301,116 @@ export function FinanceOpsClient({
       ) : null}
 
       {tab === "ap" ? (
-        <div className="overflow-hidden rounded-xl border border-slate-200 bg-white">
-          <p className="border-b border-slate-100 px-3 py-2 text-xs text-slate-500">
-            Βάση: ανοιχτές παραγγελίες αγοράς (τιμολόγια αγοράς σε επόμενη φάση).
-          </p>
-          <table className="w-full text-left text-sm">
-            <thead className="bg-slate-50 text-xs uppercase text-slate-500">
-              <tr>
-                <th className="px-3 py-2">PO</th>
-                <th className="px-3 py-2">Προμηθευτής</th>
-                <th className="px-3 py-2">Κατάσταση</th>
-                <th className="px-3 py-2 text-right">Σύνολο</th>
-              </tr>
-            </thead>
-            <tbody>
-              {apRows.map((r) => (
-                <tr key={r.id} className="border-t border-slate-100">
-                  <td className="px-3 py-2 font-mono text-xs font-semibold">
-                    <Link href="/purchasing" className="text-sky-700 hover:underline">
-                      {r.number}
-                    </Link>
-                  </td>
-                  <td className="px-3 py-2">{r.supplier.name}</td>
-                  <td className="px-3 py-2 text-xs">
-                    {PO_STATUS[r.status] ?? r.status}
-                  </td>
-                  <td className="px-3 py-2 text-right font-medium tabular-nums">
-                    {money(r.total)}
-                  </td>
-                </tr>
-              ))}
-              {apRows.length === 0 ? (
+        <div className="space-y-4">
+          <div className="grid gap-2 sm:grid-cols-2">
+            <div className="rounded-xl border border-slate-100 bg-slate-50 px-3 py-2">
+              <p className="text-xs text-slate-500">Ανοιχτά PO</p>
+              <p className="text-lg font-semibold tabular-nums">{money(apTotal)}</p>
+            </div>
+            <div className="rounded-xl border border-slate-100 bg-slate-50 px-3 py-2">
+              <p className="text-xs text-slate-500">Αγορές FI (υπόλοιπο)</p>
+              <p className="text-lg font-semibold tabular-nums">
+                {money(apInvoiceOpen)}
+              </p>
+            </div>
+          </div>
+
+          <div className="overflow-hidden rounded-xl border border-slate-200 bg-white">
+            <div className="flex items-center justify-between border-b border-slate-100 px-3 py-2">
+              <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                Τιμολόγια αγοράς FI
+              </p>
+              <Link
+                href="/purchasing"
+                className="text-xs font-medium text-teal-700 hover:underline"
+              >
+                Purchasing →
+              </Link>
+            </div>
+            <table className="w-full text-left text-sm">
+              <thead className="bg-slate-50 text-xs uppercase text-slate-500">
                 <tr>
-                  <td
-                    colSpan={4}
-                    className="px-3 py-8 text-center text-slate-500"
-                  >
-                    Καμία ανοιχτή υποχρέωση αγοράς.
-                  </td>
+                  <th className="px-3 py-2">Αρ.</th>
+                  <th className="px-3 py-2">Προμηθευτής</th>
+                  <th className="px-3 py-2">Κατάσταση</th>
+                  <th className="px-3 py-2 text-right">Υπόλοιπο</th>
                 </tr>
-              ) : null}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {purchaseInvoices.map((r) => (
+                  <tr key={r.id} className="border-t border-slate-100">
+                    <td className="px-3 py-2 font-mono text-xs font-semibold">
+                      {r.number}
+                    </td>
+                    <td className="px-3 py-2">{r.supplierName}</td>
+                    <td className="px-3 py-2">
+                      <Badge tone="teal">{r.status}</Badge>
+                    </td>
+                    <td className="px-3 py-2 text-right font-medium tabular-nums">
+                      {money(Math.max(0, r.total - r.paidAmount))}
+                    </td>
+                  </tr>
+                ))}
+                {purchaseInvoices.length === 0 ? (
+                  <tr>
+                    <td
+                      colSpan={4}
+                      className="px-3 py-6 text-center text-slate-500"
+                    >
+                      Καμία αγορά FI — δημιούργησε από «Αγορές FI».
+                    </td>
+                  </tr>
+                ) : null}
+              </tbody>
+            </table>
+          </div>
+
+          <div className="overflow-hidden rounded-xl border border-slate-200 bg-white">
+            <p className="border-b border-slate-100 px-3 py-2 text-xs text-slate-500">
+              Ανοιχτές παραγγελίες αγοράς (PO)
+            </p>
+            <table className="w-full text-left text-sm">
+              <thead className="bg-slate-50 text-xs uppercase text-slate-500">
+                <tr>
+                  <th className="px-3 py-2">PO</th>
+                  <th className="px-3 py-2">Προμηθευτής</th>
+                  <th className="px-3 py-2">Κατάσταση</th>
+                  <th className="px-3 py-2 text-right">Σύνολο</th>
+                </tr>
+              </thead>
+              <tbody>
+                {apRows.map((r) => (
+                  <tr key={r.id} className="border-t border-slate-100">
+                    <td className="px-3 py-2 font-mono text-xs font-semibold">
+                      <Link
+                        href="/purchasing"
+                        className="text-sky-700 hover:underline"
+                      >
+                        {r.number}
+                      </Link>
+                    </td>
+                    <td className="px-3 py-2">{r.supplier.name}</td>
+                    <td className="px-3 py-2 text-xs">
+                      {PO_STATUS[r.status] ?? r.status}
+                    </td>
+                    <td className="px-3 py-2 text-right font-medium tabular-nums">
+                      {money(r.total)}
+                    </td>
+                  </tr>
+                ))}
+                {apRows.length === 0 ? (
+                  <tr>
+                    <td
+                      colSpan={4}
+                      className="px-3 py-6 text-center text-slate-500"
+                    >
+                      Καμία ανοιχτή παραγγελία αγοράς.
+                    </td>
+                  </tr>
+                ) : null}
+              </tbody>
+            </table>
+          </div>
         </div>
       ) : null}
 
@@ -369,19 +498,32 @@ export function FinanceOpsClient({
       {tab === "mydata" ? (
         <div className="overflow-hidden rounded-xl border border-slate-200 bg-white">
           <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 px-3 py-2">
-            <p className="text-xs text-slate-500">
-              Simulator / test / prod stub — διάβασε env από Ρυθμίσεις →
-              Integrations. SENT → ACCEPTED με MARK.
-            </p>
+            <div className="text-xs text-slate-600">
+              <p>
+                Περιβάλλον:{" "}
+                <span className="font-semibold text-ink-900">{myDataEnv}</span>
+                {myDataEnv === "simulator"
+                  ? " · τοπικό MARK"
+                  : " · live AADE SendInvoices"}
+              </p>
+              <p className="text-slate-500">
+                Credentials & env:{" "}
+                <Link
+                  href="/settings/integrations"
+                  className="text-teal-700 hover:underline"
+                >
+                  Integrations
+                </Link>
+              </p>
+            </div>
             {canWrite ? (
-              <button
-                type="button"
+              <Button
+                size="sm"
                 disabled={busyId === "batch"}
                 onClick={() => void processBatch()}
-                className="rounded-md bg-teal-700 px-2.5 py-1 text-xs font-medium text-white disabled:opacity-50"
               >
                 Επεξεργασία ουράς
-              </button>
+              </Button>
             ) : null}
           </div>
           <table className="w-full text-left text-sm">

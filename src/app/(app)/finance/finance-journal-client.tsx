@@ -58,9 +58,11 @@ function newLine(partial?: Partial<DraftLine>): DraftLine {
 export function FinanceJournalClient({
   initialJournals,
   canWrite,
+  showActions = false,
 }: {
   initialJournals: Journal[];
   canWrite: boolean;
+  showActions?: boolean;
 }) {
   const [items, setItems] = useState(initialJournals);
   const [expanded, setExpanded] = useState<string | null>(
@@ -201,13 +203,14 @@ export function FinanceJournalClient({
     });
   };
 
-  const loadCard = () => {
-    if (!cardAccountId) return;
+  const loadCard = (accountId?: string) => {
+    const id = accountId || cardAccountId;
+    if (!id) return;
     startTransition(async () => {
       setError(null);
       await loadAccounts();
       const res = await fetch(
-        `/api/finance/reports?kind=account-card&accountId=${encodeURIComponent(cardAccountId)}`,
+        `/api/finance/reports?kind=account-card&accountId=${encodeURIComponent(id)}`,
       );
       const data = await res.json();
       if (!res.ok) {
@@ -228,6 +231,34 @@ export function FinanceJournalClient({
         ),
         totals: data.totals,
       });
+    });
+  };
+
+  const journalAction = (
+    id: string,
+    action: "post" | "void" | "reverse",
+  ) => {
+    startTransition(async () => {
+      setError(null);
+      setMessage(null);
+      const res = await fetch(`/api/finance/journals/${id}/actions`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data.error || "Αποτυχία ενέργειας");
+        return;
+      }
+      setMessage(
+        action === "post"
+          ? "Άρθρο οριστικοποιήθηκε"
+          : action === "void"
+            ? "Άρθρο ακυρώθηκε"
+            : `Αντιστροφή ${data.item?.number ?? ""}`,
+      );
+      await refreshJournals(action === "reverse" ? data.item?.id : id);
     });
   };
 
@@ -253,7 +284,7 @@ export function FinanceJournalClient({
         </p>
       ) : null}
 
-      <div className="soft-panel space-y-3 p-4">
+      <div className="space-y-3 rounded-2xl border border-slate-100 bg-slate-50/50 p-4">
         <div className="flex flex-wrap items-end gap-2">
           <label className="min-w-[220px] flex-1 text-sm">
             <span className="mb-1 block font-medium">Καρτέλα λογαριασμού</span>
@@ -275,7 +306,7 @@ export function FinanceJournalClient({
             size="sm"
             variant="secondary"
             disabled={!cardAccountId || pending}
-            onClick={loadCard}
+            onClick={() => loadCard()}
           >
             Εμφάνιση
           </Button>
@@ -348,7 +379,10 @@ export function FinanceJournalClient({
       </div>
 
       {showForm ? (
-        <form onSubmit={postManual} className="soft-panel space-y-3 p-4">
+        <form
+          onSubmit={postManual}
+          className="space-y-3 rounded-2xl border border-teal-100 bg-teal-50/30 p-4"
+        >
           <p className="text-sm font-medium text-ink-900">
             Πολυγραμμικό άρθρο (ισοσκελισμένο)
           </p>
@@ -515,7 +549,7 @@ export function FinanceJournalClient({
         </form>
       ) : null}
 
-      <div className="soft-panel divide-y divide-slate-100 overflow-hidden">
+      <div className="divide-y divide-slate-100 overflow-hidden rounded-2xl border border-slate-100">
         {items.map((j) => {
           const open = expanded === j.id;
           const debit = j.lines.reduce((s, l) => s + l.debit, 0);
@@ -542,7 +576,15 @@ export function FinanceJournalClient({
                   </p>
                 </div>
                 <div className="flex items-center gap-2">
-                  <Badge tone={j.status === "POSTED" ? "teal" : "slate"}>
+                  <Badge
+                    tone={
+                      j.status === "POSTED"
+                        ? "teal"
+                        : j.status === "VOID"
+                          ? "rose"
+                          : "slate"
+                    }
+                  >
                     {j.status}
                   </Badge>
                   <span className="tabular-nums text-sm font-medium">
@@ -552,6 +594,39 @@ export function FinanceJournalClient({
               </button>
               {open ? (
                 <div className="border-t border-slate-100 bg-slate-50/50 px-4 py-3">
+                  {showActions && canWrite ? (
+                    <div className="mb-3 flex flex-wrap gap-2">
+                      {j.status === "DRAFT" ? (
+                        <>
+                          <Button
+                            size="sm"
+                            disabled={pending}
+                            onClick={() => journalAction(j.id, "post")}
+                          >
+                            Post
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="secondary"
+                            disabled={pending}
+                            onClick={() => journalAction(j.id, "void")}
+                          >
+                            Void
+                          </Button>
+                        </>
+                      ) : null}
+                      {j.status === "POSTED" ? (
+                        <Button
+                          size="sm"
+                          variant="secondary"
+                          disabled={pending}
+                          onClick={() => journalAction(j.id, "reverse")}
+                        >
+                          Αντιστροφή
+                        </Button>
+                      ) : null}
+                    </div>
+                  ) : null}
                   <table className="w-full text-sm">
                     <thead>
                       <tr className="text-xs uppercase tracking-wide text-slate-400">
@@ -564,10 +639,26 @@ export function FinanceJournalClient({
                       {j.lines.map((l) => (
                         <tr key={l.id} className="border-t border-slate-100">
                           <td className="py-1.5">
-                            <span className="font-mono text-teal-800">
-                              {l.accountCode}
-                            </span>{" "}
-                            {l.accountName}
+                            <button
+                              type="button"
+                              className="text-left"
+                              onClick={() => {
+                                void loadAccounts().then((list) => {
+                                  const acc = list.find(
+                                    (a) => a.code === l.accountCode,
+                                  );
+                                  if (acc) {
+                                    setCardAccountId(acc.id);
+                                    loadCard(acc.id);
+                                  }
+                                });
+                              }}
+                            >
+                              <span className="font-mono text-teal-800 hover:underline">
+                                {l.accountCode}
+                              </span>{" "}
+                              {l.accountName}
+                            </button>
                             {l.memo ? (
                               <span className="block text-xs text-slate-400">
                                 {l.memo}
