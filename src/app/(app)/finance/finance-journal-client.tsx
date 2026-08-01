@@ -1,9 +1,14 @@
 "use client";
 
-import { FormEvent, useMemo, useState, useTransition } from "react";
+import { FormEvent, useEffect, useMemo, useState, useTransition } from "react";
 import { Button } from "@/shared/ui/button";
 import { Badge } from "@/shared/ui/badge";
 import { formatEUR } from "@/modules/sales/invoice-utils";
+import {
+  inDateRange,
+  matchesText,
+  type FinanceFilters,
+} from "./finance-filters";
 
 type Journal = {
   id: string;
@@ -12,6 +17,7 @@ type Journal = {
   description: string | null;
   sourceType: string | null;
   postedAt: string | null;
+  entryDate?: string;
   createdAt: string;
   lines: Array<{
     id: string;
@@ -59,10 +65,12 @@ export function FinanceJournalClient({
   initialJournals,
   canWrite,
   showActions = false,
+  filters,
 }: {
   initialJournals: Journal[];
   canWrite: boolean;
   showActions?: boolean;
+  filters?: FinanceFilters;
 }) {
   const [items, setItems] = useState(initialJournals);
   const [expanded, setExpanded] = useState<string | null>(
@@ -94,6 +102,33 @@ export function FinanceJournalClient({
       diff: Math.round((debit - credit) * 100) / 100,
     };
   }, [lines]);
+
+  const filteredItems = useMemo(() => {
+    if (!filters) return items;
+    const q = filters.q.trim();
+    return items.filter((j) => {
+      const dateKey = j.entryDate || j.postedAt || j.createdAt;
+      if (!inDateRange(dateKey, filters.from, filters.to)) return false;
+      if (filters.status !== "ALL" && j.status !== filters.status) return false;
+      if (!q) return true;
+      const hay = [
+        j.number,
+        j.description ?? "",
+        j.status,
+        j.sourceType ?? "",
+        ...j.lines.map(
+          (l) => `${l.accountCode} ${l.accountName} ${l.memo ?? ""}`,
+        ),
+      ].join(" ");
+      return matchesText(hay, q);
+    });
+  }, [filters, items]);
+
+  useEffect(() => {
+    if (!cardAccountId || !card) return;
+    loadCard(cardAccountId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filters?.from, filters?.to, filters?.legalEntityId]);
 
   const loadAccounts = async () => {
     if (accounts.length) return accounts;
@@ -131,6 +166,7 @@ export function FinanceJournalClient({
       listData.items.map(
         (
           j: Journal & {
+            entryDate?: string | Date;
             lines: Array<
               Journal["lines"][number] & {
                 glAccount?: { code: string; name: string };
@@ -139,6 +175,20 @@ export function FinanceJournalClient({
           },
         ) => ({
           ...j,
+          entryDate: j.entryDate
+            ? typeof j.entryDate === "string"
+              ? j.entryDate
+              : new Date(j.entryDate).toISOString()
+            : j.createdAt,
+          postedAt: j.postedAt
+            ? typeof j.postedAt === "string"
+              ? j.postedAt
+              : new Date(j.postedAt as unknown as Date).toISOString()
+            : null,
+          createdAt:
+            typeof j.createdAt === "string"
+              ? j.createdAt
+              : new Date(j.createdAt as unknown as Date).toISOString(),
           lines: j.lines.map((l) => ({
             id: l.id,
             memo: l.memo,
@@ -209,9 +259,16 @@ export function FinanceJournalClient({
     startTransition(async () => {
       setError(null);
       await loadAccounts();
-      const res = await fetch(
-        `/api/finance/reports?kind=account-card&accountId=${encodeURIComponent(id)}`,
-      );
+      const params = new URLSearchParams({
+        kind: "account-card",
+        accountId: id,
+      });
+      if (filters?.from) params.set("from", filters.from);
+      if (filters?.to) params.set("to", filters.to);
+      if (filters?.legalEntityId) {
+        params.set("legalEntityId", filters.legalEntityId);
+      }
+      const res = await fetch(`/api/finance/reports?${params.toString()}`);
       const data = await res.json();
       if (!res.ok) {
         setError(data.error || "Αποτυχία καρτέλας");
@@ -265,7 +322,17 @@ export function FinanceJournalClient({
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <h2 className="text-sm font-semibold text-ink-900">Ημερολόγιο άρθρων</h2>
+        <div>
+          <h2 className="text-sm font-semibold text-ink-900">Ημερολόγιο άρθρων</h2>
+          <p className="text-xs text-slate-500">
+            Εμφάνιση {filteredItems.length}/{items.length}
+            {filters
+              ? ` · ${filters.from} → ${filters.to}${
+                  filters.status !== "ALL" ? ` · ${filters.status}` : ""
+                }`
+              : ""}
+          </p>
+        </div>
         {canWrite ? (
           <Button size="sm" onClick={() => void openForm()} disabled={pending}>
             Νέο άρθρο
@@ -550,9 +617,10 @@ export function FinanceJournalClient({
       ) : null}
 
       <div className="divide-y divide-slate-100 overflow-hidden rounded-2xl border border-slate-100">
-        {items.map((j) => {
+        {filteredItems.map((j) => {
           const open = expanded === j.id;
           const debit = j.lines.reduce((s, l) => s + l.debit, 0);
+          const when = j.entryDate || j.postedAt || j.createdAt;
           return (
             <div key={j.id}>
               <button
@@ -568,9 +636,7 @@ export function FinanceJournalClient({
                     ) : null}
                   </p>
                   <p className="mt-0.5 text-xs text-slate-500">
-                    {j.postedAt
-                      ? new Date(j.postedAt).toLocaleString("el-GR")
-                      : new Date(j.createdAt).toLocaleString("el-GR")}
+                    {new Date(when).toLocaleDateString("el-GR")}
                     {j.sourceType ? ` · ${j.sourceType}` : ""}
                     {` · ${j.lines.length} γραμμές`}
                   </p>
@@ -680,9 +746,11 @@ export function FinanceJournalClient({
             </div>
           );
         })}
-        {items.length === 0 ? (
+        {filteredItems.length === 0 ? (
           <p className="px-4 py-10 text-center text-sm text-slate-500">
-            Δεν υπάρχουν άρθρα ακόμη. Εκδώστε τιμολόγιο ή καταχωρήστε χειροκίνητα.
+            {items.length === 0
+              ? "Δεν υπάρχουν άρθρα ακόμη. Εκδώστε τιμολόγιο ή καταχωρήστε χειροκίνητα."
+              : "Κανένα άρθρο με τα τρέχοντα φίλτρα. Δοκίμασε «Καθαρισμός» ή άλλο διάστημα."}
           </p>
         ) : null}
       </div>

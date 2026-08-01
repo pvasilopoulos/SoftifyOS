@@ -50,6 +50,7 @@ export default async function FinancePage() {
     purchaseInvoices,
     settings,
     draftJournalCount,
+    legalEntities,
   ] = await Promise.all([
     prisma.journalEntry.findMany({
       where: { tenantId: session.tenantId },
@@ -86,6 +87,11 @@ export default async function FinancePage() {
     }),
     prisma.journalEntry.count({
       where: { tenantId: session.tenantId, status: "DRAFT" },
+    }),
+    prisma.legalEntity.findMany({
+      where: { tenantId: session.tenantId, isActive: true },
+      orderBy: [{ isDefault: "desc" }, { code: "asc" }],
+      select: { id: true, code: true, name: true, isDefault: true },
     }),
   ]);
 
@@ -137,6 +143,7 @@ export default async function FinancePage() {
         description: j.description,
         sourceType: j.sourceType,
         postedAt: j.postedAt?.toISOString() ?? null,
+        entryDate: j.entryDate.toISOString(),
         createdAt: j.createdAt.toISOString(),
         lines: j.lines.map((l) => ({
           id: l.id,
@@ -147,6 +154,7 @@ export default async function FinancePage() {
           accountName: l.glAccount.name,
         })),
       }))}
+      legalEntities={legalEntities}
       arRows={arRows}
       apRows={apRows}
       purchaseInvoices={purchaseInvoices.map((p) => ({

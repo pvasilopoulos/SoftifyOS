@@ -4,6 +4,11 @@ import { useEffect, useMemo, useState, useTransition } from "react";
 import { Button } from "@/shared/ui/button";
 import { Badge } from "@/shared/ui/badge";
 import { formatEUR } from "@/modules/sales/invoice-utils";
+import {
+  filtersToReportQuery,
+  matchesText,
+  type FinanceFilters,
+} from "./finance-filters";
 
 type Tab =
   | "reports"
@@ -37,11 +42,13 @@ export function AccountingHubClient({
   initialPeriods,
   forcedTab,
   hideOuterChrome,
+  filters,
 }: {
   canWrite: boolean;
   initialPeriods: Period[];
   forcedTab?: Tab;
   hideOuterChrome?: boolean;
+  filters?: FinanceFilters;
 }) {
   const [tab, setTab] = useState<Tab>(forcedTab ?? "reports");
   useEffect(() => {
@@ -55,6 +62,7 @@ export function AccountingHubClient({
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [forcedTab]);
+
   const [reportKind, setReportKind] = useState("trial-balance");
   const [rows, setRows] = useState<TrialRow[]>([]);
   const [pnl, setPnl] = useState<{
@@ -179,15 +187,30 @@ export function AccountingHubClient({
   const loadReport = (kind = reportKind) => {
     startTransition(async () => {
       setError(null);
-      const res = await fetch(`/api/finance/reports?kind=${kind}`);
+      const params = filters
+        ? filtersToReportQuery(filters)
+        : new URLSearchParams();
+      params.set("kind", kind);
+      const res = await fetch(`/api/finance/reports?${params}`);
       const data = await res.json();
       if (!res.ok) {
         setError(data.error || "Αποτυχία αναφοράς");
         return;
       }
       setReportKind(kind);
+      const q = filters?.q?.trim() ?? "";
       if (kind === "trial-balance" || kind === "cost-centers") {
-        setRows(data.rows ?? []);
+        const next = (data.rows ?? []) as TrialRow[];
+        setRows(
+          q
+            ? next.filter(
+                (r) =>
+                  matchesText(r.code, q) ||
+                  matchesText(r.name, q) ||
+                  matchesText(r.type, q),
+              )
+            : next,
+        );
         setPnl(null);
         setBs(null);
       } else if (kind === "pnl") {
@@ -196,7 +219,7 @@ export function AccountingHubClient({
           expenseTotal: data.expenseTotal,
           netIncome: data.netIncome,
         });
-        setRows([
+        const pnlRows = [
           ...(data.revenue ?? []).map((r: TrialRow) => ({
             ...r,
             balance: r.credit - r.debit,
@@ -205,7 +228,14 @@ export function AccountingHubClient({
             ...r,
             balance: r.debit - r.credit,
           })),
-        ]);
+        ];
+        setRows(
+          q
+            ? pnlRows.filter(
+                (r) => matchesText(r.code, q) || matchesText(r.name, q),
+              )
+            : pnlRows,
+        );
         setBs(null);
       } else if (kind === "balance-sheet") {
         setBs({
@@ -215,19 +245,38 @@ export function AccountingHubClient({
           netIncome: data.netIncome,
           balanced: data.balanced,
         });
-        setRows([
+        const bsRows = [
           ...(data.assets ?? []),
           ...(data.liabilities ?? []),
           ...(data.equity ?? []),
-        ]);
+        ] as TrialRow[];
+        setRows(
+          q
+            ? bsRows.filter(
+                (r) => matchesText(r.code, q) || matchesText(r.name, q),
+              )
+            : bsRows,
+        );
         setPnl(null);
       } else if (kind === "consolidation") {
-        setRows(data.consolidated ?? []);
+        const cons = (data.consolidated ?? []) as TrialRow[];
+        setRows(
+          q
+            ? cons.filter(
+                (r) => matchesText(r.code, q) || matchesText(r.name, q),
+              )
+            : cons,
+        );
         setPnl(null);
         setBs(null);
       }
     });
   };
+
+  useEffect(() => {
+    if (tab === "reports") loadReport(reportKind);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filters?.from, filters?.to, filters?.legalEntityId, filters?.q]);
 
   const loadDimensions = () => {
     startTransition(async () => {

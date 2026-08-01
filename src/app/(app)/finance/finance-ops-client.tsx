@@ -87,6 +87,7 @@ export function FinanceOpsClient({
   hideTabBar,
   myDataEnv = "simulator",
   purchaseInvoices = [],
+  filters,
 }: {
   arRows: ArRow[];
   apRows: ApRow[];
@@ -97,6 +98,13 @@ export function FinanceOpsClient({
   hideTabBar?: boolean;
   myDataEnv?: "simulator" | "test" | "prod";
   purchaseInvoices?: PurchaseInvoiceRow[];
+  filters?: {
+    from: string;
+    to: string;
+    q: string;
+    status: string;
+    aging: string;
+  };
 }) {
   const [tab, setTab] = useState<"ar" | "ap" | "vat" | "mydata" | "banking">(
     forcedTab ?? "ar",
@@ -121,13 +129,87 @@ export function FinanceOpsClient({
     () => apRows.reduce((s, r) => s + r.total, 0),
     [apRows],
   );
-  const apInvoiceOpen = useMemo(
+
+  const filteredAr = useMemo(() => {
+    const q = filters?.q?.trim().toLowerCase() ?? "";
+    const aging = filters?.aging ?? "ALL";
+    return arRows.filter((r) => {
+      if (aging !== "ALL" && r.bucket !== aging) return false;
+      // Period filter on issue date (not due) so open AR stays meaningful.
+      const issued = r.issuedAt?.slice(0, 10);
+      if (filters?.from && issued && issued < filters.from) return false;
+      if (filters?.to && issued && issued > filters.to) return false;
+      if (!q) return true;
+      return (
+        r.number.toLowerCase().includes(q) ||
+        r.customer.name.toLowerCase().includes(q) ||
+        r.customer.code.toLowerCase().includes(q) ||
+        r.status.toLowerCase().includes(q)
+      );
+    });
+  }, [arRows, filters]);
+
+  const filteredApPo = useMemo(() => {
+    const q = filters?.q?.trim().toLowerCase() ?? "";
+    return apRows.filter((r) => {
+      if (filters?.from && r.orderedAt.slice(0, 10) < filters.from) return false;
+      if (filters?.to && r.orderedAt.slice(0, 10) > filters.to) return false;
+      if (!q) return true;
+      return (
+        r.number.toLowerCase().includes(q) ||
+        r.supplier.name.toLowerCase().includes(q) ||
+        r.supplier.code.toLowerCase().includes(q)
+      );
+    });
+  }, [apRows, filters]);
+
+  const filteredPurchases = useMemo(() => {
+    const q = filters?.q?.trim().toLowerCase() ?? "";
+    return purchaseInvoices.filter((r) => {
+      if (filters?.from && r.issueDate.slice(0, 10) < filters.from) return false;
+      if (filters?.to && r.issueDate.slice(0, 10) > filters.to) return false;
+      if (!q) return true;
+      return (
+        r.number.toLowerCase().includes(q) ||
+        r.supplierName.toLowerCase().includes(q) ||
+        r.status.toLowerCase().includes(q)
+      );
+    });
+  }, [purchaseInvoices, filters]);
+
+  const filteredMyData = useMemo(() => {
+    const q = filters?.q?.trim().toLowerCase() ?? "";
+    const st = filters?.status ?? "ALL";
+    return rows.filter((r) => {
+      if (st !== "ALL" && r.status !== st) return false;
+      if (filters?.from && r.createdAt.slice(0, 10) < filters.from) return false;
+      if (filters?.to && r.createdAt.slice(0, 10) > filters.to) return false;
+      if (!q) return true;
+      return (
+        (r.entityNumber ?? "").toLowerCase().includes(q) ||
+        r.status.toLowerCase().includes(q) ||
+        (r.mark ?? "").toLowerCase().includes(q) ||
+        (r.invoiceType ?? "").toLowerCase().includes(q) ||
+        r.entityType.toLowerCase().includes(q)
+      );
+    });
+  }, [rows, filters]);
+
+  const filteredArTotal = useMemo(
+    () => filteredAr.reduce((s, r) => s + r.balance, 0),
+    [filteredAr],
+  );
+  const filteredApPoTotal = useMemo(
+    () => filteredApPo.reduce((s, r) => s + r.total, 0),
+    [filteredApPo],
+  );
+  const filteredPurchaseOpen = useMemo(
     () =>
-      purchaseInvoices.reduce(
+      filteredPurchases.reduce(
         (s, r) => s + Math.max(0, r.total - r.paidAmount),
         0,
       ),
-    [purchaseInvoices],
+    [filteredPurchases],
   );
 
   async function processMyData(id: string) {
@@ -230,12 +312,14 @@ export function FinanceOpsClient({
           </h2>
           <p className="text-xs text-slate-500">
             {tab === "ar"
-              ? `Ανοιχτό υπόλοιπο ${money(arTotal)}`
+              ? `Εμφάνιση ${filteredAr.length}/${arRows.length} · υπόλοιπο ${money(filteredArTotal)}`
               : tab === "ap"
-                ? `PO ${money(apTotal)} · αγορές FI ανοιχτές ${money(apInvoiceOpen)}`
+                ? `PO ${filteredApPo.length}/${apRows.length} · ${money(filteredApPoTotal)} · αγορές FI ${money(filteredPurchaseOpen)}`
                 : tab === "mydata"
-                  ? `Περιβάλλον: ${myDataEnv}`
-                  : "Λειτουργική ενότητα"}
+                  ? `Περιβάλλον: ${myDataEnv} · ${filteredMyData.length}/${rows.length} εγγραφές`
+                  : tab === "vat"
+                    ? "Σύνοψη ΦΠΑ χρήσης (server) — άλλαξε περίοδο στα φίλτρα για GL αναφορές"
+                    : "Λειτουργική ενότητα"}
           </p>
         </div>
       )}
@@ -259,7 +343,7 @@ export function FinanceOpsClient({
               </tr>
             </thead>
             <tbody>
-              {arRows.map((r) => (
+              {filteredAr.map((r) => (
                 <tr key={r.id} className="border-t border-slate-100">
                   <td className="px-3 py-2">
                     <Link
@@ -285,13 +369,13 @@ export function FinanceOpsClient({
                   </td>
                 </tr>
               ))}
-              {arRows.length === 0 ? (
+              {filteredAr.length === 0 ? (
                 <tr>
                   <td
                     colSpan={5}
                     className="px-3 py-8 text-center text-slate-500"
                   >
-                    Καμία ανοιχτή απαίτηση.
+                    Καμία απαίτηση με τα τρέχοντα φίλτρα.
                   </td>
                 </tr>
               ) : null}
@@ -304,13 +388,19 @@ export function FinanceOpsClient({
         <div className="space-y-4">
           <div className="grid gap-2 sm:grid-cols-2">
             <div className="rounded-xl border border-slate-100 bg-slate-50 px-3 py-2">
-              <p className="text-xs text-slate-500">Ανοιχτά PO</p>
-              <p className="text-lg font-semibold tabular-nums">{money(apTotal)}</p>
+              <p className="text-xs text-slate-500">
+                Ανοιχτά PO (φίλτρο {filteredApPo.length}/{apRows.length})
+              </p>
+              <p className="text-lg font-semibold tabular-nums">
+                {money(filteredApPoTotal)}
+              </p>
             </div>
             <div className="rounded-xl border border-slate-100 bg-slate-50 px-3 py-2">
-              <p className="text-xs text-slate-500">Αγορές FI (υπόλοιπο)</p>
+              <p className="text-xs text-slate-500">
+                Αγορές FI υπόλοιπο ({filteredPurchases.length})
+              </p>
               <p className="text-lg font-semibold tabular-nums">
-                {money(apInvoiceOpen)}
+                {money(filteredPurchaseOpen)}
               </p>
             </div>
           </div>
@@ -337,7 +427,7 @@ export function FinanceOpsClient({
                 </tr>
               </thead>
               <tbody>
-                {purchaseInvoices.map((r) => (
+                {filteredPurchases.map((r) => (
                   <tr key={r.id} className="border-t border-slate-100">
                     <td className="px-3 py-2 font-mono text-xs font-semibold">
                       {r.number}
@@ -351,13 +441,15 @@ export function FinanceOpsClient({
                     </td>
                   </tr>
                 ))}
-                {purchaseInvoices.length === 0 ? (
+                {filteredPurchases.length === 0 ? (
                   <tr>
                     <td
                       colSpan={4}
                       className="px-3 py-6 text-center text-slate-500"
                     >
-                      Καμία αγορά FI — δημιούργησε από «Αγορές FI».
+                      {purchaseInvoices.length === 0
+                        ? "Καμία αγορά FI — δημιούργησε από «Αγορές FI»."
+                        : "Καμία αγορά με τα τρέχοντα φίλτρα."}
                     </td>
                   </tr>
                 ) : null}
@@ -379,7 +471,7 @@ export function FinanceOpsClient({
                 </tr>
               </thead>
               <tbody>
-                {apRows.map((r) => (
+                {filteredApPo.map((r) => (
                   <tr key={r.id} className="border-t border-slate-100">
                     <td className="px-3 py-2 font-mono text-xs font-semibold">
                       <Link
@@ -398,13 +490,15 @@ export function FinanceOpsClient({
                     </td>
                   </tr>
                 ))}
-                {apRows.length === 0 ? (
+                {filteredApPo.length === 0 ? (
                   <tr>
                     <td
                       colSpan={4}
                       className="px-3 py-6 text-center text-slate-500"
                     >
-                      Καμία ανοιχτή παραγγελία αγοράς.
+                      {apRows.length === 0
+                        ? "Καμία ανοιχτή παραγγελία αγοράς."
+                        : "Καμία παραγγελία με τα τρέχοντα φίλτρα."}
                     </td>
                   </tr>
                 ) : null}
@@ -537,7 +631,7 @@ export function FinanceOpsClient({
               </tr>
             </thead>
             <tbody>
-              {rows.map((r) => (
+              {filteredMyData.map((r) => (
                 <tr key={r.id} className="border-t border-slate-100">
                   <td className="px-3 py-2">
                     <div className="font-mono text-xs font-semibold">
@@ -569,14 +663,15 @@ export function FinanceOpsClient({
                   </td>
                 </tr>
               ))}
-              {rows.length === 0 ? (
+              {filteredMyData.length === 0 ? (
                 <tr>
                   <td
                     colSpan={5}
                     className="px-3 py-8 text-center text-slate-500"
                   >
-                    Καμία εγγραφή στην ουρά. Ενεργοποίησε myDATA στη σειρά
-                    παραστατικού.
+                    {rows.length === 0
+                      ? "Καμία εγγραφή στην ουρά. Ενεργοποίησε myDATA στη σειρά παραστατικού."
+                      : "Καμία εγγραφή με τα τρέχοντα φίλτρα."}
                   </td>
                 </tr>
               ) : null}
