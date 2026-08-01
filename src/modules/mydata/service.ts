@@ -1,16 +1,15 @@
 import type { Prisma, PrismaClient } from "@/generated/prisma/client";
+import { sendInvoicesXml, type MyDataEnv } from "./client";
+import { buildInvoiceInvoicesDocXml, readMyDataConfig } from "./payload";
 
 type Db = PrismaClient | Prisma.TransactionClient;
 
-type MyDataEnv = "simulator" | "test" | "prod";
-
-async function resolveMyDataEnv(db: Db, tenantId: string): Promise<MyDataEnv> {
+async function resolveMyDataConfig(db: Db, tenantId: string) {
   const settings = await db.tenantSettings.findUnique({
     where: { tenantId },
     select: { integrationsJson: true },
   });
-  const json = (settings?.integrationsJson as { myDataEnv?: MyDataEnv } | null) ?? {};
-  return json.myDataEnv ?? "simulator";
+  return readMyDataConfig(settings?.integrationsJson);
 }
 
 /** Enqueue a document for myDATA when series has myDataEnabled. */
@@ -52,8 +51,8 @@ export async function enqueueMyDataSubmission(
 
 /**
  * Process queue item.
- * - simulator / test: local fake MARK (test prefix differs)
- * - prod: still simulator until AADE credentials land — returns clear mode flag
+ * - simulator: local fake MARK
+ * - test / prod: live AADE SendInvoices HTTP (requires credentials)
  */
 export async function processMyDataSubmission(
   db: Db,
@@ -71,11 +70,11 @@ export async function processMyDataSubmission(
     return row;
   }
 
-  const env = await resolveMyDataEnv(db, input.tenantId);
+  const config = await resolveMyDataConfig(db, input.tenantId);
+  const env: MyDataEnv = config.myDataEnv;
   const now = new Date();
   const attempts = row.attempts + 1;
 
-  // Intermediate SENT hop for observability
   if (row.status === "PENDING") {
     await db.myDataSubmission.update({
       where: { id: row.id },
@@ -92,7 +91,7 @@ export async function processMyDataSubmission(
     });
   }
 
-  if (input.forceReject || (env === "test" && attempts % 7 === 0)) {
+  if (input.forceReject || (env === "simulator" && attempts % 7 === 0)) {
     return db.myDataSubmission.update({
       where: { id: row.id },
       data: {
@@ -110,9 +109,126 @@ export async function processMyDataSubmission(
     });
   }
 
-  const prefix = env === "prod" ? "MARK-STUB" : env === "test" ? "MARK-TEST" : "MARK-SIM";
-  const mark = `${prefix}-${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, "0")}${String(now.getDate()).padStart(2, "0")}-${row.id.slice(-8).toUpperCase()}`;
-  const uid = `UID-${env.toUpperCase()}-${row.entityId.slice(0, 12).toUpperCase()}`;
+  // Live AADE for test + prod
+  if (env === "test" || env === "prod") {
+    const userId = config.myDataUserId?.trim();
+    const subscriptionKey = config.myDataSubscriptionKey?.trim();
+    if (!userId || !subscriptionKey) {
+      return db.myDataSubmission.update({
+        where: { id: row.id },
+        data: {
+          status: "REJECTED",
+          attempts,
+          lastAttemptAt: now,
+          errorMessage:
+            "Λείπουν credentials ΑΑΔΕ (user id / subscription key) στις Integrations",
+          response: {
+            mode: env,
+            accepted: false,
+            live: true,
+            errors: [{ code: "CFG-001", message: "Missing AADE credentials" }],
+            processedAt: now.toISOString(),
+          },
+        },
+      });
+    }
+
+    try {
+      let xml: string;
+      if (row.entityType === "invoice") {
+        xml = await buildInvoiceInvoicesDocXml(db, {
+          tenantId: input.tenantId,
+          invoiceId: row.entityId,
+          invoiceType: row.invoiceType,
+          vatCategory: row.vatCategory,
+        });
+      } else {
+        throw new Error(
+          `Live myDATA υποστηρίζει entityType=invoice (λήφθηκε ${row.entityType})`,
+        );
+      }
+
+      const result = await sendInvoicesXml(env, { userId, subscriptionKey }, xml);
+
+      if (!result.ok) {
+        return db.myDataSubmission.update({
+          where: { id: row.id },
+          data: {
+            status: "REJECTED",
+            attempts,
+            lastAttemptAt: now,
+            errorMessage:
+              result.errors.map((e) => e.message).join("; ") ||
+              `Απόρριψη ΑΑΔΕ HTTP ${result.status}`,
+            response: {
+              mode: env,
+              live: true,
+              accepted: false,
+              endpoint: result.endpoint,
+              httpStatus: result.status,
+              errors: result.errors,
+              rawXml: result.rawXml.slice(0, 8000),
+              processedAt: now.toISOString(),
+            },
+            payload: {
+              ...((row.payload as object) || {}),
+              requestXml: xml.slice(0, 8000),
+            },
+          },
+        });
+      }
+
+      return db.myDataSubmission.update({
+        where: { id: row.id },
+        data: {
+          status: "ACCEPTED",
+          attempts,
+          lastAttemptAt: now,
+          mark: result.mark,
+          uid: result.uid,
+          errorMessage: null,
+          response: {
+            mode: env,
+            live: true,
+            accepted: true,
+            endpoint: result.endpoint,
+            httpStatus: result.status,
+            mark: result.mark,
+            uid: result.uid,
+            rawXml: result.rawXml.slice(0, 8000),
+            processedAt: now.toISOString(),
+          },
+          payload: {
+            ...((row.payload as object) || {}),
+            requestXml: xml.slice(0, 8000),
+          },
+        },
+      });
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Σφάλμα live myDATA";
+      return db.myDataSubmission.update({
+        where: { id: row.id },
+        data: {
+          status: "REJECTED",
+          attempts,
+          lastAttemptAt: now,
+          errorMessage: message,
+          response: {
+            mode: env,
+            live: true,
+            accepted: false,
+            errors: [{ message }],
+            processedAt: now.toISOString(),
+          },
+        },
+      });
+    }
+  }
+
+  // Local simulator
+  const mark = `MARK-SIM-${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, "0")}${String(now.getDate()).padStart(2, "0")}-${row.id.slice(-8).toUpperCase()}`;
+  const uid = `UID-SIM-${row.entityId.slice(0, 12).toUpperCase()}`;
 
   return db.myDataSubmission.update({
     where: { id: row.id },
@@ -128,10 +244,7 @@ export async function processMyDataSubmission(
         accepted: true,
         mark,
         uid,
-        note:
-          env === "prod"
-            ? "Stub — δεν υπάρχει ακόμα live AADE client"
-            : "Local simulator",
+        note: "Local simulator",
         processedAt: now.toISOString(),
       },
     },

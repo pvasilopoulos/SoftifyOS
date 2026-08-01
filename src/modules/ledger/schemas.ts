@@ -29,9 +29,55 @@ export const journalCreateSchema = z.object({
   post: z.boolean().optional().default(true),
 });
 
-export const periodActionSchema = z.object({
-  periodId: z.string().min(1),
-  action: z.enum(["close", "reopen"]),
+export const periodActionSchema = z.discriminatedUnion("action", [
+  z.object({
+    action: z.enum(["close", "reopen"]),
+    periodId: z.string().min(1),
+  }),
+  z.object({
+    action: z.literal("close-year"),
+    year: z.coerce.number().int().min(2000).max(2100),
+    createOpenings: z.boolean().optional().default(true),
+  }),
+]);
+
+export const costAllocationSchema = z.object({
+  code: z.string().trim().min(1).max(40),
+  name: z.string().trim().min(1).max(200),
+  method: z.enum(["EQUAL", "PERCENT", "DRIVER"]).optional().default("PERCENT"),
+  sourceCostCenterId: z.string().min(1),
+  glAccountId: z.string().min(1),
+  amount: z.coerce.number().positive().max(100_000_000),
+  targets: z
+    .array(
+      z.object({
+        costCenterId: z.string().min(1),
+        weight: z.coerce.number().min(0).max(1_000_000),
+      }),
+    )
+    .min(1)
+    .max(50),
+});
+
+export const intercompanyMatchSchema = z.object({
+  code: z.string().trim().min(1).max(40),
+  legalEntityAId: z.string().min(1),
+  legalEntityBId: z.string().min(1),
+  amount: z.coerce.number().positive().max(100_000_000),
+  lineAId: z.string().min(1).nullable().optional(),
+  lineBId: z.string().min(1).nullable().optional(),
+  notes: z.string().trim().max(500).nullable().optional(),
+  eliminate: z.boolean().optional().default(false),
+});
+
+export const parallelLedgerSchema = z.object({
+  code: z.string().trim().min(1).max(20),
+  name: z.string().trim().min(1).max(200),
+  kind: z
+    .enum(["STATUTORY", "IFRS", "MANAGEMENT", "TAX"])
+    .optional()
+    .default("MANAGEMENT"),
+  isDefault: z.boolean().optional(),
 });
 
 export const legalEntitySchema = z.object({

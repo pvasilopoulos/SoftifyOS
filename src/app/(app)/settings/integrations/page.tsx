@@ -12,6 +12,8 @@ type IntegrationsJson = {
   webhookSecretHint?: string | null;
   skroutzEnabled?: boolean;
   myDataEnv?: "simulator" | "test" | "prod";
+  myDataUserId?: string | null;
+  myDataSubscriptionKey?: string | null;
   notes?: string | null;
 };
 
@@ -30,7 +32,7 @@ export default async function IntegrationsSettingsPage() {
     <div className="mx-auto max-w-3xl space-y-5">
       <PageHeader
         title="API & Integrations"
-        description="Webhooks, myDATA περιβάλλον και σύνδεση με εξωτερικές υπηρεσίες."
+        description="Webhooks, live myDATA/ΑΑΔΕ credentials και εξωτερικές υπηρεσίες."
       />
       <IntegrationsClient
         canWrite={session.role === "OWNER" || session.role === "ADMIN"}
@@ -39,6 +41,9 @@ export default async function IntegrationsSettingsPage() {
           webhookSecretHint: raw.webhookSecretHint ?? "",
           skroutzEnabled: Boolean(raw.skroutzEnabled),
           myDataEnv: raw.myDataEnv ?? "simulator",
+          myDataUserId: raw.myDataUserId ?? "",
+          myDataSubscriptionKey: "",
+          hasMyDataSubscriptionKey: Boolean(raw.myDataSubscriptionKey),
           notes: raw.notes ?? "",
         }}
         endpoints={{

@@ -32,6 +32,7 @@ export const DEFAULT_GL_ACCOUNTS: DefaultGlAccount[] = [
   { code: "40.00.00", name: "Κεφάλαιο", type: "EQUITY", reportGroup: "BS_EQUITY" },
   { code: "64", name: "Έξοδα", type: "EXPENSE", isPostable: false, reportGroup: "PL_EXPENSE" },
   { code: "64.00.00", name: "Γενικά έξοδα", type: "EXPENSE", reportGroup: "PL_EXPENSE" },
+  { code: "64.01.00", name: "Κόστος πωληθέντων", type: "EXPENSE", reportGroup: "PL_COGS" },
   { code: "66.00.00", name: "Αποσβέσεις παγίων", type: "EXPENSE", reportGroup: "PL_EXPENSE" },
   { code: "70", name: "Πωλήσεις", type: "REVENUE", isPostable: false, reportGroup: "PL_REVENUE" },
   { code: "70.00.00", name: "Πωλήσεις εμπορευμάτων", type: "REVENUE", reportGroup: "PL_REVENUE" },

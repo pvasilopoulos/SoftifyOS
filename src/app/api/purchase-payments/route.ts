@@ -100,6 +100,28 @@ export async function POST(request: Request) {
         paidAt: body.paidAt ? new Date(body.paidAt) : new Date(),
       },
     });
+
+    let journalId: string | null = null;
+    try {
+      const { tryPostPurchasePayment } = await import("@/modules/ledger/service");
+      const cashCode =
+        (body.method || "TRANSFER").toUpperCase() === "CASH"
+          ? "38.00.00"
+          : "38.03.00";
+      const journal = await tryPostPurchasePayment(prisma, {
+        tenantId: session.tenantId,
+        paymentId: item.id,
+        supplierName: supplier.name,
+        amount: body.amount,
+        glCashAccount: cashCode,
+        glApAccount: "50.00.00",
+        userId: session.sub,
+      });
+      journalId = journal?.id ?? null;
+    } catch {
+      journalId = null;
+    }
+
     await writeAuditEvent({
       tenantId: session.tenantId,
       userId: session.sub,
@@ -110,6 +132,7 @@ export async function POST(request: Request) {
         supplierId: item.supplierId,
         amount: toNumber(item.amount),
         purchaseOrderId: item.purchaseOrderId,
+        journalId,
       },
     });
     return NextResponse.json(
@@ -118,6 +141,7 @@ export async function POST(request: Request) {
           id: item.id,
           amount: toNumber(item.amount),
           paidAt: item.paidAt.toISOString(),
+          journalId,
         },
       },
       { status: 201 },

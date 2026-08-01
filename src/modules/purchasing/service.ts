@@ -142,6 +142,37 @@ export async function receivePurchaseOrderLines(
       if (!result.skipped && result.movementId) {
         movements.push(result.movementId);
       }
+
+      // Weighted average cost from PO unit price
+      const product = await db.product.findFirst({
+        where: { id: line.productId, tenantId: input.tenantId },
+        select: { id: true, averageCost: true },
+      });
+      if (product) {
+        const balances = await db.stockBalance.findMany({
+          where: { tenantId: input.tenantId, productId: line.productId },
+          select: { qtyOnHand: true },
+        });
+        const onHandAfter = balances.reduce(
+          (s, b) => s + Number(b.qtyOnHand),
+          0,
+        );
+        const onHandBefore = Math.max(0, onHandAfter - qty);
+        const prevCost = Number(product.averageCost ?? 0);
+        const unitPrice = Number(line.unitPrice);
+        const newAvg =
+          onHandAfter <= 0
+            ? unitPrice
+            : (onHandBefore * prevCost + qty * unitPrice) / onHandAfter;
+        await db.product.update({
+          where: { id: product.id },
+          data: {
+            averageCost: new Prisma.Decimal(
+              Math.round(Math.max(0, newAvg) * 10_000) / 10_000,
+            ),
+          },
+        });
+      }
     }
   }
 

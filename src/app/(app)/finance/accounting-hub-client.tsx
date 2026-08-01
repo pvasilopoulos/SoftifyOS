@@ -9,6 +9,7 @@ type Tab =
   | "reports"
   | "periods"
   | "dimensions"
+  | "controlling"
   | "assets"
   | "purchases";
 
@@ -79,12 +80,47 @@ export function AccountingHubClient({
       supplier: { name: string };
     }>
   >([]);
+  const [allocations, setAllocations] = useState<
+    Array<{
+      id: string;
+      code: string;
+      name: string;
+      amount: number;
+      status: string;
+      sourceCostCenter: { code: string; name: string };
+      glAccount: { code: string; name: string };
+    }>
+  >([]);
+  const [icMatches, setIcMatches] = useState<
+    Array<{
+      id: string;
+      code: string;
+      amount: number;
+      difference: number;
+      status: string;
+      legalEntityA: { code: string; name: string };
+      legalEntityB: { code: string; name: string };
+    }>
+  >([]);
+  const [ledgers, setLedgers] = useState<
+    Array<{
+      id: string;
+      code: string;
+      name: string;
+      kind: string;
+      isDefault: boolean;
+    }>
+  >([]);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
 
   const monthPeriods = useMemo(
     () => periods.filter((p) => p.kind === "MONTH"),
+    [periods],
+  );
+  const yearPeriods = useMemo(
+    () => periods.filter((p) => p.kind === "YEAR"),
     [periods],
   );
 
@@ -168,12 +204,25 @@ export function AccountingHubClient({
     });
   };
 
+  const loadControlling = () => {
+    startTransition(async () => {
+      const res = await fetch("/api/finance/controlling");
+      const data = await res.json();
+      if (res.ok) {
+        setAllocations(data.allocations ?? []);
+        setIcMatches(data.intercompany ?? []);
+        setLedgers(data.ledgers ?? []);
+      }
+    });
+  };
+
   const switchTab = (t: Tab) => {
     setTab(t);
     setError(null);
     setMessage(null);
     if (t === "reports") loadReport("trial-balance");
     if (t === "dimensions") loadDimensions();
+    if (t === "controlling") loadControlling();
     if (t === "assets") loadAssets();
     if (t === "purchases") loadPurchases();
   };
@@ -195,6 +244,165 @@ export function AccountingHubClient({
         prev.map((p) => (p.id === periodId ? { ...p, ...data.item } : p)),
       );
       setMessage(action === "close" ? "Περίοδος κλειστή" : "Περίοδος ανοιχτή");
+    });
+  };
+
+  const closeYear = (year: number) => {
+    if (
+      !window.confirm(
+        `Κλείσιμο χρήσης ${year}; Θα κλείσουν οι μήνες, θα γίνει άρθρο αποτελεσμάτων σε 80.00.00 και υπόλοιπα έναρξης.`,
+      )
+    ) {
+      return;
+    }
+    startTransition(async () => {
+      setError(null);
+      const res = await fetch("/api/finance/periods", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "close-year",
+          year,
+          createOpenings: true,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data.error || "Αποτυχία κλεισίματος χρήσης");
+        return;
+      }
+      setMessage(
+        `Χρήση ${year} κλειστή · αποτέλεσμα ${formatEUR(data.netIncome ?? 0)} → 80.00.00`,
+      );
+      const list = await fetch(`/api/finance/periods?year=${year}`);
+      const listData = await list.json();
+      if (list.ok) setPeriods(listData.items ?? []);
+    });
+  };
+
+  const createAllocation = () => {
+    if (!costCenters.length) loadDimensions();
+    const code = window.prompt("Κωδικός κατανομής", `ALLOC-${Date.now().toString().slice(-6)}`);
+    const name = window.prompt("Περιγραφή κατανομής");
+    const amount = Number(window.prompt("Ποσό", "100") || 0);
+    const sourceCode = window.prompt("Κωδ. κέντρου πηγής");
+    const targetCode = window.prompt("Κωδ. κέντρου στόχου");
+    const glCode = window.prompt("Κωδ. λογαριασμού εξόδου", "64.00.00");
+    if (!code || !name || !(amount > 0) || !sourceCode || !targetCode) return;
+    startTransition(async () => {
+      setError(null);
+      const dim = await fetch("/api/finance/dimensions");
+      const dimData = await dim.json();
+      const ccs = (dimData.costCenters ?? []) as Array<{
+        id: string;
+        code: string;
+      }>;
+      const source = ccs.find((c) => c.code === sourceCode);
+      const target = ccs.find((c) => c.code === targetCode);
+      if (!source || !target) {
+        setError("Κέντρα κόστους δεν βρέθηκαν — δημιούργησέ τα πρώτα");
+        return;
+      }
+      const glRes = await fetch("/api/settings/gl-accounts");
+      const glData = await glRes.json();
+      const gl = (
+        (glData.items ?? []) as Array<{ id: string; code: string }>
+      ).find((a) => a.code === glCode);
+      if (!gl) {
+        setError(`Λογαριασμός ${glCode} δεν βρέθηκε`);
+        return;
+      }
+      const res = await fetch("/api/finance/controlling", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          op: "allocation",
+          code,
+          name,
+          method: "PERCENT",
+          sourceCostCenterId: source.id,
+          glAccountId: gl.id,
+          amount,
+          targets: [{ costCenterId: target.id, weight: 100 }],
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data.error || "Αποτυχία κατανομής");
+        return;
+      }
+      setMessage(`Κατανομή ${code} posted`);
+      loadControlling();
+    });
+  };
+
+  const createIcMatch = () => {
+    const code = window.prompt("Κωδικός IC", `IC-${Date.now().toString().slice(-6)}`);
+    const entA = window.prompt("Κωδ. οντότητας Α", "MAIN");
+    const entB = window.prompt("Κωδ. οντότητας Β");
+    const amount = Number(window.prompt("Ποσό", "100") || 0);
+    if (!code || !entA || !entB || !(amount > 0)) return;
+    startTransition(async () => {
+      setError(null);
+      const dim = await fetch("/api/finance/dimensions");
+      const dimData = await dim.json();
+      const les = (dimData.legalEntities ?? []) as Array<{
+        id: string;
+        code: string;
+      }>;
+      const a = les.find((e) => e.code === entA);
+      const b = les.find((e) => e.code === entB);
+      if (!a || !b) {
+        setError("Νομικές οντότητες δεν βρέθηκαν");
+        return;
+      }
+      const res = await fetch("/api/finance/controlling", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          op: "intercompany",
+          code,
+          legalEntityAId: a.id,
+          legalEntityBId: b.id,
+          amount,
+          eliminate: true,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data.error || "Αποτυχία IC");
+        return;
+      }
+      setMessage(`IC ${code}: ${data.item.status}`);
+      loadControlling();
+    });
+  };
+
+  const createLedger = () => {
+    const code = window.prompt("Κωδικός ledger", "IFRS");
+    const name = window.prompt("Όνομα", "IFRS books");
+    const ledgerKind =
+      window.prompt("Είδος STATUTORY|IFRS|MANAGEMENT|TAX", "IFRS") ||
+      "MANAGEMENT";
+    if (!code || !name) return;
+    startTransition(async () => {
+      const res = await fetch("/api/finance/controlling", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          op: "ledger",
+          code,
+          name,
+          kind: ledgerKind,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setError(data.error || "Αποτυχία ledger");
+        return;
+      }
+      setMessage(`Ledger ${code} αποθηκεύτηκε`);
+      loadControlling();
     });
   };
 
@@ -285,6 +493,7 @@ export function AccountingHubClient({
     { id: "reports", label: "Αναφορές GL" },
     { id: "periods", label: "Περίοδοι" },
     { id: "dimensions", label: "Διαστάσεις" },
+    { id: "controlling", label: "CO / IC / Ledgers" },
     { id: "assets", label: "Πάγια" },
     { id: "purchases", label: "Αγορές FI" },
   ];
@@ -417,43 +626,191 @@ export function AccountingHubClient({
       ) : null}
 
       {tab === "periods" ? (
-        <div className="space-y-2">
-          <p className="text-xs text-slate-500">
-            Μηνιαίες περίοδοι τρέχουσας χρήσης — κλείσιμο εμποδίζει νέα άρθρα.
-          </p>
-          <ul className="divide-y divide-slate-100 rounded-xl border border-slate-100">
-            {monthPeriods.map((p) => (
-              <li
-                key={p.id}
-                className="flex flex-wrap items-center justify-between gap-2 px-3 py-2 text-sm"
-              >
-                <div>
-                  <span className="font-medium">{p.name}</span>
-                  <span className="ml-2 text-xs text-slate-400">{p.code}</span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <Badge tone={p.status === "OPEN" ? "emerald" : "rose"}>
-                    {p.status === "OPEN" ? "Ανοιχτή" : "Κλειστή"}
-                  </Badge>
-                  {canWrite ? (
-                    <Button
-                      size="sm"
-                      variant="secondary"
-                      disabled={pending}
-                      onClick={() =>
-                        periodAction(
-                          p.id,
-                          p.status === "OPEN" ? "close" : "reopen",
-                        )
-                      }
-                    >
-                      {p.status === "OPEN" ? "Κλείσιμο" : "Επαναφορά"}
-                    </Button>
-                  ) : null}
-                </div>
-              </li>
-            ))}
-          </ul>
+        <div className="space-y-4">
+          <div className="space-y-2">
+            <p className="text-xs text-slate-500">
+              Κλείσιμο χρήσης → άρθρο αποτελεσμάτων σε 80.00.00 + υπόλοιπα έναρξης
+              89.00.00.
+            </p>
+            <ul className="divide-y divide-slate-100 rounded-xl border border-slate-100">
+              {yearPeriods.map((p) => (
+                <li
+                  key={p.id}
+                  className="flex flex-wrap items-center justify-between gap-2 px-3 py-2 text-sm"
+                >
+                  <div>
+                    <span className="font-medium">{p.name}</span>
+                    <span className="ml-2 text-xs text-slate-400">{p.code}</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Badge tone={p.status === "OPEN" ? "emerald" : "rose"}>
+                      {p.status === "OPEN" ? "Ανοιχτή" : "Κλειστή"}
+                    </Badge>
+                    {canWrite && p.status === "OPEN" ? (
+                      <Button
+                        size="sm"
+                        disabled={pending}
+                        onClick={() => closeYear(p.year)}
+                      >
+                        Κλείσιμο χρήσης → 80.xx
+                      </Button>
+                    ) : null}
+                  </div>
+                </li>
+              ))}
+            </ul>
+          </div>
+          <div className="space-y-2">
+            <p className="text-xs text-slate-500">
+              Μηνιαίες περίοδοι — κλείσιμο εμποδίζει νέα άρθρα.
+            </p>
+            <ul className="divide-y divide-slate-100 rounded-xl border border-slate-100">
+              {monthPeriods.map((p) => (
+                <li
+                  key={p.id}
+                  className="flex flex-wrap items-center justify-between gap-2 px-3 py-2 text-sm"
+                >
+                  <div>
+                    <span className="font-medium">{p.name}</span>
+                    <span className="ml-2 text-xs text-slate-400">{p.code}</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Badge tone={p.status === "OPEN" ? "emerald" : "rose"}>
+                      {p.status === "OPEN" ? "Ανοιχτή" : "Κλειστή"}
+                    </Badge>
+                    {canWrite ? (
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        disabled={pending}
+                        onClick={() =>
+                          periodAction(
+                            p.id,
+                            p.status === "OPEN" ? "close" : "reopen",
+                          )
+                        }
+                      >
+                        {p.status === "OPEN" ? "Κλείσιμο" : "Επαναφορά"}
+                      </Button>
+                    ) : null}
+                  </div>
+                </li>
+              ))}
+            </ul>
+          </div>
+        </div>
+      ) : null}
+
+      {tab === "controlling" ? (
+        <div className="space-y-5">
+          <div className="space-y-2">
+            <div className="flex items-center justify-between gap-2">
+              <h3 className="text-sm font-semibold">Κατανομές CO</h3>
+              {canWrite ? (
+                <Button size="sm" variant="secondary" onClick={createAllocation}>
+                  + Κατανομή
+                </Button>
+              ) : null}
+            </div>
+            <ul className="divide-y divide-slate-100 rounded-xl border border-slate-100 text-sm">
+              {allocations.length === 0 ? (
+                <li className="px-3 py-4 text-slate-400">Καμία κατανομή ακόμη</li>
+              ) : (
+                allocations.map((a) => (
+                  <li
+                    key={a.id}
+                    className="flex flex-wrap items-center justify-between gap-2 px-3 py-2"
+                  >
+                    <span>
+                      <span className="font-mono text-xs text-slate-400">
+                        {a.code}
+                      </span>{" "}
+                      {a.name}
+                      <span className="ml-2 text-xs text-slate-500">
+                        {a.sourceCostCenter.code} · {a.glAccount.code}
+                      </span>
+                    </span>
+                    <span className="flex items-center gap-2">
+                      <Badge tone="teal">{a.status}</Badge>
+                      <span className="tabular-nums">{formatEUR(a.amount)}</span>
+                    </span>
+                  </li>
+                ))
+              )}
+            </ul>
+          </div>
+
+          <div className="space-y-2">
+            <div className="flex items-center justify-between gap-2">
+              <h3 className="text-sm font-semibold">Intercompany matching</h3>
+              {canWrite ? (
+                <Button size="sm" variant="secondary" onClick={createIcMatch}>
+                  + IC match
+                </Button>
+              ) : null}
+            </div>
+            <ul className="divide-y divide-slate-100 rounded-xl border border-slate-100 text-sm">
+              {icMatches.length === 0 ? (
+                <li className="px-3 py-4 text-slate-400">Κανένα match ακόμη</li>
+              ) : (
+                icMatches.map((m) => (
+                  <li
+                    key={m.id}
+                    className="flex flex-wrap items-center justify-between gap-2 px-3 py-2"
+                  >
+                    <span>
+                      <span className="font-mono text-xs text-slate-400">
+                        {m.code}
+                      </span>{" "}
+                      {m.legalEntityA.code} ↔ {m.legalEntityB.code}
+                    </span>
+                    <span className="flex items-center gap-2">
+                      <Badge
+                        tone={
+                          m.status === "ELIMINATED"
+                            ? "teal"
+                            : m.status === "MATCHED"
+                              ? "emerald"
+                              : "slate"
+                        }
+                      >
+                        {m.status}
+                      </Badge>
+                      <span className="tabular-nums">{formatEUR(m.amount)}</span>
+                    </span>
+                  </li>
+                ))
+              )}
+            </ul>
+          </div>
+
+          <div className="space-y-2">
+            <div className="flex items-center justify-between gap-2">
+              <h3 className="text-sm font-semibold">Parallel ledgers</h3>
+              {canWrite ? (
+                <Button size="sm" variant="secondary" onClick={createLedger}>
+                  + Ledger
+                </Button>
+              ) : null}
+            </div>
+            <ul className="divide-y divide-slate-100 rounded-xl border border-slate-100 text-sm">
+              {ledgers.map((l) => (
+                <li
+                  key={l.id}
+                  className="flex items-center justify-between px-3 py-2"
+                >
+                  <span>
+                    <span className="font-mono text-xs text-slate-400">
+                      {l.code}
+                    </span>{" "}
+                    {l.name}
+                    <span className="ml-2 text-xs text-slate-500">{l.kind}</span>
+                  </span>
+                  {l.isDefault ? <Badge tone="teal">Default</Badge> : null}
+                </li>
+              ))}
+            </ul>
+          </div>
         </div>
       ) : null}
 

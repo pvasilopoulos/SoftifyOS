@@ -146,6 +146,24 @@ export type JournalLineInput = {
   legalEntityId?: string | null;
 };
 
+async function resolveParallelLedgerId(
+  db: Db,
+  tenantId: string,
+  parallelLedgerId?: string | null,
+) {
+  if (parallelLedgerId) {
+    const led = await db.parallelLedger.findFirst({
+      where: { id: parallelLedgerId, tenantId, isActive: true },
+    });
+    if (!led) throw new LedgerError("Parallel ledger δεν βρέθηκε", 404);
+    return led.id;
+  }
+  const def = await db.parallelLedger.findFirst({
+    where: { tenantId, isDefault: true, isActive: true },
+  });
+  return def?.id ?? null;
+}
+
 function normalizeLines(lines: JournalLineInput[]) {
   const normalized = lines
     .map((l) => ({
@@ -219,6 +237,7 @@ export async function createJournal(
     entryDate?: Date | null;
     isOpening?: boolean;
     post?: boolean;
+    parallelLedgerId?: string | null;
     lines: JournalLineInput[];
   },
 ) {
@@ -230,6 +249,11 @@ export async function createJournal(
   const number = await nextJournalNumber(db, input.tenantId);
   const post = input.post !== false;
   const now = new Date();
+  const parallelLedgerId = await resolveParallelLedgerId(
+    db,
+    input.tenantId,
+    input.parallelLedgerId,
+  );
 
   return db.journalEntry.create({
     data: {
@@ -240,6 +264,7 @@ export async function createJournal(
       sourceType: input.sourceType ?? null,
       sourceId: input.sourceId ?? null,
       fiscalPeriodId: period.id,
+      parallelLedgerId,
       entryDate,
       isOpening: !!input.isOpening,
       postedAt: post ? now : null,
@@ -272,6 +297,7 @@ export async function createAndPostJournal(
     createdByUserId?: string | null;
     entryDate?: Date | null;
     isOpening?: boolean;
+    parallelLedgerId?: string | null;
     lines: JournalLineInput[];
   },
 ) {
@@ -590,5 +616,125 @@ export async function tryPostPurchaseInvoice(
     sourceId: input.purchaseInvoiceId,
     createdByUserId: input.userId,
     lines,
+  });
+}
+
+/** Supplier payment: Dr AP / Cr Cash-Bank */
+export async function tryPostPurchasePayment(
+  db: Db,
+  input: {
+    tenantId: string;
+    paymentId: string;
+    supplierName?: string | null;
+    amount: number;
+    glCashAccount?: string | null;
+    glApAccount?: string | null;
+    userId?: string | null;
+  },
+) {
+  if (input.amount <= 0) return null;
+  const existing = await findPostedBySource(
+    db,
+    input.tenantId,
+    "purchase.payment",
+    input.paymentId,
+  );
+  if (existing) return existing;
+
+  const cash = await findAccountByCode(
+    db,
+    input.tenantId,
+    input.glCashAccount ?? "38.03.00",
+  );
+  const ap = await findAccountByCode(
+    db,
+    input.tenantId,
+    input.glApAccount ?? "50.00.00",
+  );
+  if (!cash || !ap) return null;
+
+  return createAndPostJournal(db, {
+    tenantId: input.tenantId,
+    description: `Πληρωμή προμηθευτή${input.supplierName ? ` ${input.supplierName}` : ""}`,
+    sourceType: "purchase.payment",
+    sourceId: input.paymentId,
+    createdByUserId: input.userId,
+    lines: [
+      { glAccountId: ap.id, debit: input.amount, memo: "Προμηθευτές" },
+      { glAccountId: cash.id, credit: input.amount, memo: "Ταμείο / Τράπεζα" },
+    ],
+  });
+}
+
+/** COGS on stock OUT: Dr COGS / Cr Inventory */
+export async function tryPostCogsForInvoice(
+  db: Db,
+  input: {
+    tenantId: string;
+    invoiceId: string;
+    invoiceNumber: string;
+    lines: Array<{ productId: string | null; quantity: number }>;
+    cogsAccountCode?: string | null;
+    inventoryAccountCode?: string | null;
+    userId?: string | null;
+  },
+) {
+  const existing = await findPostedBySource(
+    db,
+    input.tenantId,
+    "invoice.cogs",
+    input.invoiceId,
+  );
+  if (existing) return existing;
+
+  const productIds = [
+    ...new Set(
+      input.lines.map((l) => l.productId).filter((id): id is string => !!id),
+    ),
+  ];
+  if (!productIds.length) return null;
+
+  const products = await db.product.findMany({
+    where: { tenantId: input.tenantId, id: { in: productIds } },
+    select: { id: true, averageCost: true, name: true },
+  });
+  const costById = new Map(
+    products.map((p) => [p.id, Number(p.averageCost ?? 0)]),
+  );
+
+  let totalCogs = 0;
+  for (const line of input.lines) {
+    if (!line.productId) continue;
+    const unit = costById.get(line.productId) ?? 0;
+    totalCogs = round2(totalCogs + unit * Math.abs(line.quantity));
+  }
+  if (totalCogs <= 0) return null;
+
+  const cogs = await findAccountByCode(
+    db,
+    input.tenantId,
+    input.cogsAccountCode ?? "64.01.00",
+  );
+  const inventory = await findAccountByCode(
+    db,
+    input.tenantId,
+    input.inventoryAccountCode ?? "20.00.00",
+  );
+  if (!cogs || !inventory) return null;
+
+  return createAndPostJournal(db, {
+    tenantId: input.tenantId,
+    description: `COGS ${input.invoiceNumber}`,
+    sourceType: "invoice.cogs",
+    sourceId: input.invoiceId,
+    createdByUserId: input.userId,
+    lines: [
+      { glAccountId: cogs.id, debit: totalCogs, memo: "Κόστος πωληθέντων" },
+      {
+        glAccountId: inventory.id,
+        credit: totalCogs,
+        memo: "Αποθέματα",
+      },
+    ],
   });
 }

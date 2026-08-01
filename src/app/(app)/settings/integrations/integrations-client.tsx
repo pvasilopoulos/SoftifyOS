@@ -9,6 +9,9 @@ type Integrations = {
   webhookSecretHint: string;
   skroutzEnabled: boolean;
   myDataEnv: "simulator" | "test" | "prod";
+  myDataUserId: string;
+  myDataSubscriptionKey: string;
+  hasMyDataSubscriptionKey: boolean;
   notes: string;
 };
 
@@ -42,12 +45,28 @@ export function IntegrationsClient({
           webhookSecretHint: form.webhookSecretHint || null,
           skroutzEnabled: form.skroutzEnabled,
           myDataEnv: form.myDataEnv,
+          myDataUserId: form.myDataUserId || null,
+          myDataSubscriptionKey:
+            form.myDataSubscriptionKey.trim() ||
+            (form.hasMyDataSubscriptionKey ? undefined : null),
           notes: form.notes || null,
         }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || "Αποτυχία");
-      setMessage("Οι integrations αποθηκεύτηκαν");
+      setMessage(
+        form.myDataEnv === "simulator"
+          ? "Οι integrations αποθηκεύτηκαν (simulator)"
+          : "Οι integrations αποθηκεύτηκαν — live AADE ενεργό όταν υπάρχουν credentials",
+      );
+      setForm((f) => ({
+        ...f,
+        myDataSubscriptionKey: "",
+        hasMyDataSubscriptionKey: Boolean(
+          data.integrations?.hasMyDataSubscriptionKey ??
+            (f.hasMyDataSubscriptionKey || Boolean(form.myDataSubscriptionKey)),
+        ),
+      }));
       router.refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Σφάλμα");
@@ -108,9 +127,13 @@ export function IntegrationsClient({
       </section>
 
       <section className="soft-panel space-y-4 p-5">
-        <h2 className="text-sm font-semibold text-ink-950">Υπηρεσίες</h2>
+        <h2 className="text-sm font-semibold text-ink-950">myDATA / ΑΑΔΕ</h2>
+        <p className="text-xs text-slate-500">
+          Test/Prod καλούν πραγματικά το SendInvoices της ΑΑΔΕ (XML + headers).
+          Απαιτούνται user id &amp; subscription key από το myDATA REST API registry.
+        </p>
         <label className="block text-xs text-slate-600">
-          myDATA περιβάλλον
+          Περιβάλλον
           <select
             disabled={!canWrite}
             value={form.myDataEnv}
@@ -123,9 +146,40 @@ export function IntegrationsClient({
             className={inputClass}
           >
             <option value="simulator">Simulator (τοπικό)</option>
-            <option value="test">AADE Test</option>
-            <option value="prod">AADE Production</option>
+            <option value="test">AADE Test (mydataapidev)</option>
+            <option value="prod">AADE Production (mydatapi)</option>
           </select>
+        </label>
+        <label className="block text-xs text-slate-600">
+          aade-user-id
+          <input
+            disabled={!canWrite}
+            value={form.myDataUserId}
+            onChange={(e) =>
+              setForm((f) => ({ ...f, myDataUserId: e.target.value }))
+            }
+            className={inputClass}
+            autoComplete="off"
+            placeholder="username από ΑΑΔΕ registry"
+          />
+        </label>
+        <label className="block text-xs text-slate-600">
+          ocp-apim-subscription-key
+          <input
+            disabled={!canWrite}
+            type="password"
+            value={form.myDataSubscriptionKey}
+            onChange={(e) =>
+              setForm((f) => ({ ...f, myDataSubscriptionKey: e.target.value }))
+            }
+            className={inputClass}
+            autoComplete="new-password"
+            placeholder={
+              form.hasMyDataSubscriptionKey
+                ? "Αποθηκευμένο — άφησε κενό για διατήρηση"
+                : "subscription key"
+            }
+          />
         </label>
         <label className="flex items-center gap-2 text-sm text-slate-700">
           <input
@@ -165,10 +219,6 @@ export function IntegrationsClient({
             </li>
           ))}
         </ul>
-        <p className="text-xs text-slate-500">
-          Τα API keys session-based είναι μέσω login cookie. Για εξωτερικά
-          secrets χρησιμοποίησε Script Secrets στις ρυθμίσεις hooks.
-        </p>
       </section>
 
       {canWrite ? (

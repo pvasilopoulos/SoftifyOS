@@ -95,6 +95,7 @@ export async function POST(
     });
 
     let journalId: string | null = null;
+    let cogsJournalId: string | null = null;
     try {
       const journal = await tryPostInvoiceIssue(prisma, {
         tenantId: session.tenantId,
@@ -119,6 +120,7 @@ export async function POST(
       movements: string[];
       siteId?: string;
     } | null = null;
+    const inventoryEffect = invoice.series?.affectsInventory ?? "NONE";
     try {
       const { applyInvoiceInventoryEffect } = await import(
         "@/modules/inventory/service"
@@ -128,7 +130,7 @@ export async function POST(
         invoiceId: invoice.id,
         invoiceNumber: updated.number,
         siteId: invoice.siteId ?? invoice.series?.siteId,
-        effect: invoice.series?.affectsInventory ?? "NONE",
+        effect: inventoryEffect,
         lines: invoice.lines.map((l) => ({
           productId: l.productId,
           quantity: toNumber(l.quantity),
@@ -139,6 +141,27 @@ export async function POST(
       });
     } catch {
       stockMeta = null;
+    }
+
+    if (inventoryEffect === "OUT") {
+      try {
+        const { tryPostCogsForInvoice } = await import(
+          "@/modules/ledger/service"
+        );
+        const cogs = await tryPostCogsForInvoice(prisma, {
+          tenantId: session.tenantId,
+          invoiceId: invoice.id,
+          invoiceNumber: updated.number,
+          lines: invoice.lines.map((l) => ({
+            productId: l.productId,
+            quantity: toNumber(l.quantity),
+          })),
+          userId: session.sub,
+        });
+        cogsJournalId = cogs?.id ?? null;
+      } catch {
+        cogsJournalId = null;
+      }
     }
 
     let myDataId: string | null = null;
@@ -174,7 +197,13 @@ export async function POST(
       action: "invoice.issue",
       entity: "invoice",
       entityId: invoice.id,
-      meta: { number: updated.number, journalId, stock: stockMeta, myDataId },
+      meta: {
+        number: updated.number,
+        journalId,
+        cogsJournalId,
+        stock: stockMeta,
+        myDataId,
+      },
     });
 
     const after = await dispatchScriptEvent(prisma, {
@@ -191,6 +220,7 @@ export async function POST(
         vatAmount: toNumber(updated.vatAmount),
         issuedAt: updated.issuedAt?.toISOString() ?? null,
         journalId,
+        cogsJournalId,
         myDataId,
       },
       previous: issueRecord,
@@ -203,6 +233,7 @@ export async function POST(
           id: updated.id,
           status: updated.status,
           journalId,
+          cogsJournalId,
           stock: stockMeta,
           myDataId,
         },
@@ -216,6 +247,7 @@ export async function POST(
         id: updated.id,
         status: updated.status,
         journalId,
+        cogsJournalId,
         stock: stockMeta,
         myDataId,
       },

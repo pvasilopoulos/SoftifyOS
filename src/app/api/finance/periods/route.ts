@@ -7,6 +7,7 @@ import { getErrorMessage } from "@/shared/lib/safe";
 import { periodActionSchema } from "@/modules/ledger/schemas";
 import {
   closeFiscalPeriod,
+  closeFiscalYear,
   listFiscalPeriods,
   reopenFiscalPeriod,
 } from "@/modules/ledger/periods";
@@ -46,6 +47,35 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
     const body = periodActionSchema.parse(await request.json());
+
+    if (body.action === "close-year") {
+      const result = await closeFiscalYear(prisma, {
+        tenantId: session.tenantId,
+        year: body.year,
+        userId: session.sub,
+        createOpenings: body.createOpenings,
+      });
+      await writeAuditEvent({
+        tenantId: session.tenantId,
+        userId: session.sub,
+        action: "finance.period.close-year",
+        entity: "fiscal_period",
+        entityId: result.yearPeriod.id,
+        meta: {
+          year: body.year,
+          netIncome: result.netIncome,
+          closeJournalId: result.closeJournal?.id,
+          openingJournalId: result.openingJournal?.id,
+        },
+      });
+      return NextResponse.json({
+        item: result.yearPeriod,
+        closeJournal: result.closeJournal,
+        openingJournal: result.openingJournal,
+        netIncome: result.netIncome,
+      });
+    }
+
     const item =
       body.action === "close"
         ? await closeFiscalPeriod(prisma, {

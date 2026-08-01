@@ -12,6 +12,8 @@ const schema = z.object({
   webhookSecretHint: z.string().trim().max(80).optional().nullable(),
   skroutzEnabled: z.boolean().optional(),
   myDataEnv: z.enum(["simulator", "test", "prod"]).optional(),
+  myDataUserId: z.string().trim().max(120).optional().nullable(),
+  myDataSubscriptionKey: z.string().trim().max(200).optional().nullable(),
   notes: z.string().trim().max(2000).optional().nullable(),
 });
 
@@ -20,8 +22,16 @@ type Integrations = {
   webhookSecretHint?: string | null;
   skroutzEnabled?: boolean;
   myDataEnv?: "simulator" | "test" | "prod";
+  myDataUserId?: string | null;
+  myDataSubscriptionKey?: string | null;
   notes?: string | null;
 };
+
+function maskKey(key: string | null | undefined) {
+  if (!key) return "";
+  if (key.length <= 8) return "••••";
+  return `${key.slice(0, 4)}…${key.slice(-4)}`;
+}
 
 async function ensureSettings(tenantId: string) {
   return prisma.tenantSettings.upsert({
@@ -45,6 +55,9 @@ export async function GET() {
         webhookSecretHint: integrations.webhookSecretHint ?? "",
         skroutzEnabled: Boolean(integrations.skroutzEnabled),
         myDataEnv: integrations.myDataEnv ?? "simulator",
+        myDataUserId: integrations.myDataUserId ?? "",
+        myDataSubscriptionKeyHint: maskKey(integrations.myDataSubscriptionKey),
+        hasMyDataSubscriptionKey: Boolean(integrations.myDataSubscriptionKey),
         notes: integrations.notes ?? "",
       },
       endpoints: {
@@ -88,6 +101,21 @@ export async function PUT(request: Request) {
         ? { skroutzEnabled: body.skroutzEnabled }
         : {}),
       ...(body.myDataEnv !== undefined ? { myDataEnv: body.myDataEnv } : {}),
+      ...(body.myDataUserId !== undefined
+        ? { myDataUserId: body.myDataUserId || null }
+        : {}),
+      ...(body.myDataSubscriptionKey !== undefined
+        ? {
+            myDataSubscriptionKey:
+              body.myDataSubscriptionKey === "" ||
+              body.myDataSubscriptionKey == null
+                ? null
+                : body.myDataSubscriptionKey.startsWith("••••") ||
+                    body.myDataSubscriptionKey.includes("…")
+                  ? prev.myDataSubscriptionKey
+                  : body.myDataSubscriptionKey,
+          }
+        : {}),
       ...(body.notes !== undefined ? { notes: body.notes || null } : {}),
     };
 
@@ -102,10 +130,21 @@ export async function PUT(request: Request) {
       action: "integrations.update",
       entity: "tenant_settings",
       entityId: current?.id,
-      meta: { keys: Object.keys(body) },
+      meta: {
+        keys: Object.keys(body).filter((k) => k !== "myDataSubscriptionKey"),
+        myDataEnv: next.myDataEnv,
+        hasMyDataKey: Boolean(next.myDataSubscriptionKey),
+      },
     });
 
-    return NextResponse.json({ integrations: next });
+    return NextResponse.json({
+      integrations: {
+        ...next,
+        myDataSubscriptionKey: undefined,
+        myDataSubscriptionKeyHint: maskKey(next.myDataSubscriptionKey),
+        hasMyDataSubscriptionKey: Boolean(next.myDataSubscriptionKey),
+      },
+    });
   } catch (error) {
     if (error instanceof z.ZodError) {
       return NextResponse.json({ error: "Μη έγκυρα δεδομένα" }, { status: 400 });

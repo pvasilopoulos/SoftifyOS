@@ -98,6 +98,9 @@ model Tenant {
   fixedAssets                  FixedAsset[]
   fixedAssetMovements          FixedAssetMovement[]
   purchaseInvoices             PurchaseInvoice[]
+  parallelLedgers              ParallelLedger[]
+  costAllocations              CostAllocation[]
+  intercompanyMatches          IntercompanyMatch[]
   unitsOfMeasure               UnitOfMeasure[]
   tenantSettings               TenantSettings?
   appRoles                     AppRole[]
@@ -729,7 +732,7 @@ enum MyDataSubmissionStatus {
   CANCELLED
 }
 
-/// Ουρά διαβίβασης myDATA / ΑΑΔΕ (τοπική · χωρίς live AADE client ακόμη)
+/// Ουρά διαβίβασης myDATA / ΑΑΔΕ (simulator / test / live prod)
 model MyDataSubmission {
   id           String                 @id @default(cuid())
   tenantId     String
@@ -2241,6 +2244,7 @@ model GlAccount {
   assetsAsAccumDepr  FixedAsset[] @relation("FixedAssetAccum")
   assetsAsDeprExp    FixedAsset[] @relation("FixedAssetDeprExp")
   purchaseInvoiceLines PurchaseInvoiceLine[]
+  costAllocations    CostAllocation[] @relation("AllocationAccount")
 
   @@unique([tenantId, code])
   @@index([tenantId, type, isActive])
@@ -2288,6 +2292,8 @@ model LegalEntity {
   lines   JournalLine[]
   assets  FixedAsset[]
   purchaseInvoices PurchaseInvoice[]
+  icMatchesA IntercompanyMatch[] @relation("IcEntityA")
+  icMatchesB IntercompanyMatch[] @relation("IcEntityB")
 
   @@unique([tenantId, code])
   @@index([tenantId, isActive])
@@ -2310,41 +2316,68 @@ model CostCenter {
   lines    JournalLine[]
   assets   FixedAsset[]
   purchaseInvoiceLines PurchaseInvoiceLine[]
+  allocationsFrom CostAllocation[] @relation("AllocationSource")
+  allocationTargets CostAllocationTarget[] @relation("AllocationTarget")
 
   @@unique([tenantId, code])
   @@index([tenantId, isActive])
   @@map("cost_centers")
 }
 
-model JournalEntry {
-  id              String        @id @default(cuid())
-  tenantId        String
-  number          String
-  status          JournalStatus @default(DRAFT)
-  description     String?
-  sourceType      String?
-  sourceId        String?
-  fiscalPeriodId  String?
-  entryDate       DateTime      @default(now())
-  isOpening       Boolean       @default(false)
-  reversesId      String?       @unique
-  postedAt        DateTime?
-  voidedAt        DateTime?
-  createdByUserId String?
-  createdAt       DateTime      @default(now())
-  updatedAt       DateTime      @updatedAt
+model ParallelLedger {
+  id        String   @id @default(cuid())
+  tenantId  String
+  code      String
+  name      String
+  /// STATUTORY | IFRS | MANAGEMENT | TAX
+  kind      String   @default("STATUTORY")
+  isDefault Boolean  @default(false)
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
-  tenant       Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  fiscalPeriod FiscalPeriod?  @relation(fields: [fiscalPeriodId], references: [id], onDelete: SetNull)
-  reverses     JournalEntry?  @relation("JournalReversal", fields: [reversesId], references: [id], onDelete: SetNull)
-  reversedBy   JournalEntry?  @relation("JournalReversal")
-  lines        JournalLine[]
+  tenant   Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  journals JournalEntry[]
+
+  @@unique([tenantId, code])
+  @@index([tenantId, isActive])
+  @@map("parallel_ledgers")
+}
+
+model JournalEntry {
+  id               String        @id @default(cuid())
+  tenantId         String
+  number           String
+  status           JournalStatus @default(DRAFT)
+  description      String?
+  sourceType       String?
+  sourceId         String?
+  fiscalPeriodId   String?
+  parallelLedgerId String?
+  entryDate        DateTime      @default(now())
+  isOpening        Boolean       @default(false)
+  reversesId       String?       @unique
+  postedAt         DateTime?
+  voidedAt         DateTime?
+  createdByUserId  String?
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
+
+  tenant         Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  fiscalPeriod   FiscalPeriod?   @relation(fields: [fiscalPeriodId], references: [id], onDelete: SetNull)
+  parallelLedger ParallelLedger? @relation(fields: [parallelLedgerId], references: [id], onDelete: SetNull)
+  reverses       JournalEntry?   @relation("JournalReversal", fields: [reversesId], references: [id], onDelete: SetNull)
+  reversedBy     JournalEntry?   @relation("JournalReversal")
+  lines          JournalLine[]
   assetMovements FixedAssetMovement[]
+  costAllocations CostAllocation[]
+  intercompanyMatches IntercompanyMatch[]
 
   @@unique([tenantId, number])
   @@index([tenantId, status, postedAt])
   @@index([tenantId, sourceType, sourceId])
   @@index([tenantId, entryDate])
+  @@index([tenantId, parallelLedgerId])
   @@map("journal_entries")
 }
 
@@ -2364,12 +2397,102 @@ model JournalLine {
   glAccount    GlAccount    @relation(fields: [glAccountId], references: [id], onDelete: Restrict)
   costCenter   CostCenter?  @relation(fields: [costCenterId], references: [id], onDelete: SetNull)
   legalEntity  LegalEntity? @relation(fields: [legalEntityId], references: [id], onDelete: SetNull)
+  icMatchLinesA IntercompanyMatchLine[] @relation("IcLineA")
+  icMatchLinesB IntercompanyMatchLine[] @relation("IcLineB")
 
   @@index([tenantId, journalEntryId])
   @@index([tenantId, glAccountId])
   @@index([tenantId, costCenterId])
   @@index([tenantId, legalEntityId])
   @@map("journal_lines")
+}
+
+/// Κατανομή κόστους μεταξύ κέντρων κόστους (CO)
+model CostAllocation {
+  id               String   @id @default(cuid())
+  tenantId         String
+  code             String
+  name             String
+  /// EQUAL | PERCENT | DRIVER
+  method           String   @default("PERCENT")
+  sourceCostCenterId String
+  glAccountId      String
+  amount           Decimal  @db.Decimal(14, 2)
+  status           String   @default("DRAFT")
+  journalEntryId   String?
+  postedAt         DateTime?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  tenant           Tenant      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  sourceCostCenter CostCenter  @relation("AllocationSource", fields: [sourceCostCenterId], references: [id], onDelete: Restrict)
+  glAccount        GlAccount   @relation("AllocationAccount", fields: [glAccountId], references: [id], onDelete: Restrict)
+  journalEntry     JournalEntry? @relation(fields: [journalEntryId], references: [id], onDelete: SetNull)
+  targets          CostAllocationTarget[]
+
+  @@unique([tenantId, code])
+  @@index([tenantId, status])
+  @@map("cost_allocations")
+}
+
+model CostAllocationTarget {
+  id               String  @id @default(cuid())
+  tenantId         String
+  allocationId     String
+  costCenterId     String
+  /// Percent 0-100 or driver weight
+  weight           Decimal @default(0) @db.Decimal(10, 4)
+  amount           Decimal @default(0) @db.Decimal(14, 2)
+
+  allocation CostAllocation @relation(fields: [allocationId], references: [id], onDelete: Cascade)
+  costCenter CostCenter     @relation("AllocationTarget", fields: [costCenterId], references: [id], onDelete: Restrict)
+
+  @@index([tenantId, allocationId])
+  @@map("cost_allocation_targets")
+}
+
+/// Διαταιρική αντιστοίχιση για consolidation eliminations
+model IntercompanyMatch {
+  id              String   @id @default(cuid())
+  tenantId        String
+  code            String
+  legalEntityAId  String
+  legalEntityBId  String
+  amount          Decimal  @db.Decimal(14, 2)
+  status          String   @default("OPEN")
+  /// OPEN | MATCHED | ELIMINATED
+  difference      Decimal  @default(0) @db.Decimal(14, 2)
+  journalEntryId  String?
+  notes           String?
+  matchedAt       DateTime?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  tenant       Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  legalEntityA LegalEntity   @relation("IcEntityA", fields: [legalEntityAId], references: [id], onDelete: Restrict)
+  legalEntityB LegalEntity   @relation("IcEntityB", fields: [legalEntityBId], references: [id], onDelete: Restrict)
+  journalEntry JournalEntry? @relation(fields: [journalEntryId], references: [id], onDelete: SetNull)
+  lines        IntercompanyMatchLine[]
+
+  @@unique([tenantId, code])
+  @@index([tenantId, status])
+  @@map("intercompany_matches")
+}
+
+model IntercompanyMatchLine {
+  id        String  @id @default(cuid())
+  tenantId  String
+  matchId   String
+  lineAId   String?
+  lineBId   String?
+  amount    Decimal @db.Decimal(14, 2)
+
+  match IntercompanyMatch @relation(fields: [matchId], references: [id], onDelete: Cascade)
+  lineA JournalLine?      @relation("IcLineA", fields: [lineAId], references: [id], onDelete: SetNull)
+  lineB JournalLine?      @relation("IcLineB", fields: [lineBId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, matchId])
+  @@map("intercompany_match_lines")
 }
 
 model FixedAsset {

@@ -9,7 +9,10 @@ import {
   ensureCurrentFiscalYear,
 } from "@/modules/ledger/service";
 import { listFiscalPeriods } from "@/modules/ledger/periods";
-import { ensureDefaultLegalEntity } from "@/modules/ledger/controlling";
+import {
+  ensureDefaultLegalEntity,
+  ensureDefaultParallelLedger,
+} from "@/modules/ledger/controlling";
 import { toNumber } from "@/modules/sales/invoice-utils";
 import {
   loadApRows,
@@ -34,6 +37,7 @@ export default async function FinancePage() {
     session.tenantId,
     session.tenantName,
   );
+  await ensureDefaultParallelLedger(prisma, session.tenantId);
 
   const year = new Date().getFullYear();
   const vatFrom = new Date(`${year}-01-01T00:00:00.000Z`);
