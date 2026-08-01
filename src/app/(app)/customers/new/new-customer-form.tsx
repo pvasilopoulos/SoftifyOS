@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { ArrowLeft } from "lucide-react";
@@ -12,8 +12,10 @@ import {
   type CustomFieldDef,
 } from "@/modules/entity-views/dynamic-ui";
 import { ViewSwitcher } from "@/modules/entity-views/view-switcher";
+import { applyFieldDefaults } from "@/modules/entity-views/form-rules";
 import {
   collectRequiredErrors,
+  normalizeFormConfig,
   type CustomFieldsMap,
   type FormViewConfig,
 } from "@/modules/entity-views/types";
@@ -30,10 +32,12 @@ export function NewCustomerForm({
   formViews,
   initialFormId,
   customFields,
+  role,
 }: {
   formViews: FormViewOpt[];
   initialFormId: string;
   customFields: CustomFieldDef[];
+  role?: string | null;
 }) {
   const router = useRouter();
   const [formId, setFormId] = useState(initialFormId);
@@ -44,10 +48,33 @@ export function NewCustomerForm({
   });
   const [customValues, setCustomValues] = useState<CustomFieldsMap>({});
 
-  const active = useMemo(
-    () => formViews.find((f) => f.id === formId) ?? formViews[0] ?? null,
-    [formViews, formId],
+  const publishedViews = useMemo(
+    () =>
+      formViews.filter((f) => {
+        const life = normalizeFormConfig(f.config).lifecycle ?? "published";
+        return life === "published";
+      }),
+    [formViews],
   );
+
+  const active = useMemo(
+    () =>
+      publishedViews.find((f) => f.id === formId) ??
+      publishedViews[0] ??
+      null,
+    [publishedViews, formId],
+  );
+
+  useEffect(() => {
+    if (!active) return;
+    const seeded = applyFieldDefaults(
+      normalizeFormConfig(active.config),
+      { status: "ACTIVE" },
+      {},
+    );
+    setValues(seeded.values);
+    setCustomValues(seeded.customValues);
+  }, [active?.id]);
 
   const [beforeSubmitFn, setBeforeSubmitFn] = useState<
     (() => Promise<{ ok: boolean; error?: string }>) | null
@@ -117,8 +144,8 @@ export function NewCustomerForm({
         />
         <ViewSwitcher
           label="Φόρμα"
-          views={formViews}
-          value={formId}
+          views={publishedViews}
+          value={active?.id ?? formId}
           onChange={setFormId}
         />
       </div>
@@ -146,6 +173,7 @@ export function NewCustomerForm({
             disabled={pending}
             entityModule="CUSTOMERS"
             modeOverride="create"
+            role={role}
             onScriptFail={(msg) => setError(msg)}
             onBeforeSubmitReady={(fn) => setBeforeSubmitFn(() => fn)}
           />

@@ -36,6 +36,7 @@ export default async function NewCustomerPage({
     <NewCustomerForm
       formViews={serialized}
       initialFormId={initial?.id ?? ""}
+      role={session.role}
       customFields={customFields.map((f) => ({
         code: f.code,
         label: f.label,

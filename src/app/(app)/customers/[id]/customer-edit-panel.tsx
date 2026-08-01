@@ -30,6 +30,7 @@ export function CustomerEditPanel({
   formViews,
   customFields,
   canEdit,
+  role,
 }: {
   customerId: string;
   initial: {
@@ -45,6 +46,7 @@ export function CustomerEditPanel({
   formViews: FormViewOpt[];
   customFields: CustomFieldDef[];
   canEdit: boolean;
+  role?: string | null;
 }) {
   const router = useRouter();
   const defaultForm =
@@ -194,6 +196,7 @@ export function CustomerEditPanel({
         disabled={!editing || pending}
         entityModule="CUSTOMERS"
         modeOverride="edit"
+        role={role}
         onScriptFail={(msg) => setError(msg)}
       />
     </section>

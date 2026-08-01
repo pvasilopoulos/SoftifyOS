@@ -85,6 +85,7 @@ type Props = {
   customFields: CustomFieldDef[];
   canWrite: boolean;
   detailLayout: DetailLayoutConfig;
+  role?: string | null;
 };
 
 export function Customer360({
@@ -100,6 +101,7 @@ export function Customer360({
   customFields,
   canWrite,
   detailLayout,
+  role,
 }: Props) {
   const visibleTabs = useMemo(
     () => detailLayout.tabs.filter((t) => t.visible),
@@ -294,6 +296,7 @@ export function Customer360({
               canEdit={canWrite}
               formViews={formViews}
               customFields={customFields}
+              role={role}
               initial={{
                 code: customer.code,
                 name: customer.name,

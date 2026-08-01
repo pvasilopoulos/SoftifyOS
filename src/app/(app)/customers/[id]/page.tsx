@@ -157,6 +157,7 @@ export default async function CustomerDetailPage({
       <Customer360
         customerId={customer.id}
         canWrite={session.role !== "VIEWER"}
+        role={session.role}
         openBalance={openBalance}
         openInvoices={openInvoices.length}
         detailLayout={detailLayout}
