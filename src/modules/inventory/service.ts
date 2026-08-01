@@ -23,6 +23,13 @@ export async function resolveStockSiteId(
     if (site) return site.id;
   }
 
+  const warehouse = await db.site.findFirst({
+    where: { tenantId, isActive: true, kind: "WAREHOUSE" },
+    orderBy: { createdAt: "asc" },
+    select: { id: true },
+  });
+  if (warehouse) return warehouse.id;
+
   const branch = await db.site.findFirst({
     where: { tenantId, isActive: true, kind: "BRANCH" },
     orderBy: { createdAt: "asc" },
@@ -43,7 +50,7 @@ export async function resolveStockSiteId(
       tenantId,
       code: "MAIN",
       name: "Κεντρική αποθήκη",
-      kind: "BRANCH",
+      kind: "WAREHOUSE",
       isActive: true,
     },
     select: { id: true },

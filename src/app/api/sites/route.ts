@@ -8,16 +8,25 @@ import { siteCreateSchema } from "@/modules/documents/schemas";
 
 export const dynamic = "force-dynamic";
 
-export async function GET() {
+export async function GET(request: Request) {
   try {
     const session = await getSession();
     if (!session) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
+    const kind = new URL(request.url).searchParams.get("kind");
     const items = await prisma.site.findMany({
-      where: { tenantId: session.tenantId },
+      where: {
+        tenantId: session.tenantId,
+        ...(kind === "BRANCH" || kind === "WAREHOUSE" || kind === "TILL"
+          ? { kind }
+          : {}),
+      },
       orderBy: [{ kind: "asc" }, { code: "asc" }],
-      include: { parent: { select: { id: true, code: true, name: true } } },
+      include: {
+        parent: { select: { id: true, code: true, name: true } },
+        _count: { select: { children: true, stockBins: true } },
+      },
     });
     return NextResponse.json({ items });
   } catch (error) {

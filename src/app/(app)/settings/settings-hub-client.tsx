@@ -13,6 +13,7 @@ import {
   Layers,
   ListChecks,
   Menu,
+  Network,
   Package,
   Plug,
   Printer,
@@ -52,6 +53,7 @@ type SettingsSection = {
 const ICONS = {
   Building2,
   Menu,
+  Network,
   Users,
   UserCog,
   UsersRound,
@@ -87,6 +89,16 @@ const SECTIONS: SettingsSection[] = [
         tone: "teal",
         icon: "Building2",
         keywords: "εταιρεία αφμ vat currency locale",
+      },
+      {
+        href: "/settings/org-structure",
+        title: "Οργανωτική δομή",
+        description:
+          "Tenants, Companies, Branches και Warehouses — New / Edit / Delete.",
+        badge: "Master",
+        tone: "teal",
+        icon: "Network",
+        keywords: "tenant company branch warehouse αποθήκη οργανισμός",
       },
       {
         href: "/settings/menu",

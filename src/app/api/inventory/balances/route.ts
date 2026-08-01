@@ -105,7 +105,11 @@ export async function GET(request: NextRequest) {
 
     const [sites, productCount, movementCount] = await Promise.all([
       prisma.site.findMany({
-        where: { tenantId: session.tenantId, isActive: true, kind: "BRANCH" },
+        where: {
+          tenantId: session.tenantId,
+          isActive: true,
+          kind: { in: ["WAREHOUSE", "BRANCH"] },
+        },
         orderBy: { name: "asc" },
         select: { id: true, code: true, name: true },
       }),

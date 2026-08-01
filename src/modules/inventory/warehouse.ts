@@ -107,7 +107,11 @@ export async function loadWarehouseDashboard(db: Db, tenantId: string) {
       },
     }),
     db.site.count({
-      where: { tenantId, isActive: true, kind: "BRANCH" },
+      where: {
+        tenantId,
+        isActive: true,
+        kind: { in: ["WAREHOUSE", "BRANCH"] },
+      },
     }),
     db.pickWave.count({
       where: {

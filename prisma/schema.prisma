@@ -1792,6 +1792,7 @@ model OrderLine {
 
 enum SiteKind {
   BRANCH
+  WAREHOUSE
   TILL
 }
 

@@ -38,7 +38,11 @@ export default async function InventoryPage() {
       },
     }),
     prisma.site.findMany({
-      where: { tenantId: session.tenantId, isActive: true, kind: "BRANCH" },
+      where: {
+        tenantId: session.tenantId,
+        isActive: true,
+        kind: { in: ["WAREHOUSE", "BRANCH"] },
+      },
       orderBy: { name: "asc" },
       select: { id: true, code: true, name: true },
     }),
