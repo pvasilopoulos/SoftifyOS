@@ -26,10 +26,12 @@ export const documentKindSchema = z.enum(DOCUMENT_KINDS);
 export const siteCreateSchema = z.object({
   code: z.string().trim().min(1).max(40),
   name: z.string().trim().min(1).max(200),
-  kind: z.enum(["BRANCH", "TILL"]).default("BRANCH"),
+  kind: z.enum(["BRANCH", "WAREHOUSE", "TILL"]).default("BRANCH"),
   parentId: z.string().trim().min(1).optional().nullable(),
   isActive: z.boolean().optional(),
 });
+
+export const siteUpdateSchema = siteCreateSchema.partial();
 
 export const seriesCreateSchema = z.object({
   code: z.string().trim().min(1).max(40),

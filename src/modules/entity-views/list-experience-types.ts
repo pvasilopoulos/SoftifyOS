@@ -6,7 +6,8 @@ export type ListMode =
   | "compact"
   | "peek"
   | "cards"
-  | "kanban";
+  | "kanban"
+  | "map";
 export type ListLifecycle = "draft" | "published";
 export type ListDensity = "compact" | "comfortable" | "detailed";
 export type ListRowClick = "navigate" | "peek" | "none";
@@ -169,7 +170,7 @@ export function emptyListConfig(): ListViewConfig {
     sorts: [],
     pageSize: 50,
     rowActions: [
-      { id: "open", label: "Άνοιγμα", type: "navigate" },
+      { id: "open", label: "Άνοιγμα", type: "navigate", icon: "external-link" },
     ],
     bulkActions: [],
     rules: [],

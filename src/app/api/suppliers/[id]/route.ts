@@ -3,6 +3,7 @@ import { z } from "zod";
 import { prisma } from "@/server/db";
 import { getSession } from "@/platform/auth/session";
 import { writeAuditEvent } from "@/platform/tenancy/audit";
+import { buildChangeMeta } from "@/platform/tenancy/audit-diff";
 import { getErrorMessage } from "@/shared/lib/safe";
 
 export const dynamic = "force-dynamic";
@@ -37,6 +38,15 @@ export async function PATCH(
       return NextResponse.json({ error: "Δεν βρέθηκε" }, { status: 404 });
     }
     const body = patchSchema.parse(await request.json());
+    const before = {
+      code: existing.code,
+      name: existing.name,
+      vatNumber: existing.vatNumber,
+      email: existing.email,
+      phone: existing.phone,
+      notes: existing.notes,
+      status: existing.status,
+    };
     const item = await prisma.supplier.update({
       where: { id },
       data: {
@@ -51,12 +61,26 @@ export async function PATCH(
         ...(body.status !== undefined ? { status: body.status } : {}),
       },
     });
+    const after = {
+      code: item.code,
+      name: item.name,
+      vatNumber: item.vatNumber,
+      email: item.email,
+      phone: item.phone,
+      notes: item.notes,
+      status: item.status,
+    };
     await writeAuditEvent({
       tenantId: session.tenantId,
       userId: session.sub,
       action: "supplier.update",
       entity: "supplier",
       entityId: item.id,
+      meta: buildChangeMeta({
+        before,
+        after,
+        extra: { code: item.code },
+      }),
     });
     return NextResponse.json({
       item: {

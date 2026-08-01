@@ -9,68 +9,208 @@ import {
 } from "lucide-react";
 import { PageHeader } from "@/shared/ui/page-header";
 import { Badge } from "@/shared/ui/badge";
-import {
-  demoInvoices,
-  formatEUR,
-  statusLabel,
-  statusTone,
-} from "@/modules/sales/demo-data";
 import { getSession } from "@/platform/auth/session";
 import { prisma } from "@/server/db";
+import { toNumber } from "@/modules/sales/invoice-utils";
+import { loadArRows } from "@/modules/finance/analytics";
 
 export const metadata = { title: "Πίνακας ελέγχου" };
+export const dynamic = "force-dynamic";
 
-const kpis = [
-  { label: "Εισπράξεις μήνα", value: "€48.2κ", delta: "+12%" },
-  { label: "Open AR", value: "€126.4κ", delta: "−3%" },
-  { label: "Παραγγελίες σήμερα", value: "37", delta: "+5" },
-  { label: "Υγεία stock", value: "94%", delta: "σταθερό" },
-];
+function money(n: number) {
+  return n.toLocaleString("el-GR", {
+    style: "currency",
+    currency: "EUR",
+    maximumFractionDigits: 0,
+  });
+}
 
-const workQueue = [
-  {
-    id: "1",
-    title: "2 ληξιπρόθεσμα τιμολόγια",
-    meta: "Αιγαίο Foods · Αττική Supplies",
-    tone: "rose" as const,
-    icon: Receipt,
-  },
-  {
-    id: "2",
-    title: "Χαμηλό απόθεμα · SKU-1842",
-    meta: "Αποθήκη κεντρική · 6 τεμ.",
-    tone: "amber" as const,
-    icon: PackageMinus,
-  },
-  {
-    id: "3",
-    title: "Έγκριση αγοράς PO-2291",
-    meta: "Αναμονή από CFO",
-    tone: "teal" as const,
-    icon: Clock3,
-  },
-];
+const statusLabel: Record<string, string> = {
+  DRAFT: "Πρόχειρο",
+  ISSUED: "Εκδομένο",
+  PARTIAL: "Μερικό",
+  PAID: "Εξοφλημένο",
+  OVERDUE: "Ληξιπρόθεσμο",
+  CANCELLED: "Ακυρωμένο",
+};
+
+const statusTone: Record<string, "slate" | "teal" | "amber" | "rose" | "emerald"> = {
+  DRAFT: "slate",
+  ISSUED: "teal",
+  PARTIAL: "amber",
+  PAID: "emerald",
+  OVERDUE: "rose",
+  CANCELLED: "rose",
+};
 
 export default async function DashboardPage() {
   const session = await getSession();
   const firstName = session?.name?.split(/\s+/)[0] ?? "εκεί";
-  const recentAudits = session
-    ? await prisma.auditEvent.findMany({
-        where: { tenantId: session.tenantId },
-        orderBy: { createdAt: "desc" },
-        take: 5,
-      })
-    : [];
-  const recent = demoInvoices.slice(0, 5);
+
+  if (!session) {
+    return (
+      <div className="space-y-6">
+        <PageHeader title="Καλημέρα" description="Συνδεθείτε για ζωντανά δεδομένα." />
+      </div>
+    );
+  }
+
+  const tenantId = session.tenantId;
+  const startOfMonth = new Date();
+  startOfMonth.setDate(1);
+  startOfMonth.setHours(0, 0, 0, 0);
+  const startOfDay = new Date();
+  startOfDay.setHours(0, 0, 0, 0);
+
+  const [
+    monthPayments,
+    arRows,
+    ordersToday,
+    stockRows,
+    overdueInvoices,
+    lowStock,
+    draftPos,
+    recentInvoices,
+    recentAudits,
+  ] = await Promise.all([
+    prisma.invoicePayment.aggregate({
+      where: { tenantId, paidAt: { gte: startOfMonth } },
+      _sum: { amount: true },
+    }),
+    loadArRows(prisma, tenantId),
+    prisma.order.count({
+      where: { tenantId, createdAt: { gte: startOfDay } },
+    }),
+    prisma.stockBalance.findMany({
+      where: { tenantId },
+      select: { qtyOnHand: true },
+      take: 5000,
+    }),
+    prisma.invoice.findMany({
+      where: {
+        tenantId,
+        status: { in: ["ISSUED", "PARTIAL", "OVERDUE"] },
+        dueAt: { lt: new Date() },
+      },
+      take: 5,
+      orderBy: { dueAt: "asc" },
+      include: { customer: { select: { name: true } } },
+    }),
+    prisma.stockBalance.findMany({
+      where: { tenantId, qtyOnHand: { lte: 5 } },
+      take: 3,
+      orderBy: { qtyOnHand: "asc" },
+      include: {
+        product: { select: { sku: true, name: true } },
+        site: { select: { name: true } },
+      },
+    }),
+    prisma.purchaseOrder.count({
+      where: { tenantId, status: "DRAFT" },
+    }),
+    prisma.invoice.findMany({
+      where: { tenantId, status: { not: "DRAFT" } },
+      orderBy: [{ issuedAt: "desc" }, { createdAt: "desc" }],
+      take: 5,
+      include: { customer: { select: { name: true, code: true } } },
+    }),
+    prisma.auditEvent.findMany({
+      where: { tenantId },
+      orderBy: { createdAt: "desc" },
+      take: 5,
+    }),
+  ]);
+
+  const collections = toNumber(monthPayments._sum.amount ?? 0);
+  const openAr = arRows.reduce((s, r) => s + r.balance, 0);
+  const positiveStock = stockRows.filter((r) => Number(r.qtyOnHand) > 0).length;
+  const stockHealth =
+    stockRows.length === 0
+      ? 100
+      : Math.round((positiveStock / stockRows.length) * 100);
+
+  const kpis = [
+    {
+      label: "Εισπράξεις μήνα",
+      value: money(collections),
+      delta: `${startOfMonth.toLocaleDateString("el-GR", { month: "short" })}`,
+    },
+    {
+      label: "Open AR",
+      value: money(openAr),
+      delta: `${arRows.length} ανοιχτά`,
+    },
+    {
+      label: "Παραγγελίες σήμερα",
+      value: String(ordersToday),
+      delta: "live",
+    },
+    {
+      label: "Υγεία stock",
+      value: `${stockHealth}%`,
+      delta: `${stockRows.length} θέσεις`,
+    },
+  ];
+
+  const workQueue: Array<{
+    id: string;
+    title: string;
+    meta: string;
+    tone: "rose" | "amber" | "teal";
+    icon: typeof Receipt;
+    href: string;
+  }> = [];
+
+  if (overdueInvoices.length) {
+    workQueue.push({
+      id: "overdue",
+      title: `${overdueInvoices.length} ληξιπρόθεσμα τιμολόγια`,
+      meta: overdueInvoices.map((i) => i.customer.name).slice(0, 2).join(" · "),
+      tone: "rose",
+      icon: Receipt,
+      href: "/finance",
+    });
+  }
+  if (lowStock.length) {
+    const first = lowStock[0]!;
+    workQueue.push({
+      id: "stock",
+      title: `Χαμηλό απόθεμα · ${first.product.sku}`,
+      meta: `${first.site.name} · ${Number(first.qtyOnHand)} τεμ.`,
+      tone: "amber",
+      icon: PackageMinus,
+      href: "/inventory",
+    });
+  }
+  if (draftPos > 0) {
+    workQueue.push({
+      id: "po",
+      title: `${draftPos} πρόχειρες παραγγελίες αγοράς`,
+      meta: "Αναμονή επιβεβαίωσης",
+      tone: "teal",
+      icon: Clock3,
+      href: "/purchasing",
+    });
+  }
+  if (workQueue.length === 0) {
+    workQueue.push({
+      id: "ok",
+      title: "Καμία επείγουσα ενέργεια",
+      meta: "Το σύστημα είναι σε καλή κατάσταση",
+      tone: "teal",
+      icon: CheckCircle2,
+      href: "/reports",
+    });
+  }
 
   return (
     <div className="space-y-6">
       <PageHeader
         title={`Καλημέρα, ${firstName}`}
-        description={`Τι χρειάζεται ενέργεια σήμερα στην ${session?.tenantName ?? "οργανισμό"}.`}
+        description={`Τι χρειάζεται ενέργεια σήμερα στην ${session.tenantName}.`}
         actions={
           <Link
-            href="/invoices?new=1"
+            href="/invoices/new"
             className="hidden h-10 items-center justify-center rounded-xl bg-teal-600 px-4 text-sm font-medium text-white shadow-sm shadow-teal-900/10 hover:bg-teal-700 sm:inline-flex"
           >
             Νέο τιμολόγιο
@@ -112,26 +252,30 @@ export default async function DashboardPage() {
               <h2 className="text-base font-semibold text-ink-950">
                 Χρειάζεται ενέργεια
               </h2>
-              <p className="text-sm text-slate-500">Work queue · σήμερα</p>
+              <p className="text-sm text-slate-500">Work queue · live</p>
             </div>
-            <Badge tone="amber">3 ανοιχτά</Badge>
+            <Badge tone="amber">{workQueue.length} ανοιχτά</Badge>
           </div>
           <ul className="space-y-2.5">
             {workQueue.map((item) => {
               const Icon = item.icon;
               return (
-                <li
-                  key={item.id}
-                  className="flex items-start gap-3 rounded-2xl border border-slate-100 bg-slate-50/70 px-3.5 py-3"
-                >
-                  <span className="mt-0.5 flex h-9 w-9 items-center justify-center rounded-xl bg-white text-teal-700 shadow-sm">
-                    <Icon size={16} />
-                  </span>
-                  <div className="min-w-0 flex-1">
-                    <p className="text-sm font-medium text-ink-900">{item.title}</p>
-                    <p className="text-xs text-slate-500">{item.meta}</p>
-                  </div>
-                  <Badge tone={item.tone}>ενέργεια</Badge>
+                <li key={item.id}>
+                  <Link
+                    href={item.href}
+                    className="flex items-start gap-3 rounded-2xl border border-slate-100 bg-slate-50/70 px-3.5 py-3 hover:bg-slate-50"
+                  >
+                    <span className="mt-0.5 flex h-9 w-9 items-center justify-center rounded-xl bg-white text-teal-700 shadow-sm">
+                      <Icon size={16} />
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-medium text-ink-900">
+                        {item.title}
+                      </p>
+                      <p className="text-xs text-slate-500">{item.meta}</p>
+                    </div>
+                    <Badge tone={item.tone}>ενέργεια</Badge>
+                  </Link>
                 </li>
               );
             })}
@@ -154,30 +298,52 @@ export default async function DashboardPage() {
             </Link>
           </div>
           <ul className="space-y-2">
-            {recent.map((inv) => (
-              <li key={inv.id}>
-                <Link
-                  href={`/invoices/${inv.id}`}
-                  className="flex items-center gap-3 rounded-2xl px-2 py-2 hover:bg-slate-50"
-                >
-                  <span className="flex h-9 w-9 items-center justify-center rounded-full bg-ink-950 text-[11px] font-semibold text-white">
-                    {inv.initials}
-                  </span>
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate text-sm font-medium text-ink-900">
-                      {inv.number}
-                    </p>
-                    <p className="truncate text-xs text-slate-500">{inv.customer}</p>
-                  </div>
-                  <div className="text-right">
-                    <p className="text-sm font-medium">{formatEUR(inv.amount)}</p>
-                    <Badge tone={statusTone[inv.status]} className="mt-1">
-                      {statusLabel[inv.status]}
-                    </Badge>
-                  </div>
-                </Link>
+            {recentInvoices.map((inv) => {
+              const initials = inv.customer.name
+                .split(/\s+/)
+                .slice(0, 2)
+                .map((w) => w[0]?.toUpperCase() ?? "")
+                .join("");
+              return (
+                <li key={inv.id}>
+                  <Link
+                    href={`/invoices/${inv.id}`}
+                    className="flex items-center gap-3 rounded-2xl px-2 py-2 hover:bg-slate-50"
+                  >
+                    <span className="flex h-9 w-9 items-center justify-center rounded-full bg-ink-950 text-[11px] font-semibold text-white">
+                      {initials || "—"}
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm font-medium text-ink-900">
+                        {inv.number}
+                      </p>
+                      <p className="truncate text-xs text-slate-500">
+                        {inv.customer.name}
+                      </p>
+                    </div>
+                    <div className="text-right">
+                      <p className="text-sm font-medium">
+                        {toNumber(inv.total).toLocaleString("el-GR", {
+                          style: "currency",
+                          currency: "EUR",
+                        })}
+                      </p>
+                      <Badge
+                        tone={statusTone[inv.status] ?? "slate"}
+                        className="mt-1"
+                      >
+                        {statusLabel[inv.status] ?? inv.status}
+                      </Badge>
+                    </div>
+                  </Link>
+                </li>
+              );
+            })}
+            {recentInvoices.length === 0 ? (
+              <li className="px-2 py-8 text-center text-sm text-slate-500">
+                Δεν υπάρχουν ακόμη τιμολόγια.
               </li>
-            ))}
+            ) : null}
           </ul>
         </section>
       </div>
@@ -188,16 +354,15 @@ export default async function DashboardPage() {
             <CheckCircle2 size={18} />
           </span>
           <div>
-            <p className="font-medium text-ink-950">Phase 0 platform ενεργό</p>
+            <p className="font-medium text-ink-950">Live ERP δεδομένα</p>
             <p className="text-sm text-slate-500">
-              Auth + tenant session · audit events: {recentAudits.length} πρόσφατα · role{" "}
-              {session?.role}
+              Audit: {recentAudits.length} πρόσφατα · role {session.role}
             </p>
           </div>
         </div>
         <div className="flex items-center gap-2 text-xs text-slate-500">
           <AlertTriangle size={14} className="text-amber-500" />
-          ERP modules ακόμα με demo data
+          myDATA σε simulator mode · χωρίς live AADE ακόμη
         </div>
       </section>
     </div>

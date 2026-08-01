@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/server/db";
 import { getSession } from "@/platform/auth/session";
 import { writeAuditEvent } from "@/platform/tenancy/audit";
+import { buildChangeMeta } from "@/platform/tenancy/audit-diff";
 import { getErrorMessage } from "@/shared/lib/safe";
 import { calcInvoiceTotals, toNumber } from "@/modules/sales/invoice-utils";
 import { invoiceUpdateSchema } from "@/modules/sales/schemas";
@@ -221,12 +222,36 @@ export async function PATCH(
       });
     });
 
+    const afterSnapshot: Record<string, unknown> = {
+      id: updated.id,
+      number: updated.number,
+      status: updated.status,
+      notes: updated.notes,
+      branchId: updated.branchId,
+      spaceId: updated.spaceId,
+      dueAt: updated.dueAt?.toISOString() ?? null,
+      total: toNumber(updated.total),
+      subtotal: toNumber(updated.subtotal),
+      vatAmount: toNumber(updated.vatAmount),
+      lineCount: updated.lines.length,
+    };
+
     await writeAuditEvent({
       tenantId: session.tenantId,
       userId: session.sub,
       action: "invoice.update",
       entity: "invoice",
       entityId: invoice.id,
+      meta: buildChangeMeta({
+        before: {
+          ...previous,
+          dueAt: invoice.dueAt?.toISOString() ?? null,
+          subtotal: toNumber(invoice.subtotal),
+          vatAmount: toNumber(invoice.vatAmount),
+        },
+        after: afterSnapshot,
+        extra: { number: updated.number },
+      }),
     });
 
     const item = {

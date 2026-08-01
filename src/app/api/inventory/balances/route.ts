@@ -28,7 +28,7 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: "Invalid query" }, { status: 400 });
     }
 
-    const { q, siteId, limit } = parsed.data;
+    const { q, siteId, limit, lowStock } = parsed.data;
     const rows = await prisma.stockBalance.findMany({
       where: {
         tenantId: session.tenantId,
@@ -45,7 +45,7 @@ export async function GET(request: NextRequest) {
             }
           : {}),
       },
-      take: limit,
+      take: lowStock ? 500 : limit,
       orderBy: [{ updatedAt: "desc" }],
       include: {
         product: {
@@ -56,30 +56,60 @@ export async function GET(request: NextRequest) {
             unit: true,
             status: true,
             trackInventory: true,
+            reorderPoint: true,
+            averageCost: true,
+            barcode: true,
           },
         },
         site: { select: { id: true, code: true, name: true } },
+        bin: { select: { id: true, code: true, name: true } },
       },
     });
 
-    const items = rows.map((r) => ({
-      id: r.id,
-      productId: r.productId,
-      sku: r.product.sku,
-      name: r.product.name,
-      unit: r.product.unit,
-      status: r.product.status,
-      trackInventory: r.product.trackInventory,
-      siteId: r.siteId,
-      siteCode: r.site.code,
-      siteName: r.site.name,
-      qtyOnHand: toNumber(r.qtyOnHand),
-      updatedAt: r.updatedAt.toISOString(),
-    }));
+    let items = rows.map((r) => {
+      const qtyOnHand = toNumber(r.qtyOnHand);
+      const qtyReserved = toNumber(r.qtyReserved);
+      const reorderPoint =
+        r.product.reorderPoint == null
+          ? null
+          : toNumber(r.product.reorderPoint);
+      return {
+        id: r.id,
+        productId: r.productId,
+        sku: r.product.sku,
+        name: r.product.name,
+        unit: r.product.unit,
+        barcode: r.product.barcode,
+        status: r.product.status,
+        trackInventory: r.product.trackInventory,
+        siteId: r.siteId,
+        siteCode: r.site.code,
+        siteName: r.site.name,
+        binCode: r.bin?.code ?? null,
+        qtyOnHand,
+        qtyReserved,
+        qtyAvailable: Math.round((qtyOnHand - qtyReserved) * 1000) / 1000,
+        reorderPoint,
+        averageCost:
+          r.product.averageCost == null
+            ? null
+            : toNumber(r.product.averageCost),
+        isLow:
+          reorderPoint != null && reorderPoint > 0 && qtyOnHand <= reorderPoint,
+        updatedAt: r.updatedAt.toISOString(),
+      };
+    });
+    if (lowStock) {
+      items = items.filter((i) => i.isLow).slice(0, limit);
+    }
 
     const [sites, productCount, movementCount] = await Promise.all([
       prisma.site.findMany({
-        where: { tenantId: session.tenantId, isActive: true, kind: "BRANCH" },
+        where: {
+          tenantId: session.tenantId,
+          isActive: true,
+          kind: { in: ["WAREHOUSE", "BRANCH"] },
+        },
         orderBy: { name: "asc" },
         select: { id: true, code: true, name: true },
       }),

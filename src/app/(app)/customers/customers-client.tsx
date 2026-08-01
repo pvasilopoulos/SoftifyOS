@@ -3,8 +3,9 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useMemo, useState, useTransition } from "react";
-import { Plus, Settings2 } from "lucide-react";
+import { List, Map as MapIcon, Plus, Settings2 } from "lucide-react";
 import { Button } from "@/shared/ui/button";
+import { cn } from "@/shared/lib/cn";
 import { ENTITY_REGISTRY } from "@/modules/entity-views/registry";
 import type { CustomFieldDef } from "@/modules/entity-views/dynamic-ui";
 import {
@@ -28,18 +29,30 @@ import {
   CustomerPeekDrawer,
   type CustomerPeekData,
 } from "./customer-peek-drawer";
+import { CustomerMapView } from "./customer-map-view";
 
 export type CustomerListItem = {
   id: string;
   code: string;
   name: string;
+  tradeName?: string | null;
   vatNumber: string | null;
+  taxOffice?: string | null;
   email: string | null;
   phone: string | null;
+  mobile?: string | null;
+  city?: string | null;
+  postalCode?: string | null;
+  category?: string | null;
+  salesperson?: string | null;
+  creditLimit?: number | null;
+  currency?: string | null;
+  isBlocked?: boolean;
   status: string;
   branchCount: number;
   createdAt: string;
   customFields?: Record<string, unknown>;
+  [key: string]: unknown;
 };
 
 type ListViewOpt = {
@@ -72,6 +85,8 @@ export function CustomersClient({
   listViews,
   customFields,
   formViews = [],
+  mapsApiKey = "",
+  mapsMapId = "DEMO_MAP_ID",
 }: {
   initialItems: CustomerListItem[];
   initialNextCursor: string | null;
@@ -79,6 +94,8 @@ export function CustomersClient({
   listViews: ListViewOpt[];
   customFields: CustomFieldDef[];
   formViews?: FormViewOpt[];
+  mapsApiKey?: string;
+  mapsMapId?: string;
 }) {
   const router = useRouter();
   const defaultView =
@@ -112,9 +129,13 @@ export function CustomersClient({
   const [peekCustomer, setPeekCustomer] = useState<CustomerPeekData | null>(
     null,
   );
+  const [surface, setSurface] = useState<"list" | "map">(() =>
+    normalizeListConfig(defaultView?.config).mode === "map" ? "map" : "list",
+  );
 
   const activeView = listViews.find((v) => v.id === viewId) ?? defaultView;
   const builtins = ENTITY_REGISTRY.CUSTOMERS.builtins;
+  const showMap = surface === "map";
 
   const baseConfig = useMemo(
     () => normalizeListConfig(activeView?.config),
@@ -249,16 +270,7 @@ export function CustomersClient({
   function openPeek(row: Record<string, unknown> & { id: string }) {
     const found = items.find((c) => c.id === row.id);
     if (!found) return;
-    setPeekCustomer({
-      id: found.id,
-      code: found.code,
-      name: found.name,
-      vatNumber: found.vatNumber,
-      email: found.email,
-      phone: found.phone,
-      status: found.status,
-      customFields: found.customFields,
-    });
+    setPeekCustomer({ ...found });
   }
 
   async function moveKanban(
@@ -335,6 +347,7 @@ export function CustomersClient({
             listViews.find((v) => v.id === id)?.config,
           );
           setDensity(cfg.page?.density ?? "comfortable");
+          setSurface(cfg.mode === "map" ? "map" : "list");
           const locked = cfg.filters.find(
             (f) => f.source === "system" && f.key === "status" && f.op === "eq",
           );
@@ -345,7 +358,9 @@ export function CustomersClient({
           if (locked?.value === "ACTIVE" || locked?.value === "INACTIVE") {
             setStatus(locked.value);
           }
-          void search({ nextViewId: id, nextStatus });
+          if (cfg.mode !== "map") {
+            void search({ nextViewId: id, nextStatus });
+          }
         }}
         status={status}
         onStatusChange={(s) => {
@@ -375,6 +390,32 @@ export function CustomersClient({
         pending={isPending}
         extraActions={
           <>
+            <div className="inline-flex rounded-xl border border-slate-200 bg-white p-0.5">
+              <button
+                type="button"
+                onClick={() => setSurface("list")}
+                className={cn(
+                  "inline-flex h-7 items-center gap-1 rounded-lg px-2.5 text-xs font-medium",
+                  !showMap
+                    ? "bg-teal-800 text-white"
+                    : "text-slate-600 hover:bg-slate-50",
+                )}
+              >
+                <List size={13} /> Πίνακας
+              </button>
+              <button
+                type="button"
+                onClick={() => setSurface("map")}
+                className={cn(
+                  "inline-flex h-7 items-center gap-1 rounded-lg px-2.5 text-xs font-medium",
+                  showMap
+                    ? "bg-teal-800 text-white"
+                    : "text-slate-600 hover:bg-slate-50",
+                )}
+              >
+                <MapIcon size={13} /> Χάρτης
+              </button>
+            </div>
             {formViews.length > 0 ? (
               <Button
                 variant="secondary"
@@ -401,37 +442,48 @@ export function CustomersClient({
         </p>
       ) : null}
 
-      <ListExperienceRenderer
-        config={effectiveConfig}
-        builtins={builtins}
-        customDefs={customFields}
-        rows={rows}
-        hrefForRow={(row) => `/customers/${row.id}`}
-        onPeek={openPeek}
-        onEdit={openPeek}
-        onQuickCreate={() => setQuickOpen(true)}
-        onNavigateNew={() => router.push("/customers/new")}
-        onKanbanMove={(row, next) => void moveKanban(row, next)}
-        onBulkStatus={(ids, st) => bulkStatus(ids, st)}
-        onSortChange={(sort) => setSortOverride(sort)}
-        emptyActionLabel="Νέος πελάτης"
-      />
+      {showMap ? (
+        <CustomerMapView
+          q={q}
+          status={status}
+          mapsApiKey={mapsApiKey}
+          mapId={mapsMapId}
+        />
+      ) : (
+        <>
+          <ListExperienceRenderer
+            config={effectiveConfig}
+            builtins={builtins}
+            customDefs={customFields}
+            rows={rows}
+            hrefForRow={(row) => `/customers/${row.id}`}
+            onPeek={openPeek}
+            onEdit={openPeek}
+            onQuickCreate={() => setQuickOpen(true)}
+            onNavigateNew={() => router.push("/customers/new")}
+            onKanbanMove={(row, next) => void moveKanban(row, next)}
+            onBulkStatus={(ids, st) => bulkStatus(ids, st)}
+            onSortChange={(sort) => setSortOverride(sort)}
+            emptyActionLabel="Νέος πελάτης"
+          />
 
-      {nextCursor ? (
-        <div className="flex justify-center">
-          <Button
-            variant="secondary"
-            disabled={isPending}
-            onClick={() => void loadMore()}
-          >
-            Περισσότερα · {items.length} φορτωμένα
-          </Button>
-        </div>
-      ) : items.length > 0 ? (
-        <p className="text-center text-xs text-slate-400">
-          Τέλος αποτελεσμάτων · {items.length} εγγραφές
-        </p>
-      ) : null}
+          {nextCursor ? (
+            <div className="flex justify-center">
+              <Button
+                variant="secondary"
+                disabled={isPending}
+                onClick={() => void loadMore()}
+              >
+                Περισσότερα · {items.length} φορτωμένα
+              </Button>
+            </div>
+          ) : items.length > 0 ? (
+            <p className="text-center text-xs text-slate-400">
+              Τέλος αποτελεσμάτων · {items.length} εγγραφές
+            </p>
+          ) : null}
+        </>
+      )}
 
       <CustomerQuickDrawer
         open={quickOpen}
@@ -455,12 +507,7 @@ export function CustomersClient({
               c.id === patch.id
                 ? {
                     ...c,
-                    code: patch.code,
-                    name: patch.name,
-                    vatNumber: patch.vatNumber,
-                    email: patch.email,
-                    phone: patch.phone,
-                    status: patch.status,
+                    ...patch,
                     customFields: parseCustomFieldsSafe(patch.customFields),
                   }
                 : c,

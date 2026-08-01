@@ -22,15 +22,18 @@ import {
 import { CSS } from "@dnd-kit/utilities";
 import {
   ArrowLeft,
+  Check,
   ChevronDown,
   Eye,
   EyeOff,
   FolderPlus,
   GripVertical,
+  Link2,
   MoreHorizontal,
   Plus,
   RotateCcw,
   Save,
+  Search,
   Smartphone,
   Trash2,
   Users,
@@ -49,11 +52,13 @@ import {
   applyMobileFooterIds,
   cloneMenuTree,
   collectLinkNodes,
-  getAvailableCatalogLinks,
+  collectNodeIds,
   getChildrenOf,
+  getMenuCatalog,
   getMobileFooterIds,
   insertNodeAt,
   moveNodeInTree,
+  type MobileFooterOverrides,
 } from "@/platform/navigation/menu-tree";
 
 type AudienceGroup = { id: string; code: string; name: string };
@@ -386,9 +391,11 @@ function FolderDropZone({
 
 function CatalogItem({
   node,
+  inMenu,
   onAdd,
 }: {
   node: MenuNodeConfig;
+  inMenu: boolean;
   onAdd: (node: MenuNodeConfig) => void;
 }) {
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
@@ -400,7 +407,10 @@ function CatalogItem({
     <div
       ref={setNodeRef}
       className={cn(
-        "flex items-center gap-2 rounded-xl border border-slate-200/80 bg-white px-2 py-2",
+        "flex items-center gap-2 rounded-xl border bg-white px-2 py-2",
+        inMenu
+          ? "border-slate-100 bg-slate-50/80"
+          : "border-slate-200/80 shadow-sm shadow-slate-900/5",
         isDragging && "opacity-40",
       )}
     >
@@ -413,18 +423,37 @@ function CatalogItem({
       >
         <GripVertical size={14} />
       </button>
-      <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-slate-100 text-slate-600">
+      <span
+        className={cn(
+          "flex h-7 w-7 items-center justify-center rounded-lg",
+          inMenu ? "bg-slate-200/70 text-slate-500" : "bg-teal-50 text-teal-700",
+        )}
+      >
         {createElement(resolveIcon(node.icon), { size: 14 })}
       </span>
       <div className="min-w-0 flex-1">
         <p className="truncate text-sm font-medium text-ink-900">{node.label}</p>
         <p className="truncate text-[11px] text-slate-400">{node.href}</p>
+        {inMenu ? (
+          <p className="mt-0.5 inline-flex items-center gap-1 text-[10px] font-medium text-slate-500">
+            <Check size={10} /> ήδη στο μενού
+          </p>
+        ) : (
+          <p className="mt-0.5 text-[10px] font-medium text-teal-700">
+            διαθέσιμο για προσθήκη
+          </p>
+        )}
       </div>
       <button
         type="button"
-        title="Προσθήκη"
+        title={inMenu ? "Προσθήκη αντιγράφου" : "Προσθήκη στο μενού"}
         onClick={() => onAdd(node)}
-        className="rounded-lg p-1.5 text-teal-700 hover:bg-teal-50"
+        className={cn(
+          "rounded-lg p-1.5",
+          inMenu
+            ? "text-slate-600 hover:bg-slate-200/70"
+            : "text-teal-700 hover:bg-teal-50",
+        )}
       >
         <Plus size={16} />
       </button>
@@ -482,16 +511,73 @@ function TreeBranch({
   );
 }
 
+type FooterScope =
+  | { kind: "default" }
+  | { kind: "group"; id: string }
+  | { kind: "user"; id: string };
+
 function MobileFooterEditor({
   tree,
-  onChangeFooter,
+  overrides,
+  audienceOptions,
+  onChangeDefaultFooter,
+  onChangeOverrides,
 }: {
   tree: MenuNodeConfig[];
-  onChangeFooter: (ids: string[]) => void;
+  overrides: MobileFooterOverrides;
+  audienceOptions: AudienceOptions;
+  onChangeDefaultFooter: (ids: string[]) => void;
+  onChangeOverrides: (next: MobileFooterOverrides) => void;
 }) {
-  const footerIds = getMobileFooterIds(tree);
+  const [scopeKind, setScopeKind] = useState<"default" | "group" | "user">(
+    "default",
+  );
+  const [scopeId, setScopeId] = useState("");
+
+  const defaultFooterIds = getMobileFooterIds(tree);
   const links = collectLinkNodes(tree).filter((n) => n.visible !== false);
   const byId = new Map(links.map((n) => [n.id, n]));
+
+  const scope: FooterScope =
+    scopeKind === "default"
+      ? { kind: "default" }
+      : scopeKind === "group" && scopeId
+        ? { kind: "group", id: scopeId }
+        : scopeKind === "user" && scopeId
+          ? { kind: "user", id: scopeId }
+          : { kind: "default" };
+
+  const hasOverride =
+    (scope.kind === "group" &&
+      Boolean(overrides.byGroupId?.[scope.id]?.length)) ||
+    (scope.kind === "user" && Boolean(overrides.byUserId?.[scope.id]?.length));
+
+  const footerIds =
+    scope.kind === "group"
+      ? (overrides.byGroupId?.[scope.id] ?? [])
+      : scope.kind === "user"
+        ? (overrides.byUserId?.[scope.id] ?? [])
+        : defaultFooterIds;
+
+  const commitIds = (ids: string[]) => {
+    const clean = ids.filter(Boolean).slice(0, MOBILE_FOOTER_SLOT_COUNT);
+    if (scope.kind === "default") {
+      onChangeDefaultFooter(clean);
+      return;
+    }
+    const next: MobileFooterOverrides = {
+      byUserId: { ...(overrides.byUserId ?? {}) },
+      byGroupId: { ...(overrides.byGroupId ?? {}) },
+    };
+    if (scope.kind === "group") {
+      if (clean.length) next.byGroupId![scope.id] = clean;
+      else delete next.byGroupId![scope.id];
+    } else {
+      if (clean.length) next.byUserId![scope.id] = clean;
+      else delete next.byUserId![scope.id];
+    }
+    onChangeOverrides(next);
+  };
 
   const setSlot = (index: number, linkId: string) => {
     const slots = Array.from(
@@ -502,7 +588,7 @@ function MobileFooterEditor({
       if (slots[i] === linkId) slots[i] = "";
     }
     slots[index] = linkId;
-    onChangeFooter(slots.filter(Boolean));
+    commitIds(slots.filter(Boolean));
   };
 
   const moveSlot = (index: number, dir: -1 | 1) => {
@@ -512,7 +598,16 @@ function MobileFooterEditor({
     const tmp = next[index];
     next[index] = next[target]!;
     next[target] = tmp!;
-    onChangeFooter(next);
+    commitIds(next);
+  };
+
+  const clearOverride = () => {
+    if (scope.kind === "default") return;
+    commitIds([]);
+  };
+
+  const copyFromDefault = () => {
+    commitIds(defaultFooterIds);
   };
 
   const previewItems: Array<{
@@ -536,6 +631,9 @@ function MobileFooterEditor({
     },
   ].slice(0, 4);
 
+  const userCount = Object.keys(overrides.byUserId ?? {}).length;
+  const groupCount = Object.keys(overrides.byGroupId ?? {}).length;
+
   return (
     <div className="space-y-3">
       <div className="flex items-center gap-2">
@@ -543,13 +641,104 @@ function MobileFooterEditor({
         <h2 className="text-sm font-semibold text-ink-900">Footer κινητού</h2>
       </div>
       <p className="text-xs leading-relaxed text-slate-500">
-        Έως {MOBILE_FOOTER_SLOT_COUNT} συντομεύσεις· η θέση «Περισσότερα» μένει
-        πάντα τελευταία.
+        Έως {MOBILE_FOOTER_SLOT_COUNT} συντομεύσεις· προτεραιότητα: χρήστης →
+        ομάδα → προεπιλογή. «Περισσότερα» πάντα τελευταίο.
       </p>
+
+      <div className="space-y-2 rounded-xl border border-slate-200 bg-slate-50/80 p-2.5">
+        <label className="block text-[11px] font-medium uppercase tracking-wide text-slate-500">
+          Ισχύει για
+        </label>
+        <select
+          value={scopeKind}
+          onChange={(e) => {
+            const kind = e.target.value as "default" | "group" | "user";
+            setScopeKind(kind);
+            if (kind === "group") {
+              setScopeId(audienceOptions.groups[0]?.id ?? "");
+            } else if (kind === "user") {
+              setScopeId(audienceOptions.users[0]?.id ?? "");
+            } else {
+              setScopeId("");
+            }
+          }}
+          className="h-9 w-full rounded-lg border border-slate-200 bg-white px-2 text-sm outline-none focus:border-teal-300"
+        >
+          <option value="default">Προεπιλογή tenant</option>
+          <option value="group">Ομάδα χρηστών</option>
+          <option value="user">Συγκεκριμένος χρήστης</option>
+        </select>
+        {scopeKind === "group" ? (
+          <select
+            value={scopeId}
+            onChange={(e) => setScopeId(e.target.value)}
+            className="h-9 w-full rounded-lg border border-slate-200 bg-white px-2 text-sm outline-none focus:border-teal-300"
+          >
+            {audienceOptions.groups.length === 0 ? (
+              <option value="">— Δεν υπάρχουν ομάδες —</option>
+            ) : null}
+            {audienceOptions.groups.map((g) => (
+              <option key={g.id} value={g.id}>
+                {g.name} ({g.code})
+                {overrides.byGroupId?.[g.id]?.length ? " · override" : ""}
+              </option>
+            ))}
+          </select>
+        ) : null}
+        {scopeKind === "user" ? (
+          <select
+            value={scopeId}
+            onChange={(e) => setScopeId(e.target.value)}
+            className="h-9 w-full rounded-lg border border-slate-200 bg-white px-2 text-sm outline-none focus:border-teal-300"
+          >
+            {audienceOptions.users.length === 0 ? (
+              <option value="">— Δεν υπάρχουν χρήστες —</option>
+            ) : null}
+            {audienceOptions.users.map((u) => (
+              <option key={u.id} value={u.id}>
+                {u.name}
+                {overrides.byUserId?.[u.id]?.length ? " · override" : ""}
+              </option>
+            ))}
+          </select>
+        ) : null}
+        <p className="text-[11px] text-slate-500">
+          {scope.kind === "default"
+            ? "Ορίζεται στα nodes του μενού (mobileTab)."
+            : hasOverride
+              ? "Ενεργό override για αυτή την επιλογή."
+              : "Δεν υπάρχει override — χρησιμοποιείται η προεπιλογή μέχρι να ορίσεις slots."}
+          {(userCount > 0 || groupCount > 0) && scope.kind === "default"
+            ? ` · Overrides: ${groupCount} ομάδες, ${userCount} χρήστες.`
+            : null}
+        </p>
+        {scope.kind !== "default" ? (
+          <div className="flex flex-wrap gap-1.5">
+            <button
+              type="button"
+              onClick={copyFromDefault}
+              className="rounded-md border border-slate-200 bg-white px-2 py-1 text-[11px] font-medium text-slate-700 hover:bg-slate-50"
+            >
+              Αντιγραφή από προεπιλογή
+            </button>
+            {hasOverride ? (
+              <button
+                type="button"
+                onClick={clearOverride}
+                className="rounded-md border border-rose-200 bg-white px-2 py-1 text-[11px] font-medium text-rose-700 hover:bg-rose-50"
+              >
+                Καθαρισμός override
+              </button>
+            ) : null}
+          </div>
+        ) : null}
+      </div>
 
       <div className="space-y-2">
         {Array.from({ length: MOBILE_FOOTER_SLOT_COUNT }).map((_, index) => {
           const selected = footerIds[index] ?? "";
+          const disabledEditor =
+            (scopeKind === "group" || scopeKind === "user") && !scopeId;
           return (
             <div
               key={index}
@@ -560,8 +749,9 @@ function MobileFooterEditor({
               </span>
               <select
                 value={selected}
+                disabled={disabledEditor}
                 onChange={(e) => setSlot(index, e.target.value)}
-                className="min-w-0 flex-1 rounded-lg border border-slate-200 bg-slate-50 px-2 py-1.5 text-sm outline-none focus:border-teal-300 focus:bg-white"
+                className="min-w-0 flex-1 rounded-lg border border-slate-200 bg-slate-50 px-2 py-1.5 text-sm outline-none focus:border-teal-300 focus:bg-white disabled:opacity-50"
               >
                 <option value="">— Κενό —</option>
                 {links.map((link) => (
@@ -578,7 +768,7 @@ function MobileFooterEditor({
               </select>
               <button
                 type="button"
-                disabled={index === 0}
+                disabled={disabledEditor || index === 0}
                 onClick={() => moveSlot(index, -1)}
                 className="rounded-lg px-1.5 py-1 text-xs text-slate-500 hover:bg-slate-100 disabled:opacity-30"
               >
@@ -586,7 +776,7 @@ function MobileFooterEditor({
               </button>
               <button
                 type="button"
-                disabled={index >= footerIds.length - 1}
+                disabled={disabledEditor || index >= footerIds.length - 1}
                 onClick={() => moveSlot(index, 1)}
                 className="rounded-lg px-1.5 py-1 text-xs text-slate-500 hover:bg-slate-100 disabled:opacity-30"
               >
@@ -632,25 +822,47 @@ function MobileFooterEditor({
 export function MenuSettingsClient({
   initialMenu,
   initialNavGroupsDefaultExpanded = true,
+  initialMobileFooterOverrides,
   audienceOptions,
 }: {
   initialMenu: MenuNodeConfig[];
   initialNavGroupsDefaultExpanded?: boolean;
+  initialMobileFooterOverrides?: MobileFooterOverrides;
   audienceOptions: AudienceOptions;
 }) {
   const [tree, setTree] = useState(() => cloneMenuTree(initialMenu));
   const [navGroupsDefaultExpanded, setNavGroupsDefaultExpanded] = useState(
     initialNavGroupsDefaultExpanded,
   );
+  const [footerOverrides, setFooterOverrides] = useState<MobileFooterOverrides>(
+    () => ({
+      byUserId: { ...(initialMobileFooterOverrides?.byUserId ?? {}) },
+      byGroupId: { ...(initialMobileFooterOverrides?.byGroupId ?? {}) },
+    }),
+  );
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
   const [activeDrag, setActiveDrag] = useState<DragData | null>(null);
+  const [catalogQuery, setCatalogQuery] = useState("");
+  const [customLabel, setCustomLabel] = useState("");
+  const [customHref, setCustomHref] = useState("");
 
   const catalog = useMemo(
-    () => getAvailableCatalogLinks(tree, defaultMenuTree),
+    () => getMenuCatalog(tree, defaultMenuTree),
     [tree],
   );
+
+  const filteredCatalog = useMemo(() => {
+    const q = catalogQuery.trim().toLowerCase();
+    if (!q) return catalog;
+    return catalog.filter((entry) => {
+      const hay = `${entry.node.label} ${entry.node.href ?? ""}`.toLowerCase();
+      return hay.includes(q);
+    });
+  }, [catalog, catalogQuery]);
+
+  const missingCount = catalog.filter((e) => !e.inMenu).length;
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
@@ -710,20 +922,55 @@ export function MenuSettingsClient({
       defaultFolderId ??
       tree.find((n) => n.type === "folder")?.id ??
       null;
-    const clean: MenuNodeConfig = {
-      ...cloneMenuTree([node])[0]!,
-      mobileTab: false,
-      visible: true,
-    };
-    delete clean.mobileOrder;
     setTree((prev) => {
+      const used = collectNodeIds(prev);
+      const baseId = node.id || "custom";
+      const id = used.has(baseId)
+        ? `${baseId}-${Math.random().toString(36).slice(2, 8)}`
+        : baseId;
+      const clean: MenuNodeConfig = {
+        ...cloneMenuTree([node])[0]!,
+        id,
+        mobileTab: false,
+        visible: true,
+      };
+      delete clean.mobileOrder;
       if (target) {
         const kids = getChildrenOf(prev, target);
         return insertNodeAt(prev, target, kids.length, clean);
       }
       return [...cloneMenuTree(prev), clean];
     });
-    setMessage(null);
+    setMessage(
+      `Προστέθηκε «${node.label}» στο μενού. Πάτα Αποθήκευση για οριστικοποίηση.`,
+    );
+  };
+
+  const addCustomLink = () => {
+    const label = customLabel.trim();
+    let href = customHref.trim();
+    if (!label || !href) {
+      setError("Συμπλήρωσε ετικέτα και διαδρομή για custom link.");
+      return;
+    }
+    if (!href.startsWith("/")) href = `/${href}`;
+    const id = `custom-${label
+      .toLowerCase()
+      .replace(/[^a-z0-9α-ωάέήίόύώϊϋΐΰ]+/gi, "-")
+      .replace(/^-|-$/g, "")
+      .slice(0, 40) || "link"}`;
+    addCatalogNode({
+      id,
+      type: "link",
+      label,
+      href,
+      icon: "FileText",
+      visible: true,
+      mobileTab: false,
+    });
+    setCustomLabel("");
+    setCustomHref("");
+    setError(null);
   };
 
   const addFolder = () => {
@@ -759,29 +1006,32 @@ export function MenuSettingsClient({
         addCatalogNode(activeData.node, overId.replace("folder-drop:", ""));
         return;
       }
-      // Dropped on a tree node — insert into parent folder or after item
+      // Dropped on a tree node — insert after that item (unique id if duplicate)
       const overData = over.data.current as { kind?: string; id?: string } | undefined;
       if (overData?.kind === "tree" && overData.id) {
         setTree((prev) => {
+          const used = collectNodeIds(prev);
+          const baseId = activeData.node.id || "custom";
+          const id = used.has(baseId)
+            ? `${baseId}-${Math.random().toString(36).slice(2, 8)}`
+            : baseId;
           const clean = {
             ...cloneMenuTree([activeData.node])[0]!,
+            id,
             mobileTab: false,
             visible: true,
           };
           delete clean.mobileOrder;
-          // Insert after the over node in its parent
-          const moved = insertNodeAt(
-            prev,
-            null,
-            prev.length,
-            clean,
-          );
-          // Prefer placing next to over via move trick: add then move
+          const moved = insertNodeAt(prev, null, prev.length, clean);
           return moveNodeInTree(moved, clean.id, overData.id!, "after");
         });
-        setMessage(null);
+        setMessage(
+          `Προστέθηκε «${activeData.node.label}». Πάτα Αποθήκευση για οριστικοποίηση.`,
+        );
       } else if (defaultFolderId) {
         addCatalogNode(activeData.node, defaultFolderId);
+      } else {
+        addCatalogNode(activeData.node, null);
       }
       return;
     }
@@ -813,6 +1063,7 @@ export function MenuSettingsClient({
         body: JSON.stringify({
           menu: tree,
           navGroupsDefaultExpanded,
+          mobileFooterOverrides: footerOverrides,
         }),
       });
       const data = await res.json();
@@ -823,6 +1074,12 @@ export function MenuSettingsClient({
       setTree(cloneMenuTree(data.menu));
       if (typeof data.navGroupsDefaultExpanded === "boolean") {
         setNavGroupsDefaultExpanded(data.navGroupsDefaultExpanded);
+      }
+      if (data.mobileFooterOverrides) {
+        setFooterOverrides({
+          byUserId: { ...(data.mobileFooterOverrides.byUserId ?? {}) },
+          byGroupId: { ...(data.mobileFooterOverrides.byGroupId ?? {}) },
+        });
       }
       setMessage("Το μενού αποθηκεύτηκε. Ανανεώστε τη σελίδα για το sidebar.");
     });
@@ -848,6 +1105,7 @@ export function MenuSettingsClient({
           ? data.navGroupsDefaultExpanded
           : true,
       );
+      setFooterOverrides({ byUserId: {}, byGroupId: {} });
       setMessage("Επαναφορά στο προεπιλεγμένο μενού.");
     });
   };
@@ -993,35 +1251,90 @@ export function MenuSettingsClient({
           </div>
 
           <aside className="space-y-4">
-            <div className="soft-panel space-y-2 p-4">
-              <h2 className="text-sm font-semibold text-ink-900">
-                Διαθέσιμες επιλογές
-              </h2>
-              <p className="text-xs text-slate-500">
-                Σύρε στο δέντρο ή πάτα + για προσθήκη.
-              </p>
-              <div className="max-h-[420px] space-y-1.5 overflow-y-auto pr-1">
-                {catalog.length === 0 ? (
+            <div className="soft-panel space-y-3 p-4">
+              <div>
+                <h2 className="text-sm font-semibold text-ink-900">
+                  Διαθέσιμες επιλογές
+                </h2>
+                <p className="mt-0.5 text-xs text-slate-500">
+                  Σύρε στο δέντρο ή πάτα{" "}
+                  <span className="font-semibold text-teal-700">+</span> για
+                  προσθήκη.
+                  {missingCount > 0
+                    ? ` ${missingCount} δεν είναι ακόμη στο μενού.`
+                    : " Όλα τα defaults υπάρχουν ήδη — μπορείς να προσθέσεις αντίγραφο ή custom link."}
+                </p>
+              </div>
+
+              <div className="relative">
+                <Search
+                  size={14}
+                  className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400"
+                />
+                <input
+                  value={catalogQuery}
+                  onChange={(e) => setCatalogQuery(e.target.value)}
+                  placeholder="Αναζήτηση…"
+                  className="h-9 w-full rounded-lg border border-slate-200 bg-white pl-8 pr-2 text-sm outline-none focus:border-teal-300 focus:ring-2 focus:ring-teal-500/20"
+                />
+              </div>
+
+              <div className="max-h-[360px] space-y-1.5 overflow-y-auto pr-1">
+                {filteredCatalog.length === 0 ? (
                   <p className="rounded-xl bg-slate-50 px-3 py-4 text-center text-xs text-slate-500">
-                    Όλες οι προεπιλεγμένες επιλογές είναι ήδη στο μενού.
+                    Καμία επιλογή δεν ταιριάζει.
                   </p>
                 ) : (
-                  catalog.map((node) => (
+                  filteredCatalog.map((entry) => (
                     <CatalogItem
-                      key={node.id}
-                      node={node}
+                      key={entry.node.id}
+                      node={entry.node}
+                      inMenu={entry.inMenu}
                       onAdd={(n) => addCatalogNode(n)}
                     />
                   ))
                 )}
+              </div>
+
+              <div className="space-y-2 border-t border-slate-100 pt-3">
+                <div className="flex items-center gap-1.5 text-xs font-semibold text-ink-900">
+                  <Link2 size={13} className="text-teal-700" />
+                  Custom link
+                </div>
+                <input
+                  value={customLabel}
+                  onChange={(e) => setCustomLabel(e.target.value)}
+                  placeholder="Ετικέτα (π.χ. Αποθήκη Β)"
+                  className="h-9 w-full rounded-lg border border-slate-200 px-2.5 text-sm outline-none focus:border-teal-300"
+                />
+                <input
+                  value={customHref}
+                  onChange={(e) => setCustomHref(e.target.value)}
+                  placeholder="Διαδρομή (π.χ. /inventory)"
+                  className="h-9 w-full rounded-lg border border-slate-200 px-2.5 font-mono text-sm outline-none focus:border-teal-300"
+                />
+                <button
+                  type="button"
+                  onClick={addCustomLink}
+                  className="inline-flex h-9 w-full items-center justify-center gap-1.5 rounded-lg bg-slate-900 text-sm font-medium text-white hover:bg-slate-800"
+                >
+                  <Plus size={14} />
+                  Προσθήκη στο μενού
+                </button>
               </div>
             </div>
 
             <div className="soft-panel p-4">
               <MobileFooterEditor
                 tree={tree}
-                onChangeFooter={(ids) => {
+                overrides={footerOverrides}
+                audienceOptions={audienceOptions}
+                onChangeDefaultFooter={(ids) => {
                   setTree((prev) => applyMobileFooterIds(prev, ids));
+                  setMessage(null);
+                }}
+                onChangeOverrides={(next) => {
+                  setFooterOverrides(next);
                   setMessage(null);
                 }}
               />

@@ -20,7 +20,58 @@ import {
   type ListSort,
 } from "./list-experience-types";
 import { evaluateListRules, rowToneClass } from "./list-rules";
-import { ArrowDown, ArrowUp, ArrowUpDown } from "lucide-react";
+import {
+  ArrowDown,
+  ArrowUp,
+  ArrowUpDown,
+  Eye,
+  ExternalLink,
+  type LucideIcon,
+  Pencil,
+  Printer,
+  Zap,
+} from "lucide-react";
+import type { ListRowAction } from "./list-experience-types";
+
+function rowActionIcon(action: ListRowAction): LucideIcon {
+  const key = (action.icon || action.id || action.type).toLowerCase();
+  if (
+    key === "open" ||
+    key === "navigate" ||
+    key === "external-link" ||
+    key === "external"
+  ) {
+    return ExternalLink;
+  }
+  if (key === "edit" || key === "form_edit" || key === "pencil") {
+    return Pencil;
+  }
+  if (
+    key === "peek" ||
+    key === "form_peek" ||
+    key === "eye" ||
+    key === "preview" ||
+    key === "view"
+  ) {
+    return Eye;
+  }
+  if (key === "print" || key === "printer") return Printer;
+  if (key === "form_quick" || key === "quick" || key === "zap") return Zap;
+  switch (action.type) {
+    case "navigate":
+      return ExternalLink;
+    case "form_edit":
+      return Pencil;
+    case "form_peek":
+      return Eye;
+    case "form_quick":
+      return Zap;
+    case "print":
+      return Printer;
+    default:
+      return ExternalLink;
+  }
+}
 
 function colLabel(
   col: ListColumn,
@@ -714,17 +765,24 @@ function RowActions({
     (a) => !hidden?.has(a.id),
   );
   if (actions.length === 0) return null;
+
+  const iconBtn =
+    "inline-flex h-8 w-8 items-center justify-center rounded-lg text-teal-700 transition hover:bg-teal-50 hover:text-teal-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-500/40";
+
   return (
-    <div className={cn("flex flex-wrap gap-1", compact && "justify-end")}>
+    <div className={cn("flex flex-wrap gap-0.5", compact && "justify-end")}>
       {actions.map((a) => {
+        const Icon = rowActionIcon(a);
         if (a.type === "navigate") {
           return (
             <Link
               key={a.id}
               href={href}
-              className="rounded-lg px-2 py-1 text-[11px] font-medium text-teal-700 hover:bg-teal-50"
+              title={a.label}
+              aria-label={a.label}
+              className={iconBtn}
             >
-              {a.label}
+              <Icon className="h-3.5 w-3.5" strokeWidth={2} />
             </Link>
           );
         }
@@ -733,10 +791,12 @@ function RowActions({
             <button
               key={a.id}
               type="button"
-              className="rounded-lg px-2 py-1 text-[11px] font-medium text-teal-700 hover:bg-teal-50"
+              title={a.label}
+              aria-label={a.label}
+              className={iconBtn}
               onClick={() => onEdit(row)}
             >
-              {a.label}
+              <Icon className="h-3.5 w-3.5" strokeWidth={2} />
             </button>
           );
         }
@@ -745,19 +805,23 @@ function RowActions({
             <button
               key={a.id}
               type="button"
-              className="rounded-lg px-2 py-1 text-[11px] font-medium text-slate-600 hover:bg-slate-50"
+              title={a.label}
+              aria-label={a.label}
+              className={cn(iconBtn, "text-slate-600 hover:bg-slate-100 hover:text-slate-900")}
               onClick={() => (onEdit ?? onPeek)?.(row)}
             >
-              {a.label}
+              <Icon className="h-3.5 w-3.5" strokeWidth={2} />
             </button>
           );
         }
         return (
           <span
             key={a.id}
-            className="rounded-lg px-2 py-1 text-[11px] text-slate-400"
+            title={a.label}
+            aria-label={a.label}
+            className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-slate-300"
           >
-            {a.label}
+            <Icon className="h-3.5 w-3.5" strokeWidth={2} />
           </span>
         );
       })}

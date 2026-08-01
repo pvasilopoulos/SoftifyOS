@@ -14,9 +14,49 @@ async function main() {
     {
       code: "CUS-NIREAS",
       name: "Νηρέας Logistics ΑΕ",
+      tradeName: "Nireas Logistics",
+      legalForm: "AE" as const,
       vatNumber: "998877661",
+      taxOffice: "Α' Αθηνών",
+      gemhNumber: "123456789012",
+      vatStatus: "NORMAL" as const,
       email: "ops@nireas.example",
       phone: "+30 210 1110001",
+      mobile: "+30 694 1110001",
+      website: "https://nireas.example",
+      address: "Πειραιώς 100",
+      city: "Αθήνα",
+      postalCode: "11854",
+      region: "Αττικής",
+      country: "GR",
+      category: "WHOLESALE" as const,
+      salesperson: "Μ. Παπαδοπούλου",
+      paymentTermsDays: 30,
+      paymentTermsLabel: "30 ημέρες",
+      creditLimit: 50000,
+      currency: "EUR",
+      locale: "el-GR",
+      iban: "GR1601101250000000012300695",
+      bic: "ETHNGRAA",
+      bankName: "Εθνική Τράπεζα",
+      bankAccountHolder: "Νηρέας Logistics ΑΕ",
+      sendEinvoice: true,
+      contacts: [
+        {
+          name: "Γιάννης Κωνσταντίνου",
+          title: "Αγορές",
+          email: "purchasing@nireas.example",
+          phone: "+30 210 1110002",
+          isPrimary: true,
+        },
+        {
+          name: "Ελένη Νικολάου",
+          title: "Λογιστήριο",
+          email: "ap@nireas.example",
+          mobile: "+30 693 2223344",
+          isPrimary: false,
+        },
+      ],
       branches: [
         {
           code: "BR-ATH",
@@ -24,6 +64,8 @@ async function main() {
           city: "Αθήνα",
           address: "Πειραιώς 100",
           postalCode: "11854",
+          region: "Αττικής",
+          country: "GR",
           isPrimary: true,
           spaces: [
             {
@@ -48,6 +90,8 @@ async function main() {
           city: "Θεσσαλονίκη",
           address: "26ης Οκτωβρίου 50",
           postalCode: "54627",
+          region: "Θεσσαλονίκης",
+          country: "GR",
           isPrimary: false,
           spaces: [
             {
@@ -69,14 +113,41 @@ async function main() {
     {
       code: "CUS-AIGAIO",
       name: "Αιγαίο Foods ΟΕ",
+      tradeName: "Aegean Foods",
+      legalForm: "OE" as const,
       vatNumber: "991122334",
+      taxOffice: "Πειραιά",
+      vatStatus: "NORMAL" as const,
       email: "info@aigaio.example",
+      phone: "+30 210 9990001",
+      address: "Ακτή Μιαούλη 20",
+      city: "Πειραιάς",
+      postalCode: "18531",
+      region: "Αττικής",
+      country: "GR",
+      category: "RETAIL" as const,
+      salesperson: "Ν. Γεωργίου",
+      paymentTermsDays: 0,
+      paymentTermsLabel: "Μετρητοίς",
+      creditLimit: 10000,
+      currency: "EUR",
+      contacts: [
+        {
+          name: "Μαρία Αιγαίου",
+          title: "Ιδιοκτήτρια",
+          email: "info@aigaio.example",
+          phone: "+30 210 9990001",
+          isPrimary: true,
+        },
+      ],
       branches: [
         {
           code: "BR-HQ",
           name: "Έδρα Πειραιά",
           city: "Πειραιάς",
           address: "Ακτή Μιαούλη 20",
+          postalCode: "18531",
+          country: "GR",
           isPrimary: true,
           spaces: [
             {
@@ -99,27 +170,46 @@ async function main() {
   ];
 
   for (const c of customers) {
+    const { branches, contacts, ...cust } = c;
     const customer = await prisma.customer.upsert({
       where: { tenantId_code: { tenantId: tenant.id, code: c.code } },
       update: {
-        name: c.name,
-        vatNumber: c.vatNumber,
-        email: c.email,
-        phone: "phone" in c ? c.phone : undefined,
+        ...cust,
         status: "ACTIVE",
       },
       create: {
         tenantId: tenant.id,
-        code: c.code,
-        name: c.name,
-        vatNumber: c.vatNumber,
-        email: c.email,
-        phone: "phone" in c ? (c.phone as string) : null,
+        ...cust,
         status: "ACTIVE",
       },
     });
 
-    for (const b of c.branches) {
+    for (const contact of contacts) {
+      const existing = await prisma.customerContact.findFirst({
+        where: {
+          tenantId: tenant.id,
+          customerId: customer.id,
+          name: contact.name,
+        },
+      });
+      if (existing) {
+        await prisma.customerContact.update({
+          where: { id: existing.id },
+          data: contact,
+        });
+      } else {
+        await prisma.customerContact.create({
+          data: {
+            tenantId: tenant.id,
+            customerId: customer.id,
+            ...contact,
+          },
+        });
+      }
+    }
+
+    for (const b of branches) {
+      const { spaces, ...branchData } = b;
       const branch = await prisma.branch.upsert({
         where: {
           tenantId_customerId_code: {
@@ -128,26 +218,15 @@ async function main() {
             code: b.code,
           },
         },
-        update: {
-          name: b.name,
-          city: b.city,
-          address: b.address,
-          postalCode: "postalCode" in b ? b.postalCode : null,
-          isPrimary: b.isPrimary,
-        },
+        update: branchData,
         create: {
           tenantId: tenant.id,
           customerId: customer.id,
-          code: b.code,
-          name: b.name,
-          city: b.city,
-          address: b.address,
-          postalCode: "postalCode" in b ? (b.postalCode as string) : null,
-          isPrimary: b.isPrimary,
+          ...branchData,
         },
       });
 
-      for (const s of b.spaces) {
+      for (const s of spaces) {
         await prisma.space.upsert({
           where: {
             tenantId_branchId_code: {
@@ -176,7 +255,7 @@ async function main() {
     }
   }
 
-  console.log("Seeded customer → branch → space hierarchy");
+  console.log("Seeded full ERP customers → contacts → branches → spaces");
   await prisma.$disconnect();
   await pool.end();
 }

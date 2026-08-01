@@ -32,7 +32,7 @@ type Site = {
   id: string;
   code: string;
   name: string;
-  kind: "BRANCH" | "TILL";
+  kind: "BRANCH" | "WAREHOUSE" | "TILL";
   parentId: string | null;
 };
 

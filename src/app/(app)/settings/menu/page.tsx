@@ -32,6 +32,7 @@ export default async function MenuSettingsPage() {
     <MenuSettingsClient
       initialMenu={settings.menuTree}
       initialNavGroupsDefaultExpanded={settings.navGroupsDefaultExpanded}
+      initialMobileFooterOverrides={settings.mobileFooterOverrides}
       audienceOptions={{
         groups,
         users: memberships.map((m) => m.user),

@@ -7,12 +7,18 @@ import { MobileTabBar } from "@/platform/shell/mobile-tab-bar";
 import { CommandPalette } from "@/platform/shell/command-palette";
 import { QuickActionsSheet } from "@/platform/shell/quick-actions-sheet";
 import { NavProvider } from "@/platform/navigation/nav-context";
+import { AppToaster } from "@/shared/ui/toaster";
+import { DensityProvider } from "@/shared/ui/density";
+import { ThemeProvider } from "@/shared/ui/theme";
 import {
   menuTreeToNavGroups,
   type MenuAudience,
   type MenuNodeConfig,
 } from "@/platform/navigation";
-import { resolveMobileTabsFromGroups } from "@/platform/navigation/menu-tree";
+import {
+  resolveMobileTabsForAudience,
+  type MobileFooterOverrides,
+} from "@/platform/navigation/menu-tree";
 import type { SessionPayload } from "@/platform/auth/session";
 
 export function AppShell({
@@ -20,12 +26,16 @@ export function AppShell({
   menuTree,
   menuAudience,
   navGroupsDefaultExpanded = true,
+  mobileFooterOverrides,
+  maintenanceMode = false,
   children,
 }: {
   session: SessionPayload;
   menuTree: MenuNodeConfig[];
   menuAudience?: MenuAudience;
   navGroupsDefaultExpanded?: boolean;
+  mobileFooterOverrides?: MobileFooterOverrides | null;
+  maintenanceMode?: boolean;
   children: React.ReactNode;
 }) {
   const [collapsed, setCollapsed] = useState(false);
@@ -53,8 +63,9 @@ export function AppShell({
   );
 
   const mobileTabs = useMemo(
-    () => resolveMobileTabsFromGroups(groups),
-    [groups],
+    () =>
+      resolveMobileTabsForAudience(groups, audience, mobileFooterOverrides),
+    [groups, audience, mobileFooterOverrides],
   );
 
   useEffect(() => {
@@ -67,35 +78,52 @@ export function AppShell({
   }, []);
 
   return (
-    <NavProvider groups={groups} mobileTabs={mobileTabs}>
-      <div className="flex min-h-dvh bg-[#F1F4F7] text-ink-900">
-        <Sidebar
-          collapsed={collapsed}
-          onToggle={() => setCollapsed((v) => !v)}
-          groups={groups}
-        />
-        <div className="flex min-w-0 flex-1 flex-col">
-          <Topbar
-            session={session}
-            onOpenCommand={() => startTransition(() => setCommandOpen(true))}
-            onOpenQuickActions={() => startTransition(() => setQuickOpen(true))}
-          />
-          <main className="flex-1 px-3 pb-24 pt-4 sm:px-5 sm:pt-6 lg:pb-8">
-            <div className="mx-auto w-full max-w-7xl animate-fade-in">
-              {children}
+    <ThemeProvider>
+      <DensityProvider>
+        <NavProvider groups={groups} mobileTabs={mobileTabs}>
+          <div className="flex min-h-dvh bg-[#F1F4F7] text-ink-900 data-[density=compact]:[&_.soft-panel]:p-3">
+            <Sidebar
+              collapsed={collapsed}
+              onToggle={() => setCollapsed((v) => !v)}
+              groups={groups}
+            />
+            <div className="flex min-w-0 flex-1 flex-col">
+              {maintenanceMode &&
+              session.role !== "OWNER" &&
+              session.role !== "ADMIN" ? (
+                <div className="border-b border-amber-200 bg-amber-50 px-4 py-2 text-center text-sm text-amber-900">
+                  Το σύστημα βρίσκεται σε κατάσταση συντήρησης. Ορισμένες
+                  ενέργειες μπορεί να είναι περιορισμένες.
+                </div>
+              ) : null}
+              <Topbar
+                session={session}
+                onOpenCommand={() =>
+                  startTransition(() => setCommandOpen(true))
+                }
+                onOpenQuickActions={() =>
+                  startTransition(() => setQuickOpen(true))
+                }
+              />
+              <main className="flex-1 px-3 pb-24 pt-4 sm:px-5 sm:pt-6 lg:pb-8">
+                <div className="mx-auto w-full max-w-7xl animate-fade-in">
+                  {children}
+                </div>
+              </main>
             </div>
-          </main>
-        </div>
-        <MobileTabBar />
-        <CommandPalette
-          open={commandOpen}
-          onClose={() => setCommandOpen(false)}
-        />
-        <QuickActionsSheet
-          open={quickOpen}
-          onClose={() => setQuickOpen(false)}
-        />
-      </div>
-    </NavProvider>
+            <MobileTabBar />
+            <CommandPalette
+              open={commandOpen}
+              onClose={() => setCommandOpen(false)}
+            />
+            <QuickActionsSheet
+              open={quickOpen}
+              onClose={() => setQuickOpen(false)}
+            />
+            <AppToaster />
+          </div>
+        </NavProvider>
+      </DensityProvider>
+    </ThemeProvider>
   );
 }

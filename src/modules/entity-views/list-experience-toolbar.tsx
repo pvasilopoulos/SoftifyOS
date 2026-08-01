@@ -5,6 +5,7 @@ import {
   Columns3,
   LayoutGrid,
   List,
+  Map as MapIcon,
   Search,
   SlidersHorizontal,
   X,
@@ -12,7 +13,7 @@ import {
 import { cn } from "@/shared/lib/cn";
 import { Button } from "@/shared/ui/button";
 import { Badge } from "@/shared/ui/badge";
-import { ViewTabs } from "@/modules/entity-views/view-switcher";
+import { ViewSwitcher } from "@/modules/entity-views/view-switcher";
 import type {
   ListColumn,
   ListDensity,
@@ -78,6 +79,7 @@ const MODE_META: Partial<
   peek: { label: "Peek", icon: List },
   cards: { label: "Κάρτες", icon: LayoutGrid },
   kanban: { label: "Kanban", icon: LayoutGrid },
+  map: { label: "Χάρτης", icon: MapIcon },
 };
 
 export function ListExperienceToolbar({
@@ -169,18 +171,6 @@ export function ListExperienceToolbar({
 
   return (
     <div className="space-y-3">
-      {views.length > 1 ? (
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <ViewTabs views={views} value={viewId} onChange={onViewChange} />
-          <div className="flex items-center gap-2 text-xs text-slate-500">
-            <span className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2 py-1">
-              <ModeIcon size={12} />
-              {modeMeta?.label ?? mode}
-            </span>
-          </div>
-        </div>
-      ) : null}
-
       <div className="flex flex-col gap-2 lg:flex-row lg:items-center">
         {showSearch ? (
           <label className="soft-surface flex flex-1 items-center gap-2 px-3 py-2.5">
@@ -213,6 +203,19 @@ export function ListExperienceToolbar({
         )}
 
         <div className="flex flex-wrap items-center gap-1.5">
+          <ViewSwitcher
+            label="Λίστα"
+            views={views}
+            value={viewId}
+            onChange={onViewChange}
+          />
+          <span
+            className="inline-flex h-9 items-center gap-1 rounded-lg border border-slate-200/80 bg-white/80 px-2 text-xs text-slate-500"
+            title={modeMeta?.label ?? mode}
+          >
+            <ModeIcon size={12} />
+            <span className="hidden sm:inline">{modeMeta?.label ?? mode}</span>
+          </span>
           <Button
             variant="secondary"
             size="sm"

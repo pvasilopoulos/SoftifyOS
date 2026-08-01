@@ -6,9 +6,58 @@ import { emptyListConfig, lxId } from "./list-experience-types";
 
 export type { FormViewConfig, ListViewConfig };
 
+function listColumnFor(
+  key: string,
+  entity: EntityModule,
+  pin: "left" | "none" = "none",
+) {
+  const b = ENTITY_REGISTRY[entity].builtins.find((x) => x.key === key);
+  if (!b) return null;
+  return {
+    id: lxId("col"),
+    key: b.key,
+    source: "system" as const,
+    pin,
+    align:
+      b.type === "money" || b.type === "number"
+        ? ("end" as const)
+        : ("start" as const),
+    format:
+      b.type === "money"
+        ? ("money" as const)
+        : b.type === "date"
+          ? ("date" as const)
+          : b.type === "badge" || b.type === "select"
+            ? ("badge" as const)
+            : b.type === "boolean"
+              ? ("boolean" as const)
+              : ("default" as const),
+    sortable: true,
+    filterable: b.filterable !== false,
+    truncate: true,
+  };
+}
+
 function defaultListConfig(entity: EntityModule): ListViewConfig {
   const builtins = ENTITY_REGISTRY[entity].builtins.filter((b) => b.listable);
-  const preferred = builtins.slice(0, 6);
+  const preferredKeys =
+    entity === "CUSTOMERS"
+      ? [
+          "code",
+          "name",
+          "tradeName",
+          "vatNumber",
+          "taxOffice",
+          "city",
+          "phone",
+          "email",
+          "category",
+          "status",
+        ]
+      : builtins.slice(0, 6).map((b) => b.key);
+  const preferred = preferredKeys
+    .map((key, i) => listColumnFor(key, entity, i === 0 ? "left" : "none"))
+    .filter(Boolean) as NonNullable<ReturnType<typeof listColumnFor>>[];
   const base = emptyListConfig();
   return {
     ...base,
@@ -21,33 +70,11 @@ function defaultListConfig(entity: EntityModule): ListViewConfig {
       emptyTitle: `Δεν βρέθηκαν ${ENTITY_REGISTRY[entity].label.toLowerCase()}`,
       emptyCta: "navigate_new",
     },
-    columns: preferred.map((b, i) => ({
-      id: lxId("col"),
-      key: b.key,
-      source: "system" as const,
-      pin: i === 0 ? ("left" as const) : ("none" as const),
-      align:
-        b.type === "money" || b.type === "number"
-          ? ("end" as const)
-          : ("start" as const),
-      format:
-        b.type === "money"
-          ? ("money" as const)
-          : b.type === "date"
-            ? ("date" as const)
-            : b.type === "badge" || b.type === "select"
-              ? ("badge" as const)
-              : b.type === "boolean"
-                ? ("boolean" as const)
-                : ("default" as const),
-      sortable: true,
-      filterable: b.filterable !== false,
-      truncate: true,
-    })),
+    columns: preferred,
     sort: { id: "sort_primary", key: "createdAt", source: "system", dir: "desc" },
     pageSize: 50,
     rowActions: [
-      { id: "open", label: "Άνοιγμα", type: "navigate" },
+      { id: "open", label: "Άνοιγμα", type: "navigate", icon: "external-link" },
       ...(entity === "CUSTOMERS"
         ? [
             {
@@ -55,12 +82,14 @@ function defaultListConfig(entity: EntityModule): ListViewConfig {
               label: "Επεξεργασία",
               type: "form_edit" as const,
               formCode: "default",
+              icon: "pencil",
             },
             {
               id: "peek",
               label: "Γρήγορη προβολή",
               type: "form_peek" as const,
               formCode: "quick",
+              icon: "eye",
             },
           ]
         : []),
@@ -91,18 +120,305 @@ function defaultListConfig(entity: EntityModule): ListViewConfig {
   };
 }
 
+function fieldRefs(
+  keys: string[],
+  entity: EntityModule,
+  opts?: { required?: string[]; full?: string[] },
+) {
+  const map = new Map(
+    ENTITY_REGISTRY[entity].builtins.map((b) => [b.key, b] as const),
+  );
+  return keys
+    .filter((k) => map.has(k))
+    .map((key) => {
+      const b = map.get(key)!;
+      return {
+        id: fxId(key),
+        key,
+        source: "system" as const,
+        required: opts?.required?.includes(key) || b.required,
+        width:
+          opts?.full?.includes(key) || b.type === "textarea"
+            ? ("full" as const)
+            : ("half" as const),
+        defaultValue:
+          key === "status"
+            ? "ACTIVE"
+            : key === "country"
+              ? "GR"
+              : key === "currency"
+                ? "EUR"
+                : key === "locale"
+                  ? "el-GR"
+                  : key === "vatStatus"
+                    ? "NORMAL"
+                    : undefined,
+      };
+    });
+}
+
 function defaultFormConfig(entity: EntityModule): FormViewConfig {
+  const customId = "custom";
+
+  if (entity === "CUSTOMERS") {
+    return {
+      schemaVersion: 2,
+      mode: "edit",
+      lifecycle: "published",
+      page: {
+        showHeader: true,
+        showSide: true,
+        sideContent: "summary",
+        root: [
+          {
+            type: "tabs",
+            id: "main_tabs",
+            variant: "tabs",
+            tabs: [
+              {
+                id: "tab_identity",
+                title: "Ταυτότητα",
+                children: [
+                  {
+                    type: "section",
+                    id: "sec_identity",
+                    title: "Ταυτότητα",
+                    children: [
+                      {
+                        type: "fields",
+                        id: "f_identity",
+                        fields: fieldRefs(
+                          [
+                            "code",
+                            "name",
+                            "tradeName",
+                            "legalForm",
+                            "isPerson",
+                            "status",
+                            "category",
+                            "profession",
+                          ],
+                          entity,
+                          { required: ["code", "name"] },
+                        ),
+                      },
+                    ],
+                  },
+                ],
+              },
+              {
+                id: "tab_fiscal",
+                title: "Φορολογικά",
+                children: [
+                  {
+                    type: "section",
+                    id: "sec_fiscal",
+                    title: "Φορολογικά στοιχεία",
+                    children: [
+                      {
+                        type: "fields",
+                        id: "f_fiscal",
+                        fields: fieldRefs(
+                          [
+                            "vatNumber",
+                            "taxOffice",
+                            "vatStatus",
+                            "gemhNumber",
+                            "eoriNumber",
+                            "sendEinvoice",
+                          ],
+                          entity,
+                        ),
+                      },
+                    ],
+                  },
+                ],
+              },
+              {
+                id: "tab_address",
+                title: "Διεύθυνση",
+                children: [
+                  {
+                    type: "section",
+                    id: "sec_billing",
+                    title: "Έδρα / τιμολόγησης",
+                    children: [
+                      {
+                        type: "fields",
+                        id: "f_billing",
+                        fields: fieldRefs(
+                          [
+                            "address",
+                            "address2",
+                            "city",
+                            "postalCode",
+                            "region",
+                            "country",
+                          ],
+                          entity,
+                          { full: ["address", "address2"] },
+                        ),
+                      },
+                    ],
+                  },
+                  {
+                    type: "section",
+                    id: "sec_shipping",
+                    title: "Αποστολής",
+                    children: [
+                      {
+                        type: "fields",
+                        id: "f_shipping",
+                        fields: fieldRefs(
+                          [
+                            "shippingAddress",
+                            "shippingAddress2",
+                            "shippingCity",
+                            "shippingPostalCode",
+                            "shippingRegion",
+                            "shippingCountry",
+                            "shippingMethod",
+                          ],
+                          entity,
+                          { full: ["shippingAddress", "shippingAddress2"] },
+                        ),
+                      },
+                    ],
+                  },
+                ],
+              },
+              {
+                id: "tab_contact",
+                title: "Επικοινωνία",
+                children: [
+                  {
+                    type: "section",
+                    id: "sec_contact",
+                    title: "Στοιχεία επικοινωνίας",
+                    children: [
+                      {
+                        type: "fields",
+                        id: "f_contact",
+                        fields: fieldRefs(
+                          ["email", "phone", "mobile", "fax", "website"],
+                          entity,
+                        ),
+                      },
+                    ],
+                  },
+                ],
+              },
+              {
+                id: "tab_commercial",
+                title: "Εμπορικά",
+                children: [
+                  {
+                    type: "section",
+                    id: "sec_commercial",
+                    title: "Όροι & πωλήσεις",
+                    children: [
+                      {
+                        type: "fields",
+                        id: "f_commercial",
+                        fields: fieldRefs(
+                          [
+                            "salesperson",
+                            "paymentTermsDays",
+                            "paymentTermsLabel",
+                            "creditLimit",
+                            "currency",
+                            "locale",
+                            "discountPercent",
+                            "priceListCode",
+                            "isBlocked",
+                          ],
+                          entity,
+                        ),
+                      },
+                    ],
+                  },
+                ],
+              },
+              {
+                id: "tab_banking",
+                title: "Τραπεζικά",
+                children: [
+                  {
+                    type: "section",
+                    id: "sec_banking",
+                    title: "Τραπεζικός λογαριασμός",
+                    children: [
+                      {
+                        type: "fields",
+                        id: "f_banking",
+                        fields: fieldRefs(
+                          ["iban", "bic", "bankName", "bankAccountHolder"],
+                          entity,
+                          { full: ["iban", "bankAccountHolder"] },
+                        ),
+                      },
+                    ],
+                  },
+                ],
+              },
+              {
+                id: "tab_notes",
+                title: "Σημειώσεις",
+                children: [
+                  {
+                    type: "section",
+                    id: "sec_notes",
+                    title: "Σημειώσεις",
+                    children: [
+                      {
+                        type: "fields",
+                        id: "f_notes",
+                        fields: fieldRefs(["notes"], entity, {
+                          full: ["notes"],
+                        }),
+                      },
+                    ],
+                  },
+                ],
+              },
+              {
+                id: "tab_extra",
+                title: "Πρόσθετα",
+                children: [
+                  {
+                    type: "callout",
+                    id: fxId("call"),
+                    tone: "info",
+                    text: "Πρόσθεσε custom πεδία από τις Ρυθμίσεις · Πεδία & Προβολές.",
+                  },
+                  {
+                    type: "section",
+                    id: customId,
+                    title: "Πρόσθετα πεδία",
+                    children: [
+                      { type: "fields", id: `${customId}_fields`, fields: [] },
+                    ],
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+      rules: [],
+    };
+  }
+
   const formable = ENTITY_REGISTRY[entity].builtins.filter((b) => b.formable);
   const mainId = "main";
-  const customId = "custom";
   return {
     schemaVersion: 2,
     mode: "edit",
     lifecycle: "published",
     page: {
       showHeader: true,
-      showSide: entity === "CUSTOMERS",
-      sideContent: entity === "CUSTOMERS" ? "summary" : "none",
+      showSide: false,
+      sideContent: "none",
       root: [
         {
           type: "tabs",
@@ -200,8 +516,14 @@ function extraListViews(entity: EntityModule): Array<{
             density: "comfortable",
           },
           rowActions: [
-            { id: "edit", label: "Επεξεργασία", type: "form_edit", formCode: "default" },
-            { id: "open", label: "Άνοιγμα", type: "navigate" },
+            {
+              id: "edit",
+              label: "Επεξεργασία",
+              type: "form_edit",
+              formCode: "default",
+              icon: "pencil",
+            },
+            { id: "open", label: "Άνοιγμα", type: "navigate", icon: "external-link" },
           ],
         },
       },
@@ -219,9 +541,23 @@ function extraListViews(entity: EntityModule): Array<{
             editFormCode: "default",
           },
           rowActions: [
-            { id: "edit", label: "Επεξεργασία", type: "form_edit" },
-            { id: "open", label: "Καρτέλα", type: "navigate" },
+            { id: "edit", label: "Επεξεργασία", type: "form_edit", icon: "pencil" },
+            { id: "open", label: "Καρτέλα", type: "navigate", icon: "external-link" },
           ],
+        },
+      },
+      {
+        code: "map",
+        name: "Χάρτης πελατών",
+        description: "Διευθύνσεις σε χάρτη με clustering · κοντά μου",
+        config: {
+          ...defaultListConfig(entity),
+          mode: "map",
+          page: {
+            ...defaultListConfig(entity).page,
+            density: "comfortable",
+            rowClick: "navigate",
+          },
         },
       },
     ];
@@ -263,14 +599,11 @@ function extraFormViews(entity: EntityModule): Array<{
   config: FormViewConfig;
 }> {
   if (entity === "CUSTOMERS") {
-    const quick = ENTITY_REGISTRY.CUSTOMERS.builtins.filter((b) =>
-      ["code", "name", "vatNumber", "phone"].includes(b.key),
-    );
     return [
       {
         code: "quick",
         name: "Γρήγορη καταχώριση",
-        description: "Drawer / modal — ελάχιστα πεδία",
+        description: "Drawer / modal — βασικά ERP πεδία",
         config: {
           schemaVersion: 2,
           mode: "quick",
@@ -287,13 +620,20 @@ function extraFormViews(entity: EntityModule): Array<{
                   {
                     type: "fields",
                     id: "quick_fields",
-                    fields: quick.map((b, i) => ({
-                      id: `quick_${b.key}_${i}`,
-                      key: b.key,
-                      source: "system" as const,
-                      required: b.key === "code" || b.key === "name",
-                      width: "full" as const,
-                    })),
+                    fields: fieldRefs(
+                      [
+                        "code",
+                        "name",
+                        "vatNumber",
+                        "taxOffice",
+                        "phone",
+                        "email",
+                        "city",
+                        "category",
+                      ],
+                      entity,
+                      { required: ["code", "name"], full: ["code", "name"] },
+                    ),
                   },
                 ],
               },
@@ -305,7 +645,7 @@ function extraFormViews(entity: EntityModule): Array<{
       {
         code: "wizard",
         name: "Οδηγός καταχώρισης",
-        description: "Wizard βήματα",
+        description: "Wizard · ταυτότητα → φορολογικά → διεύθυνση → εμπορικά",
         config: {
           schemaVersion: 2,
           mode: "wizard",
@@ -326,55 +666,71 @@ function extraFormViews(entity: EntityModule): Array<{
                       {
                         type: "fields",
                         id: "w1_f",
-                        fields: ["code", "name", "vatNumber"].map((key, i) => ({
-                          id: `w1_${key}`,
-                          key,
-                          source: "system" as const,
-                          required: key !== "vatNumber",
-                          width: "full" as const,
-                        })),
+                        fields: fieldRefs(
+                          ["code", "name", "tradeName", "legalForm", "category"],
+                          entity,
+                          { required: ["code", "name"], full: ["code", "name"] },
+                        ),
                       },
                     ],
                   },
                   {
                     id: "w2",
-                    title: "Επικοινωνία",
+                    title: "Φορολογικά",
                     children: [
                       {
                         type: "fields",
                         id: "w2_f",
-                        fields: ["email", "phone", "notes"].map((key) => ({
-                          id: `w2_${key}`,
-                          key,
-                          source: "system" as const,
-                          width: key === "notes" ? ("full" as const) : ("half" as const),
-                        })),
+                        fields: fieldRefs(
+                          ["vatNumber", "taxOffice", "vatStatus", "gemhNumber"],
+                          entity,
+                        ),
                       },
                     ],
                   },
                   {
                     id: "w3",
-                    title: "Κατάσταση",
+                    title: "Διεύθυνση",
                     children: [
-                      {
-                        type: "callout",
-                        id: "w3_c",
-                        tone: "info",
-                        text: "Επίλεξε αν ο πελάτης είναι ενεργός.",
-                      },
                       {
                         type: "fields",
                         id: "w3_f",
-                        fields: [
-                          {
-                            id: "w3_status",
-                            key: "status",
-                            source: "system",
-                            required: true,
-                            width: "half",
-                            defaultValue: "ACTIVE",
-                          },
-                        ],
+                        fields: fieldRefs(
+                          [
+                            "address",
+                            "city",
+                            "postalCode",
+                            "region",
+                            "country",
+                            "email",
+                            "phone",
+                            "mobile",
+                          ],
+                          entity,
+                          { full: ["address"] },
+                        ),
+                      },
+                    ],
+                  },
+                  {
+                    id: "w4",
+                    title: "Εμπορικά",
+                    children: [
+                      {
+                        type: "fields",
+                        id: "w4_f",
+                        fields: fieldRefs(
+                          [
+                            "salesperson",
+                            "paymentTermsDays",
+                            "creditLimit",
+                            "currency",
+                            "status",
+                            "notes",
+                          ],
+                          entity,
+                          { full: ["notes"], required: ["status"] },
+                        ),
                       },
                     ],
                   },

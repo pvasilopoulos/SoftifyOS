@@ -32,6 +32,9 @@ export async function POST(
             glVatAccount: true,
             affectsInventory: true,
             siteId: true,
+            myDataEnabled: true,
+            myDataInvoiceType: true,
+            myDataVatCategory: true,
           },
         },
         lines: {
@@ -92,6 +95,7 @@ export async function POST(
     });
 
     let journalId: string | null = null;
+    let cogsJournalId: string | null = null;
     try {
       const journal = await tryPostInvoiceIssue(prisma, {
         tenantId: session.tenantId,
@@ -116,6 +120,7 @@ export async function POST(
       movements: string[];
       siteId?: string;
     } | null = null;
+    const inventoryEffect = invoice.series?.affectsInventory ?? "NONE";
     try {
       const { applyInvoiceInventoryEffect } = await import(
         "@/modules/inventory/service"
@@ -125,7 +130,7 @@ export async function POST(
         invoiceId: invoice.id,
         invoiceNumber: updated.number,
         siteId: invoice.siteId ?? invoice.series?.siteId,
-        effect: invoice.series?.affectsInventory ?? "NONE",
+        effect: inventoryEffect,
         lines: invoice.lines.map((l) => ({
           productId: l.productId,
           quantity: toNumber(l.quantity),
@@ -138,13 +143,67 @@ export async function POST(
       stockMeta = null;
     }
 
+    if (inventoryEffect === "OUT") {
+      try {
+        const { tryPostCogsForInvoice } = await import(
+          "@/modules/ledger/service"
+        );
+        const cogs = await tryPostCogsForInvoice(prisma, {
+          tenantId: session.tenantId,
+          invoiceId: invoice.id,
+          invoiceNumber: updated.number,
+          lines: invoice.lines.map((l) => ({
+            productId: l.productId,
+            quantity: toNumber(l.quantity),
+          })),
+          userId: session.sub,
+        });
+        cogsJournalId = cogs?.id ?? null;
+      } catch {
+        cogsJournalId = null;
+      }
+    }
+
+    let myDataId: string | null = null;
+    if (invoice.series?.myDataEnabled) {
+      try {
+        const { enqueueMyDataSubmission } = await import(
+          "@/modules/mydata/service"
+        );
+        const sub = await enqueueMyDataSubmission(prisma, {
+          tenantId: session.tenantId,
+          entityType: "invoice",
+          entityId: invoice.id,
+          entityNumber: updated.number,
+          invoiceType: invoice.series.myDataInvoiceType,
+          vatCategory: invoice.series.myDataVatCategory,
+          payload: {
+            number: updated.number,
+            kind: invoice.kind,
+            customerId: invoice.customerId,
+            total: toNumber(updated.total),
+            vatAmount: toNumber(updated.vatAmount),
+          },
+        });
+        myDataId = sub.id;
+      } catch {
+        myDataId = null;
+      }
+    }
+
     await writeAuditEvent({
       tenantId: session.tenantId,
       userId: session.sub,
       action: "invoice.issue",
       entity: "invoice",
       entityId: invoice.id,
-      meta: { number: updated.number, journalId, stock: stockMeta },
+      meta: {
+        number: updated.number,
+        journalId,
+        cogsJournalId,
+        stock: stockMeta,
+        myDataId,
+      },
     });
 
     const after = await dispatchScriptEvent(prisma, {
@@ -161,6 +220,8 @@ export async function POST(
         vatAmount: toNumber(updated.vatAmount),
         issuedAt: updated.issuedAt?.toISOString() ?? null,
         journalId,
+        cogsJournalId,
+        myDataId,
       },
       previous: issueRecord,
       user: scriptActorFromSession(session),
@@ -172,7 +233,9 @@ export async function POST(
           id: updated.id,
           status: updated.status,
           journalId,
+          cogsJournalId,
           stock: stockMeta,
+          myDataId,
         },
         warning: after.failed.message,
         script: after.failed.scriptCode,
@@ -184,7 +247,9 @@ export async function POST(
         id: updated.id,
         status: updated.status,
         journalId,
+        cogsJournalId,
         stock: stockMeta,
+        myDataId,
       },
     });
   } catch (error) {

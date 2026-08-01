@@ -27,9 +27,17 @@ const menuNodeSchema: z.ZodType<MenuNodeConfig> = z.lazy(() =>
   }),
 ) as z.ZodType<MenuNodeConfig>;
 
+const footerIdsSchema = z.array(z.string().min(1).max(80)).max(3);
+
 const saveSchema = z.object({
   menu: z.array(menuNodeSchema).min(1).max(50),
   navGroupsDefaultExpanded: z.boolean().optional(),
+  mobileFooterOverrides: z
+    .object({
+      byUserId: z.record(z.string(), footerIdsSchema).optional(),
+      byGroupId: z.record(z.string(), footerIdsSchema).optional(),
+    })
+    .optional(),
 });
 
 export async function GET() {
@@ -59,6 +67,7 @@ export async function GET() {
       menu: settings.menuTree,
       defaultMenu: defaultMenuTree,
       navGroupsDefaultExpanded: settings.navGroupsDefaultExpanded,
+      mobileFooterOverrides: settings.mobileFooterOverrides,
       audienceOptions: {
         groups,
         users: memberships.map((m) => m.user),
@@ -86,9 +95,16 @@ export async function PUT(request: Request) {
     const data: {
       menuJson: MenuNodeConfig[];
       navGroupsDefaultExpanded?: boolean;
+      mobileFooterOverrides?: {
+        byUserId?: Record<string, string[]>;
+        byGroupId?: Record<string, string[]>;
+      };
     } = { menuJson: body.menu };
     if (typeof body.navGroupsDefaultExpanded === "boolean") {
       data.navGroupsDefaultExpanded = body.navGroupsDefaultExpanded;
+    }
+    if (body.mobileFooterOverrides) {
+      data.mobileFooterOverrides = body.mobileFooterOverrides;
     }
 
     await prisma.tenantSettings.upsert({
@@ -98,6 +114,7 @@ export async function PUT(request: Request) {
         tenantId: session.tenantId,
         menuJson: body.menu,
         navGroupsDefaultExpanded: body.navGroupsDefaultExpanded ?? true,
+        mobileFooterOverrides: body.mobileFooterOverrides ?? {},
       },
     });
 
@@ -110,6 +127,12 @@ export async function PUT(request: Request) {
       meta: {
         nodes: body.menu.length,
         navGroupsDefaultExpanded: body.navGroupsDefaultExpanded,
+        footerUserOverrides: Object.keys(
+          body.mobileFooterOverrides?.byUserId ?? {},
+        ).length,
+        footerGroupOverrides: Object.keys(
+          body.mobileFooterOverrides?.byGroupId ?? {},
+        ).length,
       },
     });
 
@@ -118,6 +141,7 @@ export async function PUT(request: Request) {
       ok: true,
       menu: settings.menuTree,
       navGroupsDefaultExpanded: settings.navGroupsDefaultExpanded,
+      mobileFooterOverrides: settings.mobileFooterOverrides,
     });
   } catch (error) {
     if (error instanceof z.ZodError) {
@@ -149,17 +173,20 @@ export async function POST(request: Request) {
         update: {
           menuJson: defaultMenuTree,
           navGroupsDefaultExpanded: true,
+          mobileFooterOverrides: {},
         },
         create: {
           tenantId: session.tenantId,
           menuJson: defaultMenuTree,
           navGroupsDefaultExpanded: true,
+          mobileFooterOverrides: {},
         },
       });
       return NextResponse.json({
         ok: true,
         menu: defaultMenuTree,
         navGroupsDefaultExpanded: true,
+        mobileFooterOverrides: { byUserId: {}, byGroupId: {} },
       });
     }
     return NextResponse.json({ error: "Unknown action" }, { status: 400 });

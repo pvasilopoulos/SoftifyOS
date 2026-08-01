@@ -1,11 +1,27 @@
 @import "tailwindcss";
 
-:root {
+:root,
+html[data-theme="light"] {
   --background: #f1f4f7;
   --foreground: #0b1220;
   --card: #ffffff;
   --teal: #0d9488;
   --ink: #0b1220;
+  --panel-bg: rgb(255 255 255 / 0.92);
+  --panel-border: rgb(226 232 240 / 0.9);
+  --muted: #64748b;
+}
+
+html[data-theme="dark"] {
+  --background: #0f172a;
+  --foreground: #e2e8f0;
+  --card: #1e293b;
+  --teal: #2dd4bf;
+  --ink: #e2e8f0;
+  --panel-bg: rgb(30 41 59 / 0.95);
+  --panel-border: rgb(51 65 85 / 0.9);
+  --muted: #94a3b8;
+  color-scheme: dark;
 }
 
 @theme inline {
@@ -68,16 +84,53 @@ body {
 }
 
 .soft-panel {
-  border: 1px solid rgb(226 232 240 / 0.9);
-  background: rgb(255 255 255 / 0.92);
+  border: 1px solid var(--panel-border);
+  background: var(--panel-bg);
   border-radius: 1.25rem;
   box-shadow: 0 1px 2px rgb(11 18 32 / 0.04);
 }
 
 .soft-surface {
-  border: 1px solid rgb(226 232 240 / 0.85);
-  background: white;
+  border: 1px solid var(--panel-border);
+  background: var(--card);
   border-radius: 1rem;
+}
+
+html[data-theme="dark"] body {
+  background: var(--background);
+  color: var(--foreground);
+}
+
+html[data-theme="dark"] .bg-\[\#F1F4F7\],
+html[data-theme="dark"] .bg-\[\#F1F4F7\]\/90 {
+  background-color: #0f172a !important;
+}
+
+html[data-theme="dark"] .bg-white,
+html[data-theme="dark"] .bg-white\/90 {
+  background-color: #1e293b !important;
+}
+
+html[data-theme="dark"] .text-ink-900,
+html[data-theme="dark"] .text-ink-950 {
+  color: #e2e8f0 !important;
+}
+
+html[data-theme="dark"] .border-slate-200,
+html[data-theme="dark"] .border-slate-100 {
+  border-color: rgb(51 65 85) !important;
+}
+
+html[data-theme="dark"] .text-slate-500,
+html[data-theme="dark"] .text-slate-600,
+html[data-theme="dark"] .text-slate-400 {
+  color: var(--muted) !important;
+}
+
+html[data-theme="dark"] .bg-slate-50,
+html[data-theme="dark"] .bg-slate-50\/80,
+html[data-theme="dark"] .bg-slate-100 {
+  background-color: #334155 !important;
 }
 
 /* Cheaper paint for long lists (1M+ ready pattern) */

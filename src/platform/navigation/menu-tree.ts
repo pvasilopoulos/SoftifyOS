@@ -46,28 +46,58 @@ export function collectNodeIds(tree: MenuNodeConfig[]): Set<string> {
   return ids;
 }
 
+export type MenuCatalogEntry = {
+  node: MenuNodeConfig;
+  /** True when a node with the same id (or same href) already exists in the tree. */
+  inMenu: boolean;
+};
+
+function catalogLinkTemplate(node: MenuNodeConfig): MenuNodeConfig {
+  return {
+    id: node.id,
+    type: "link",
+    label: node.label,
+    href: node.href,
+    icon: node.icon,
+    roles: node.roles ? [...node.roles] : undefined,
+    visible: true,
+    mobileTab: false,
+  };
+}
+
+/** All link templates from the default menu, with in-menu status. */
+export function getMenuCatalog(
+  tree: MenuNodeConfig[],
+  catalogSource: MenuNodeConfig[] = defaultMenuTree,
+): MenuCatalogEntry[] {
+  const usedIds = collectNodeIds(tree);
+  const usedHrefs = new Set(
+    collectLinkNodes(tree)
+      .map((n) => n.href)
+      .filter((h): h is string => Boolean(h)),
+  );
+  const entries: MenuCatalogEntry[] = [];
+  walkMenuNodes(catalogSource, (node) => {
+    if (node.type === "link" && node.href) {
+      entries.push({
+        node: catalogLinkTemplate(node),
+        inMenu: usedIds.has(node.id) || usedHrefs.has(node.href),
+      });
+    }
+  });
+  return entries.sort((a, b) =>
+    a.node.label.localeCompare(b.node.label, "el"),
+  );
+}
+
 /** Link templates from the default menu that are not currently in the tree. */
 export function getAvailableCatalogLinks(
   tree: MenuNodeConfig[],
   catalogSource: MenuNodeConfig[] = defaultMenuTree,
 ): MenuNodeConfig[] {
-  const used = collectNodeIds(tree);
-  const available: MenuNodeConfig[] = [];
-  walkMenuNodes(catalogSource, (node) => {
-    if (node.type === "link" && node.href && !used.has(node.id)) {
-      available.push({
-        id: node.id,
-        type: "link",
-        label: node.label,
-        href: node.href,
-        icon: node.icon,
-        roles: node.roles ? [...node.roles] : undefined,
-        visible: true,
-        mobileTab: false,
-      });
-    }
-  });
-  return available.sort((a, b) => a.label.localeCompare(b.label, "el"));
+  return getMenuCatalog(tree, catalogSource)
+    .filter((e) => !e.inMenu)
+    .map((e) => e.node);
 }
 
 export function findNodeLocation(
@@ -217,4 +247,70 @@ export function resolveMobileTabsFromGroups(groups: NavGroup[]): NavItem[] {
     .sort((a, b) => (a.mobileOrder ?? 999) - (b.mobileOrder ?? 999))
     .slice(0, MOBILE_FOOTER_SLOT_COUNT);
   return [...custom, MORE_NAV_ITEM];
+}
+
+export type MobileFooterOverrides = {
+  byUserId?: Record<string, string[]>;
+  byGroupId?: Record<string, string[]>;
+};
+
+export function parseMobileFooterOverrides(
+  raw: unknown,
+): MobileFooterOverrides {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
+  const obj = raw as Record<string, unknown>;
+  const cleanMap = (value: unknown): Record<string, string[]> => {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+    const out: Record<string, string[]> = {};
+    for (const [key, ids] of Object.entries(value as Record<string, unknown>)) {
+      if (!key || !Array.isArray(ids)) continue;
+      const list = ids
+        .filter((id): id is string => typeof id === "string" && id.length > 0)
+        .slice(0, MOBILE_FOOTER_SLOT_COUNT);
+      if (list.length) out[key] = list;
+    }
+    return out;
+  };
+  return {
+    byUserId: cleanMap(obj.byUserId),
+    byGroupId: cleanMap(obj.byGroupId),
+  };
+}
+
+/** Pick override link ids: user wins, then first matching group. */
+export function pickMobileFooterOverrideIds(
+  audience: { userId?: string; groupIds?: string[] } | undefined,
+  overrides: MobileFooterOverrides | null | undefined,
+): string[] | null {
+  if (!overrides) return null;
+  if (audience?.userId) {
+    const userIds = overrides.byUserId?.[audience.userId];
+    if (userIds?.length) return userIds.slice(0, MOBILE_FOOTER_SLOT_COUNT);
+  }
+  if (audience?.groupIds?.length && overrides.byGroupId) {
+    for (const groupId of audience.groupIds) {
+      const ids = overrides.byGroupId[groupId];
+      if (ids?.length) return ids.slice(0, MOBILE_FOOTER_SLOT_COUNT);
+    }
+  }
+  return null;
+}
+
+export function resolveMobileTabsForAudience(
+  groups: NavGroup[],
+  audience?: { userId?: string; groupIds?: string[] },
+  overrides?: MobileFooterOverrides | null,
+): NavItem[] {
+  const visibleById = new Map(
+    groups.flatMap((g) => g.items).map((item) => [item.id, item]),
+  );
+  const overrideIds = pickMobileFooterOverrideIds(audience, overrides);
+  if (overrideIds?.length) {
+    const tabs = overrideIds
+      .map((id) => visibleById.get(id))
+      .filter((item): item is NavItem => Boolean(item))
+      .slice(0, MOBILE_FOOTER_SLOT_COUNT);
+    if (tabs.length > 0) return [...tabs, MORE_NAV_ITEM];
+  }
+  return resolveMobileTabsFromGroups(groups);
 }

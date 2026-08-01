@@ -10,6 +10,10 @@ import {
   serializeListView,
 } from "@/modules/entity-views/service";
 import { ENTITY_MODULES } from "@/modules/entity-views/registry";
+import {
+  entitySupportsDetailTabs,
+  getEntityDetailLayout,
+} from "@/modules/entity-views/detail-tabs";
 import { EntityViewsClient } from "./entity-views-client";
 
 export const metadata = { title: "Πεδία & Προβολές" };
@@ -47,6 +51,15 @@ export default async function EntityViewsSettingsPage() {
     }
   >;
 
+  const detailLayouts = Object.fromEntries(
+    await Promise.all(
+      ENTITY_MODULES.filter(entitySupportsDetailTabs).map(async (entity) => [
+        entity,
+        await getEntityDetailLayout(prisma, session.tenantId, entity),
+      ]),
+    ),
+  );
+
   return (
     <EntityViewsClient
       initialFields={fields.map((f) => ({
@@ -65,6 +78,7 @@ export default async function EntityViewsSettingsPage() {
         isActive: f.isActive,
       }))}
       initialViews={byEntity}
+      initialDetailLayouts={detailLayouts}
     />
   );
 }

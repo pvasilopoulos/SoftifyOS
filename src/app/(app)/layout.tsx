@@ -5,6 +5,7 @@ import {
   getMenuAudienceForSession,
   getTenantMenuSettings,
 } from "@/platform/navigation/resolve-menu";
+import { prisma } from "@/server/db";
 
 export default async function AppLayout({
   children,
@@ -16,15 +17,22 @@ export default async function AppLayout({
     redirect("/login");
   }
 
-  const [{ menuTree, navGroupsDefaultExpanded }, menuAudience] =
-    await Promise.all([
-      getTenantMenuSettings(session.tenantId),
-      getMenuAudienceForSession({
-        tenantId: session.tenantId,
-        userId: session.sub,
-        role: session.role,
-      }),
-    ]);
+  const [
+    { menuTree, navGroupsDefaultExpanded, mobileFooterOverrides },
+    menuAudience,
+    orgSettings,
+  ] = await Promise.all([
+    getTenantMenuSettings(session.tenantId),
+    getMenuAudienceForSession({
+      tenantId: session.tenantId,
+      userId: session.sub,
+      role: session.role,
+    }),
+    prisma.tenantSettings.findUnique({
+      where: { tenantId: session.tenantId },
+      select: { maintenanceMode: true },
+    }),
+  ]);
 
   return (
     <AppShell
@@ -32,6 +40,8 @@ export default async function AppLayout({
       menuTree={menuTree}
       menuAudience={menuAudience}
       navGroupsDefaultExpanded={navGroupsDefaultExpanded}
+      mobileFooterOverrides={mobileFooterOverrides}
+      maintenanceMode={Boolean(orgSettings?.maintenanceMode)}
     >
       {children}
     </AppShell>

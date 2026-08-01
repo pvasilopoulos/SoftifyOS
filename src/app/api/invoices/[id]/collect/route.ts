@@ -35,10 +35,14 @@ export async function POST(
       where: { id, tenantId: session.tenantId },
       select: {
         id: true,
+        number: true,
         status: true,
         total: true,
         paidAmount: true,
         seriesId: true,
+        series: {
+          select: { glDebitAccount: true },
+        },
       },
     });
     if (!invoice) {
@@ -137,6 +141,36 @@ export async function POST(
       });
     });
 
+    let journalId: string | null = null;
+    try {
+      const payment = await prisma.invoicePayment.findFirst({
+        where: { tenantId: session.tenantId, invoiceId: invoice.id },
+        orderBy: { createdAt: "desc" },
+        select: { id: true },
+      });
+      const pmGl = await prisma.paymentMethod.findFirst({
+        where: { id: method.id, tenantId: session.tenantId },
+        select: { glAccount: true, glClearingAccount: true },
+      });
+      const { tryPostInvoiceCollect } = await import("@/modules/ledger/service");
+      const journal = await tryPostInvoiceCollect(prisma, {
+        tenantId: session.tenantId,
+        invoiceId: invoice.id,
+        invoiceNumber: updated.number,
+        amount: body.amount,
+        paymentId: payment?.id ?? null,
+        glArAccount: invoice.series?.glDebitAccount ?? "30.00.00",
+        glCashAccount:
+          pmGl?.glAccount ||
+          pmGl?.glClearingAccount ||
+          "38.00.00",
+        userId: session.sub,
+      });
+      journalId = journal?.id ?? null;
+    } catch {
+      journalId = null;
+    }
+
     await writeAuditEvent({
       tenantId: session.tenantId,
       userId: session.sub,
@@ -150,6 +184,7 @@ export async function POST(
         paidAmount,
         status: nextStatus,
         note: body.note || null,
+        journalId,
       },
     });
 
@@ -163,6 +198,7 @@ export async function POST(
         balance: roundMoney(
           toNumber(updated.total) - toNumber(updated.paidAmount),
         ),
+        journalId,
       },
     });
   } catch (error) {

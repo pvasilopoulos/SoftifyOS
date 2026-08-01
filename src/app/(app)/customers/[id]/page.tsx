@@ -11,8 +11,9 @@ import {
   serializeFormView,
 } from "@/modules/entity-views/service";
 import { parseCustomFields } from "@/modules/entity-views/types";
-import { CustomerHierarchyClient } from "./customer-hierarchy-client";
-import { CustomerEditPanel } from "./customer-edit-panel";
+import { Customer360 } from "./customer-360";
+import { toNumber } from "@/modules/sales/invoice-utils";
+import { getEntityDetailLayout } from "@/modules/entity-views/detail-tabs";
 
 export const dynamic = "force-dynamic";
 
@@ -38,10 +39,21 @@ export default async function CustomerDetailPage({
   if (!session) redirect("/login");
 
   const { id } = await params;
-  const [customer, formViews, customFields] = await Promise.all([
+  const [
+    customer,
+    formViews,
+    customFields,
+    invoices,
+    orders,
+    activities,
+    detailLayout,
+  ] = await Promise.all([
     prisma.customer.findFirst({
       where: { id, tenantId: session.tenantId },
       include: {
+        contacts: {
+          orderBy: [{ isPrimary: "desc" }, { name: "asc" }],
+        },
         branches: {
           orderBy: [{ isPrimary: "desc" }, { name: "asc" }],
           include: {
@@ -52,26 +64,48 @@ export default async function CustomerDetailPage({
     }),
     listEntityFormViews(prisma, session.tenantId, "CUSTOMERS", true),
     listCustomFields(prisma, session.tenantId, "CUSTOMERS", true),
+    prisma.invoice.findMany({
+      where: { tenantId: session.tenantId, customerId: id },
+      orderBy: { createdAt: "desc" },
+      take: 20,
+      select: {
+        id: true,
+        number: true,
+        status: true,
+        total: true,
+        paidAmount: true,
+        issuedAt: true,
+      },
+    }),
+    prisma.order.findMany({
+      where: { tenantId: session.tenantId, customerId: id },
+      orderBy: { createdAt: "desc" },
+      take: 20,
+      select: {
+        id: true,
+        number: true,
+        status: true,
+        kind: true,
+        total: true,
+      },
+    }),
+    prisma.crmActivity.findMany({
+      where: { tenantId: session.tenantId, customerId: id },
+      orderBy: { createdAt: "desc" },
+      take: 30,
+    }),
+    getEntityDetailLayout(prisma, session.tenantId, "CUSTOMERS"),
   ]);
 
   if (!customer) notFound();
 
-  const payload = {
-    ...customer,
-    createdAt: customer.createdAt.toISOString(),
-    updatedAt: customer.updatedAt.toISOString(),
-    branches: customer.branches.map((b) => ({
-      ...b,
-      createdAt: b.createdAt.toISOString(),
-      updatedAt: b.updatedAt.toISOString(),
-      spaces: b.spaces.map((s) => ({
-        ...s,
-        areaSqm: s.areaSqm == null ? null : Number(s.areaSqm),
-        createdAt: s.createdAt.toISOString(),
-        updatedAt: s.updatedAt.toISOString(),
-      })),
-    })),
-  };
+  const openInvoices = invoices.filter((i) =>
+    ["ISSUED", "PARTIAL", "OVERDUE"].includes(i.status),
+  );
+  const openBalance = openInvoices.reduce(
+    (s, i) => s + Math.max(0, toNumber(i.total) - toNumber(i.paidAmount)),
+    0,
+  );
 
   const fieldDefs = customFields.map((f) => ({
     code: f.code,
@@ -81,8 +115,29 @@ export default async function CustomerDetailPage({
     required: f.required,
   }));
 
+  const branches = customer.branches.map((b) => ({
+    id: b.id,
+    code: b.code,
+    name: b.name,
+    address: b.address,
+    city: b.city,
+    postalCode: b.postalCode,
+    phone: b.phone,
+    isPrimary: b.isPrimary,
+    spaces: b.spaces.map((s) => ({
+      id: s.id,
+      code: s.code,
+      name: s.name,
+      type: s.type,
+      floorLabel: s.floorLabel,
+      areaSqm: s.areaSqm == null ? null : Number(s.areaSqm),
+      notes: s.notes,
+    })),
+  }));
+
   return (
     <div className="space-y-5">
+      {/* Region: header */}
       <div>
         <Link
           href="/customers"
@@ -93,7 +148,15 @@ export default async function CustomerDetailPage({
         </Link>
         <PageHeader
           title={customer.name}
-          description={`${customer.code}${customer.vatNumber ? ` · ΑΦΜ ${customer.vatNumber}` : ""}`}
+          description={[
+            customer.code,
+            customer.tradeName,
+            customer.vatNumber ? `ΑΦΜ ${customer.vatNumber}` : null,
+            customer.taxOffice ? `ΔΟΥ ${customer.taxOffice}` : null,
+            customer.city,
+          ]
+            .filter(Boolean)
+            .join(" · ")}
           actions={
             <Badge tone={customer.status === "ACTIVE" ? "emerald" : "slate"}>
               {customer.status === "ACTIVE" ? "Ενεργός" : "Ανενεργός"}
@@ -102,27 +165,93 @@ export default async function CustomerDetailPage({
         />
       </div>
 
-      <CustomerEditPanel
+      <Customer360
         customerId={customer.id}
-        canEdit={session.role !== "VIEWER"}
-        formViews={formViews.map(serializeFormView)}
-        customFields={fieldDefs}
-        initial={{
+        canWrite={session.role !== "VIEWER"}
+        role={session.role}
+        openBalance={openBalance}
+        openInvoices={openInvoices.length}
+        detailLayout={detailLayout}
+        customer={{
+          id: customer.id,
           code: customer.code,
           name: customer.name,
+          tradeName: customer.tradeName,
+          legalForm: customer.legalForm,
+          isPerson: customer.isPerson,
           vatNumber: customer.vatNumber,
+          taxOffice: customer.taxOffice,
+          gemhNumber: customer.gemhNumber,
+          eoriNumber: customer.eoriNumber,
+          vatStatus: customer.vatStatus,
+          profession: customer.profession,
           email: customer.email,
           phone: customer.phone,
+          mobile: customer.mobile,
+          fax: customer.fax,
+          website: customer.website,
+          address: customer.address,
+          address2: customer.address2,
+          city: customer.city,
+          postalCode: customer.postalCode,
+          region: customer.region,
+          country: customer.country,
+          shippingAddress: customer.shippingAddress,
+          shippingAddress2: customer.shippingAddress2,
+          shippingCity: customer.shippingCity,
+          shippingPostalCode: customer.shippingPostalCode,
+          shippingRegion: customer.shippingRegion,
+          shippingCountry: customer.shippingCountry,
+          category: customer.category,
+          salesperson: customer.salesperson,
+          paymentTermsDays: customer.paymentTermsDays,
+          paymentTermsLabel: customer.paymentTermsLabel,
+          creditLimit:
+            customer.creditLimit == null ? null : Number(customer.creditLimit),
+          currency: customer.currency,
+          locale: customer.locale,
+          discountPercent:
+            customer.discountPercent == null
+              ? null
+              : Number(customer.discountPercent),
+          priceListCode: customer.priceListCode,
+          shippingMethod: customer.shippingMethod,
+          iban: customer.iban,
+          bic: customer.bic,
+          bankName: customer.bankName,
+          bankAccountHolder: customer.bankAccountHolder,
+          isBlocked: customer.isBlocked,
+          sendEinvoice: customer.sendEinvoice,
           notes: customer.notes,
           status: customer.status,
           customFields: parseCustomFields(customer.customFields),
         }}
-      />
-
-      <CustomerHierarchyClient
-        customerId={customer.id}
-        initialBranches={payload.branches}
-        canEdit={session.role !== "VIEWER"}
+        contacts={customer.contacts}
+        formViews={formViews.map(serializeFormView)}
+        customFields={fieldDefs}
+        branches={branches}
+        invoices={invoices.map((i) => ({
+          id: i.id,
+          number: i.number,
+          status: i.status,
+          total: toNumber(i.total),
+          balance: Math.max(0, toNumber(i.total) - toNumber(i.paidAmount)),
+          issuedAt: i.issuedAt?.toISOString() ?? null,
+        }))}
+        orders={orders.map((o) => ({
+          id: o.id,
+          number: o.number,
+          status: o.status,
+          kind: o.kind,
+          total: toNumber(o.total),
+        }))}
+        activities={activities.map((a) => ({
+          id: a.id,
+          kind: a.kind,
+          title: a.title,
+          dueAt: a.dueAt?.toISOString() ?? null,
+          createdAt: a.createdAt.toISOString(),
+        }))}
       />
     </div>
   );

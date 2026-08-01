@@ -6,7 +6,7 @@ import { writeAuditEvent } from "@/platform/tenancy/audit";
 import { getErrorMessage } from "@/shared/lib/safe";
 import { journalCreateSchema } from "@/modules/ledger/schemas";
 import {
-  createAndPostJournal,
+  createJournal,
   ensureChartOfAccounts,
   LedgerError,
 } from "@/modules/ledger/service";
@@ -14,35 +14,49 @@ import { toNumber } from "@/modules/sales/invoice-utils";
 
 export const dynamic = "force-dynamic";
 
-export async function GET() {
+function serializeJournal(j: {
+  lines: Array<{ debit: unknown; credit: unknown; [k: string]: unknown }>;
+  [k: string]: unknown;
+}) {
+  return {
+    ...j,
+    lines: j.lines.map((l) => ({
+      ...l,
+      debit: toNumber(l.debit),
+      credit: toNumber(l.credit),
+    })),
+  };
+}
+
+export async function GET(request: Request) {
   try {
     const session = await getSession();
     if (!session) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
     await ensureChartOfAccounts(prisma, session.tenantId);
+    const url = new URL(request.url);
+    const status = url.searchParams.get("status");
     const items = await prisma.journalEntry.findMany({
-      where: { tenantId: session.tenantId },
-      orderBy: [{ postedAt: "desc" }, { createdAt: "desc" }],
-      take: 100,
+      where: {
+        tenantId: session.tenantId,
+        ...(status ? { status: status as "DRAFT" | "POSTED" | "VOID" } : {}),
+      },
+      orderBy: [{ entryDate: "desc" }, { createdAt: "desc" }],
+      take: 150,
       include: {
         lines: {
           include: {
             glAccount: { select: { code: true, name: true } },
+            costCenter: { select: { code: true, name: true } },
           },
           orderBy: { lineNo: "asc" },
         },
+        fiscalPeriod: { select: { code: true, name: true } },
       },
     });
     return NextResponse.json({
-      items: items.map((j) => ({
-        ...j,
-        lines: j.lines.map((l) => ({
-          ...l,
-          debit: toNumber(l.debit),
-          credit: toNumber(l.credit),
-        })),
-      })),
+      items: items.map(serializeJournal),
     });
   } catch (error) {
     return NextResponse.json(
@@ -63,35 +77,26 @@ export async function POST(request: Request) {
     }
 
     const body = journalCreateSchema.parse(await request.json());
-    const item = await createAndPostJournal(prisma, {
+    const item = await createJournal(prisma, {
       tenantId: session.tenantId,
       description: body.description,
       createdByUserId: session.sub,
+      entryDate: body.entryDate,
+      isOpening: body.isOpening,
+      post: body.post,
       lines: body.lines,
     });
 
     await writeAuditEvent({
       tenantId: session.tenantId,
       userId: session.sub,
-      action: "finance.journal.post",
+      action: body.post ? "finance.journal.post" : "finance.journal.draft",
       entity: "journal_entry",
       entityId: item.id,
-      meta: { number: item.number, lines: item.lines.length },
+      meta: { number: item.number, lines: item.lines.length, status: item.status },
     });
 
-    return NextResponse.json(
-      {
-        item: {
-          ...item,
-          lines: item.lines.map((l) => ({
-            ...l,
-            debit: toNumber(l.debit),
-            credit: toNumber(l.credit),
-          })),
-        },
-      },
-      { status: 201 },
-    );
+    return NextResponse.json({ item: serializeJournal(item) }, { status: 201 });
   } catch (error) {
     if (error instanceof LedgerError) {
       return NextResponse.json({ error: error.message }, { status: error.status });

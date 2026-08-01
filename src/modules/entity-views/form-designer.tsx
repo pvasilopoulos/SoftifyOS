@@ -27,11 +27,15 @@ import { entityLabel, type BuiltinField } from "./registry";
 import {
   emptyFormConfig,
   findBlock,
+  findSiblingContext,
   fxId,
   insertChild,
   mapBlocks,
+  moveBlock,
   normalizeFormConfig,
   removeBlock,
+  duplicateBlock,
+  walkFormBlocks,
   walkFormFields,
   type FieldWidth,
   type FormBlock,
@@ -72,7 +76,8 @@ type FormViewItem = {
 type Selection =
   | { kind: "page" }
   | { kind: "block"; id: string }
-  | { kind: "field"; blockId: string; fieldId: string };
+  | { kind: "field"; blockId: string; fieldId: string }
+  | { kind: "slot"; containerId: string; slotId: string };
 
 const MODES: FormMode[] = ["create", "edit", "view", "quick", "wizard"];
 
@@ -228,109 +233,300 @@ function blockLabel(b: FormBlock): string {
   }
 }
 
+function walkNestedBlocks(blocks: FormBlock[], visit: (b: FormBlock) => void) {
+  for (const b of blocks) {
+    visit(b);
+    switch (b.type) {
+      case "section":
+        walkNestedBlocks(b.children, visit);
+        break;
+      case "tabs":
+        for (const t of b.tabs) walkNestedBlocks(t.children, visit);
+        break;
+      case "columns":
+        for (const c of b.columns) walkNestedBlocks(c.children, visit);
+        break;
+      case "accordion":
+        for (const it of b.items) walkNestedBlocks(it.children, visit);
+        break;
+      default:
+        break;
+    }
+  }
+}
+
+/** Nested blocks + field refs inside a block (excludes the block itself). */
+function countNestedContent(block: FormBlock): number {
+  let n = 0;
+  const tally = (blocks: FormBlock[]) => {
+    walkNestedBlocks(blocks, (b) => {
+      n += 1;
+      if (b.type === "fields") n += b.fields.length;
+    });
+  };
+  switch (block.type) {
+    case "section":
+      tally(block.children);
+      break;
+    case "tabs":
+      for (const t of block.tabs) tally(t.children);
+      break;
+    case "columns":
+      for (const c of block.columns) tally(c.children);
+      break;
+    case "accordion":
+      for (const it of block.items) tally(it.children);
+      break;
+    case "fields":
+      return block.fields.length;
+    default:
+      return 0;
+  }
+  return n;
+}
+
+function confirmRemoveBlock(block: FormBlock): boolean {
+  const nested = countNestedContent(block);
+  if (nested === 0) return true;
+  return window.confirm(
+    `Να αφαιρεθεί «${blockLabel(block)}» και τα ${nested} εσωτερικά στοιχεία;`,
+  );
+}
+
 function StructureTree({
   blocks,
   depth,
   selection,
   onSelect,
+  onRemoveBlock,
+  onRemoveField,
+  onMoveBlock,
+  onDuplicateBlock,
 }: {
   blocks: FormBlock[];
   depth: number;
   selection: Selection;
   onSelect: (s: Selection) => void;
+  onRemoveBlock: (id: string) => void;
+  onRemoveField: (blockId: string, fieldId: string) => void;
+  onMoveBlock: (id: string, dir: -1 | 1) => void;
+  onDuplicateBlock: (id: string) => void;
 }) {
+  const treeProps = {
+    selection,
+    onSelect,
+    onRemoveBlock,
+    onRemoveField,
+    onMoveBlock,
+    onDuplicateBlock,
+  };
   return (
     <ul className={cn("space-y-0.5", depth > 0 && "ml-3 border-l border-slate-100 pl-2")}>
-      {blocks.map((b) => {
+      {blocks.map((b, idx) => {
         const active =
           (selection.kind === "block" && selection.id === b.id) ||
           (selection.kind === "field" && selection.blockId === b.id);
         return (
           <li key={b.id}>
-            <button
-              type="button"
-              onClick={() => onSelect({ kind: "block", id: b.id })}
+            <div
               className={cn(
-                "flex w-full items-center gap-1.5 rounded-lg px-2 py-1 text-left text-[11px]",
+                "flex w-full items-center gap-0.5 rounded-lg",
                 active
                   ? "bg-teal-50 font-medium text-teal-900"
                   : "text-slate-600 hover:bg-slate-50",
               )}
             >
-              <span className="truncate text-slate-400">{b.type}</span>
-              <span className="truncate">{blockLabel(b)}</span>
-            </button>
+              <button
+                type="button"
+                onClick={() => onSelect({ kind: "block", id: b.id })}
+                className="flex min-w-0 flex-1 items-center gap-1.5 px-2 py-1 text-left text-[11px]"
+              >
+                <span className="truncate text-slate-400">{b.type}</span>
+                <span className="truncate">{blockLabel(b)}</span>
+              </button>
+              <button
+                type="button"
+                title="Πάνω"
+                disabled={idx === 0}
+                className="shrink-0 rounded p-0.5 text-slate-400 disabled:opacity-30 hover:bg-slate-100"
+                onClick={() => onMoveBlock(b.id, -1)}
+              >
+                <ArrowUp size={10} />
+              </button>
+              <button
+                type="button"
+                title="Κάτω"
+                disabled={idx === blocks.length - 1}
+                className="shrink-0 rounded p-0.5 text-slate-400 disabled:opacity-30 hover:bg-slate-100"
+                onClick={() => onMoveBlock(b.id, 1)}
+              >
+                <ArrowDown size={10} />
+              </button>
+              <button
+                type="button"
+                title="Αντίγραφο"
+                className="shrink-0 rounded p-0.5 text-slate-500 hover:bg-slate-100"
+                onClick={() => onDuplicateBlock(b.id)}
+              >
+                <Copy size={10} />
+              </button>
+              <button
+                type="button"
+                title="Αφαίρεση"
+                aria-label={`Αφαίρεση ${blockLabel(b)}`}
+                className="mr-1 shrink-0 rounded p-1 text-rose-500 opacity-70 hover:bg-rose-50 hover:opacity-100"
+                onClick={() => onRemoveBlock(b.id)}
+              >
+                <Trash2 size={11} />
+              </button>
+            </div>
             {b.type === "fields"
               ? b.fields.map((f) => (
-                  <button
+                  <div
                     key={f.id}
-                    type="button"
-                    onClick={() =>
-                      onSelect({ kind: "field", blockId: b.id, fieldId: f.id })
-                    }
                     className={cn(
-                      "ml-3 flex w-[calc(100%-0.75rem)] truncate rounded-lg px-2 py-0.5 text-left text-[10px]",
+                      "ml-3 flex w-[calc(100%-0.75rem)] items-center gap-0.5 rounded-lg",
                       selection.kind === "field" && selection.fieldId === f.id
                         ? "bg-teal-100 text-teal-900"
                         : "text-slate-500 hover:bg-slate-50",
                     )}
                   >
-                    · {f.label || f.key}
-                  </button>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        onSelect({
+                          kind: "field",
+                          blockId: b.id,
+                          fieldId: f.id,
+                        })
+                      }
+                      className="min-w-0 flex-1 truncate px-2 py-0.5 text-left text-[10px]"
+                    >
+                      · {f.label || f.key}
+                    </button>
+                    <button
+                      type="button"
+                      title="Αφαίρεση πεδίου"
+                      aria-label={`Αφαίρεση ${f.label || f.key}`}
+                      className="mr-1 shrink-0 rounded p-0.5 text-rose-500 opacity-70 hover:bg-rose-50 hover:opacity-100"
+                      onClick={() => onRemoveField(b.id, f.id)}
+                    >
+                      <Trash2 size={10} />
+                    </button>
+                  </div>
                 ))
               : null}
             {b.type === "section" ? (
               <StructureTree
                 blocks={b.children}
                 depth={depth + 1}
-                selection={selection}
-                onSelect={onSelect}
+                {...treeProps}
               />
             ) : null}
             {b.type === "tabs"
-              ? b.tabs.map((t) => (
-                  <div key={t.id} className="ml-3 mt-0.5">
-                    <p className="px-2 text-[10px] font-medium text-slate-400">
-                      {t.title}
-                    </p>
-                    <StructureTree
-                      blocks={t.children}
-                      depth={depth + 1}
-                      selection={selection}
-                      onSelect={onSelect}
-                    />
-                  </div>
-                ))
+              ? b.tabs.map((t) => {
+                  const slotActive =
+                    selection.kind === "slot" &&
+                    selection.containerId === b.id &&
+                    selection.slotId === t.id;
+                  return (
+                    <div key={t.id} className="ml-3 mt-0.5">
+                      <button
+                        type="button"
+                        onClick={() =>
+                          onSelect({
+                            kind: "slot",
+                            containerId: b.id,
+                            slotId: t.id,
+                          })
+                        }
+                        className={cn(
+                          "w-full rounded px-2 py-0.5 text-left text-[10px] font-medium",
+                          slotActive
+                            ? "bg-teal-100 text-teal-900"
+                            : "text-slate-400 hover:bg-slate-50",
+                        )}
+                      >
+                        ▸ {t.title}
+                      </button>
+                      <StructureTree
+                        blocks={t.children}
+                        depth={depth + 1}
+                        {...treeProps}
+                      />
+                    </div>
+                  );
+                })
               : null}
             {b.type === "columns"
-              ? b.columns.map((c, i) => (
-                  <div key={c.id} className="ml-3 mt-0.5">
-                    <p className="px-2 text-[10px] font-medium text-slate-400">
-                      Στήλη {i + 1}
-                    </p>
-                    <StructureTree
-                      blocks={c.children}
-                      depth={depth + 1}
-                      selection={selection}
-                      onSelect={onSelect}
-                    />
-                  </div>
-                ))
+              ? b.columns.map((c, i) => {
+                  const slotActive =
+                    selection.kind === "slot" &&
+                    selection.containerId === b.id &&
+                    selection.slotId === c.id;
+                  return (
+                    <div key={c.id} className="ml-3 mt-0.5">
+                      <button
+                        type="button"
+                        onClick={() =>
+                          onSelect({
+                            kind: "slot",
+                            containerId: b.id,
+                            slotId: c.id,
+                          })
+                        }
+                        className={cn(
+                          "w-full rounded px-2 py-0.5 text-left text-[10px] font-medium",
+                          slotActive
+                            ? "bg-teal-100 text-teal-900"
+                            : "text-slate-400 hover:bg-slate-50",
+                        )}
+                      >
+                        ▸ Στήλη {i + 1}
+                      </button>
+                      <StructureTree
+                        blocks={c.children}
+                        depth={depth + 1}
+                        {...treeProps}
+                      />
+                    </div>
+                  );
+                })
               : null}
             {b.type === "accordion"
-              ? b.items.map((it) => (
-                  <div key={it.id} className="ml-3 mt-0.5">
-                    <p className="px-2 text-[10px] font-medium text-slate-400">
-                      {it.title}
-                    </p>
-                    <StructureTree
-                      blocks={it.children}
-                      depth={depth + 1}
-                      selection={selection}
-                      onSelect={onSelect}
-                    />
-                  </div>
-                ))
+              ? b.items.map((it) => {
+                  const slotActive =
+                    selection.kind === "slot" &&
+                    selection.containerId === b.id &&
+                    selection.slotId === it.id;
+                  return (
+                    <div key={it.id} className="ml-3 mt-0.5">
+                      <button
+                        type="button"
+                        onClick={() =>
+                          onSelect({
+                            kind: "slot",
+                            containerId: b.id,
+                            slotId: it.id,
+                          })
+                        }
+                        className={cn(
+                          "w-full rounded px-2 py-0.5 text-left text-[10px] font-medium",
+                          slotActive
+                            ? "bg-teal-100 text-teal-900"
+                            : "text-slate-400 hover:bg-slate-50",
+                        )}
+                      >
+                        ▸ {it.title}
+                      </button>
+                      <StructureTree
+                        blocks={it.children}
+                        depth={depth + 1}
+                        {...treeProps}
+                      />
+                    </div>
+                  );
+                })
               : null}
           </li>
         );
@@ -452,26 +648,37 @@ export function FormExperienceDesigner({
     updateDraft({ ...draft, page: { ...draft.page, root } });
   };
 
-  const containerParentId = (): string | null => {
+  const insertTarget = (): {
+    parentId: string | null;
+    slotId?: string | null;
+  } => {
+    if (selection.kind === "slot") {
+      return {
+        parentId: selection.containerId,
+        slotId: selection.slotId,
+      };
+    }
     if (selection.kind === "block") {
       const b = findBlock(draft.page.root, selection.id);
-      if (
-        b &&
-        (b.type === "section" ||
-          b.type === "tabs" ||
-          b.type === "columns" ||
-          b.type === "accordion")
-      ) {
-        return b.id;
+      if (!b) return { parentId: null };
+      if (b.type === "section") return { parentId: b.id };
+      if (b.type === "tabs") {
+        return { parentId: b.id, slotId: b.tabs[0]?.id ?? null };
+      }
+      if (b.type === "columns") {
+        return { parentId: b.id, slotId: b.columns[0]?.id ?? null };
+      }
+      if (b.type === "accordion") {
+        return { parentId: b.id, slotId: b.items[0]?.id ?? null };
       }
     }
-    return null;
+    return { parentId: null };
   };
 
   const addBlock = (type: FormBlock["type"]) => {
     const child = makeBlock(type);
-    const parentId = containerParentId();
-    setRoot(insertChild(draft.page.root, parentId, child));
+    const { parentId, slotId } = insertTarget();
+    setRoot(insertChild(draft.page.root, parentId, child, slotId));
     setSelection({ kind: "block", id: child.id });
   };
 
@@ -509,18 +716,14 @@ export function FormExperienceDesigner({
       return;
     }
 
-    // Create fields block under selected section, or at root
+    // Create fields block under selected container/slot, or at root
     const fieldsBlock: FormBlock = {
       type: "fields",
       id: fxId("flds"),
       fields: [ref],
     };
-    let parentId: string | null = null;
-    if (selection.kind === "block") {
-      const b = findBlock(draft.page.root, selection.id);
-      if (b?.type === "section") parentId = b.id;
-    }
-    setRoot(insertChild(draft.page.root, parentId, fieldsBlock));
+    const { parentId, slotId } = insertTarget();
+    setRoot(insertChild(draft.page.root, parentId, fieldsBlock, slotId));
     setSelection({
       kind: "field",
       blockId: fieldsBlock.id,
@@ -558,16 +761,225 @@ export function FormExperienceDesigner({
   const formableBuiltins = builtins.filter((b) => b.formable !== false);
   const activeCustoms = customFields.filter((f) => f.isActive);
 
-  const createDefaultConfig = (): FormViewConfig => {
-    const base = emptyFormConfig("edit");
-    const fields = formableBuiltins.slice(0, 4).map((b) => ({
+  const fieldRefs = (
+    keys: string[] | "all",
+    width: FieldWidth = "half",
+  ): FormFieldRef[] => {
+    const list =
+      keys === "all"
+        ? formableBuiltins
+        : formableBuiltins.filter((b) => keys.includes(b.key));
+    return list.map((b) => ({
       id: fxId("f"),
       key: b.key,
       source: "system" as const,
       required: b.required,
       label: b.label,
-      width: (b.type === "textarea" ? "full" : "half") as FieldWidth,
+      width: (b.type === "textarea" ? "full" : width) as FieldWidth,
     }));
+  };
+
+  const createConfigFromTemplate = (
+    template: "basic" | "tabs" | "quick" | "wizard" | "columns",
+  ): FormViewConfig => {
+    const base = emptyFormConfig(
+      template === "quick"
+        ? "quick"
+        : template === "wizard"
+          ? "wizard"
+          : "edit",
+    );
+    if (template === "quick") {
+      return {
+        ...base,
+        mode: "quick",
+        page: {
+          ...base.page,
+          showHeader: false,
+          showSide: false,
+          root: [
+            {
+              type: "section",
+              id: fxId("sec"),
+              title: "Γρήγορα",
+              children: [
+                {
+                  type: "fields",
+                  id: fxId("flds"),
+                  fields: fieldRefs(
+                    formableBuiltins.slice(0, 4).map((b) => b.key),
+                  ),
+                },
+              ],
+            },
+          ],
+        },
+      };
+    }
+    if (template === "wizard") {
+      const half = Math.ceil(formableBuiltins.length / 2) || 1;
+      const a = formableBuiltins.slice(0, half).map((b) => b.key);
+      const bKeys = formableBuiltins.slice(half).map((b) => b.key);
+      return {
+        ...base,
+        mode: "wizard",
+        page: {
+          ...base.page,
+          showHeader: true,
+          root: [
+            {
+              type: "tabs",
+              id: fxId("tabs"),
+              variant: "wizard",
+              tabs: [
+                {
+                  id: fxId("tab"),
+                  title: "Βήμα 1",
+                  children: [
+                    {
+                      type: "section",
+                      id: fxId("sec"),
+                      title: "Βασικά",
+                      children: [
+                        {
+                          type: "fields",
+                          id: fxId("flds"),
+                          fields: fieldRefs(a.length ? a : ["code", "name"]),
+                        },
+                      ],
+                    },
+                  ],
+                },
+                {
+                  id: fxId("tab"),
+                  title: "Βήμα 2",
+                  children: [
+                    {
+                      type: "section",
+                      id: fxId("sec"),
+                      title: "Λεπτομέρειες",
+                      children: [
+                        {
+                          type: "fields",
+                          id: fxId("flds"),
+                          fields: fieldRefs(bKeys.length ? bKeys : []),
+                        },
+                      ],
+                    },
+                  ],
+                },
+              ],
+            },
+          ],
+        },
+      };
+    }
+    if (template === "tabs") {
+      return {
+        ...base,
+        mode: "edit",
+        page: {
+          ...base.page,
+          showHeader: true,
+          showSide: true,
+          sideContent: "summary",
+          root: [
+            {
+              type: "tabs",
+              id: fxId("tabs"),
+              variant: "tabs",
+              tabs: [
+                {
+                  id: fxId("tab"),
+                  title: "Βασικά",
+                  children: [
+                    {
+                      type: "section",
+                      id: fxId("sec"),
+                      title: "Βασικά στοιχεία",
+                      children: [
+                        {
+                          type: "fields",
+                          id: fxId("flds"),
+                          fields: fieldRefs("all"),
+                        },
+                      ],
+                    },
+                  ],
+                },
+                {
+                  id: fxId("tab"),
+                  title: "Πρόσθετα",
+                  children: [
+                    {
+                      type: "callout",
+                      id: fxId("call"),
+                      tone: "info",
+                      text: "Πρόσθεσε custom πεδία από τη βιβλιοθήκη αριστερά.",
+                    },
+                    {
+                      type: "section",
+                      id: fxId("sec"),
+                      title: "Πρόσθετα πεδία",
+                      children: [
+                        { type: "fields", id: fxId("flds"), fields: [] },
+                      ],
+                    },
+                  ],
+                },
+              ],
+            },
+          ],
+        },
+      };
+    }
+    if (template === "columns") {
+      const keys = formableBuiltins.map((b) => b.key);
+      const mid = Math.ceil(keys.length / 2);
+      return {
+        ...base,
+        mode: "edit",
+        page: {
+          ...base.page,
+          root: [
+            {
+              type: "section",
+              id: fxId("sec"),
+              title: "Διάταξη στηλών",
+              children: [
+                {
+                  type: "columns",
+                  id: fxId("cols"),
+                  columns: [
+                    {
+                      id: fxId("col"),
+                      children: [
+                        {
+                          type: "fields",
+                          id: fxId("flds"),
+                          fields: fieldRefs(keys.slice(0, mid), "full"),
+                        },
+                      ],
+                    },
+                    {
+                      id: fxId("col"),
+                      children: [
+                        {
+                          type: "fields",
+                          id: fxId("flds"),
+                          fields: fieldRefs(keys.slice(mid), "full"),
+                        },
+                      ],
+                    },
+                  ],
+                },
+              ],
+            },
+          ],
+        },
+      };
+    }
+    // basic
     return {
       ...base,
       page: {
@@ -577,19 +989,40 @@ export function FormExperienceDesigner({
             type: "section",
             id: fxId("sec"),
             title: "Βασικά στοιχεία",
-            children: [{ type: "fields", id: fxId("flds"), fields }],
+            children: [
+              {
+                type: "fields",
+                id: fxId("flds"),
+                fields: fieldRefs(formableBuiltins.slice(0, 6).map((b) => b.key)),
+              },
+            ],
+          },
+          {
+            type: "section",
+            id: fxId("sec"),
+            title: "Πρόσθετα πεδία",
+            children: [{ type: "fields", id: fxId("flds"), fields: [] }],
           },
         ],
       },
     };
   };
 
-  const handleCreate = () => {
+  const handleCreate = (
+    template: "basic" | "tabs" | "quick" | "wizard" | "columns" = "basic",
+  ) => {
+    const labels: Record<typeof template, string> = {
+      basic: "Βασική",
+      tabs: "Tabs + Side",
+      quick: "Γρήγορη",
+      wizard: "Οδηγός",
+      columns: "Στήλες",
+    };
     onCreate({
       entity,
       code: `form_${Date.now().toString(36)}`,
-      name: `Νέα φόρμα ${entityLabel(entity)}`,
-      configJson: createDefaultConfig(),
+      name: `${labels[template]} · ${entityLabel(entity)}`,
+      configJson: createConfigFromTemplate(template),
     });
   };
 
@@ -614,6 +1047,87 @@ export function FormExperienceDesigner({
   const patchBlock = (id: string, patcher: (b: FormBlock) => FormBlock) => {
     setRoot(mapBlocks(draft.page.root, (b) => (b.id === id ? patcher(b) : b)));
   };
+
+  const selectionStillValid = (
+    nextRoot: FormBlock[],
+    sel: Selection,
+  ): boolean => {
+    if (sel.kind === "page") return true;
+    if (sel.kind === "block") return !!findBlock(nextRoot, sel.id);
+    if (sel.kind === "slot") {
+      const container = findBlock(nextRoot, sel.containerId);
+      if (!container) return false;
+      if (container.type === "tabs") {
+        return container.tabs.some((t) => t.id === sel.slotId);
+      }
+      if (container.type === "columns") {
+        return container.columns.some((c) => c.id === sel.slotId);
+      }
+      if (container.type === "accordion") {
+        return container.items.some((it) => it.id === sel.slotId);
+      }
+      return false;
+    }
+    const block = findBlock(nextRoot, sel.blockId);
+    if (!block || block.type !== "fields") return false;
+    return block.fields.some((f) => f.id === sel.fieldId);
+  };
+
+  const removeBlockById = (id: string) => {
+    const block = findBlock(draft.page.root, id);
+    if (!block) return;
+    if (!confirmRemoveBlock(block)) return;
+    const next = removeBlock(draft.page.root, id);
+    setRoot(next);
+    if (!selectionStillValid(next, selection)) {
+      setSelection({ kind: "page" });
+    }
+  };
+
+  const moveBlockById = (id: string, dir: -1 | 1) => {
+    setRoot(moveBlock(draft.page.root, id, dir));
+  };
+
+  const duplicateBlockById = (id: string) => {
+    const next = duplicateBlock(draft.page.root, id);
+    setRoot(next);
+    const ctx = findSiblingContext(next, id);
+    if (ctx && ctx.index + 1 < ctx.siblings.length) {
+      const clone = ctx.siblings[ctx.index + 1];
+      if (clone) setSelection({ kind: "block", id: clone.id });
+    }
+  };
+
+  const removeFieldById = (blockId: string, fieldId: string) => {
+    const next = mapBlocks(draft.page.root, (b) => {
+      if (b.type !== "fields" || b.id !== blockId) return b;
+      return { ...b, fields: b.fields.filter((f) => f.id !== fieldId) };
+    });
+    setRoot(next);
+    if (
+      selection.kind === "field" &&
+      selection.blockId === blockId &&
+      selection.fieldId === fieldId
+    ) {
+      setSelection({ kind: "block", id: blockId });
+    }
+  };
+
+  const ruleTargetOptions = useMemo(() => {
+    const fields: Array<{ id: string; label: string }> = [];
+    const blocks: Array<{ id: string; label: string }> = [];
+    walkFormFields(draft.page.root, (f, blockId) => {
+      fields.push({
+        id: f.id,
+        label: `${f.label || f.key} (${f.source})`,
+      });
+      void blockId;
+    });
+    walkFormBlocks(draft.page.root, (b) => {
+      blocks.push({ id: b.id, label: `${b.type} · ${blockLabel(b)}` });
+    });
+    return { fields, blocks };
+  }, [draft.page.root]);
 
   const patchField = (
     blockId: string,
@@ -745,14 +1259,30 @@ export function FormExperienceDesigner({
               );
             })}
           </ul>
-          <Button
-            size="sm"
-            className="w-full"
-            disabled={pending}
-            onClick={handleCreate}
-          >
-            <Plus size={14} /> Νέα φόρμα
-          </Button>
+          <div className="space-y-1 border-t border-slate-100 pt-2">
+            <p className="px-1 text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+              Νέα από πρότυπο
+            </p>
+            {(
+              [
+                ["basic", "Βασική"],
+                ["tabs", "Tabs + Side"],
+                ["columns", "Στήλες"],
+                ["quick", "Γρήγορη"],
+                ["wizard", "Οδηγός"],
+              ] as const
+            ).map(([key, label]) => (
+              <button
+                key={key}
+                type="button"
+                disabled={pending}
+                onClick={() => handleCreate(key)}
+                className="flex w-full items-center gap-1.5 rounded-lg px-2 py-1.5 text-left text-[11px] text-slate-600 hover:bg-teal-50 hover:text-teal-900 disabled:opacity-40"
+              >
+                <Plus size={12} /> {label}
+              </button>
+            ))}
+          </div>
           {selected ? (
             <Button
               size="sm"
@@ -859,30 +1389,83 @@ export function FormExperienceDesigner({
               </div>
             </div>
 
-            <div className="rounded-xl border border-slate-100 bg-white p-4 shadow-sm">
-              {selected ? (
-                <FormExperienceRenderer
-                  config={draft}
-                  builtins={builtins}
-                  customDefs={customDefs}
-                  values={previewValues}
-                  customValues={previewCustom}
-                  onSystemChange={(key, value) =>
-                    setPreviewValues((v) => ({ ...v, [key]: value }))
-                  }
-                  onCustomChange={(key, value) =>
-                    setPreviewCustom((v) => ({
-                      ...v,
-                      [key]: Array.isArray(value) ? value.join(",") : value,
-                    }))
-                  }
-                  modeOverride={previewMode}
-                  compact
-                />
-              ) : (
+            <div className="space-y-3 rounded-xl border border-slate-100 bg-white p-4 shadow-sm">
+              {!selected ? (
                 <p className="text-sm text-slate-400">
                   Επιλέξτε ή δημιουργήστε μια προβολή φόρμας.
                 </p>
+              ) : draft.page.root.length === 0 ? (
+                <p className="rounded-lg border border-dashed border-slate-200 px-3 py-8 text-center text-sm text-slate-400">
+                  Κενός καμβάς — προσθέστε περιοχή ή πεδία από τη βιβλιοθήκη.
+                </p>
+              ) : (
+                draft.page.root.map((block) => {
+                  const selectedHere =
+                    (selection.kind === "block" &&
+                      !!findBlock([block], selection.id)) ||
+                    (selection.kind === "field" &&
+                      !!findBlock([block], selection.blockId));
+                  return (
+                    <div
+                      key={block.id}
+                      className={cn(
+                        "rounded-xl border bg-slate-50/40",
+                        selectedHere
+                          ? "border-teal-400 ring-1 ring-teal-200"
+                          : "border-slate-200",
+                      )}
+                    >
+                      <div className="flex items-center gap-2 border-b border-slate-200/80 px-2 py-1.5">
+                        <button
+                          type="button"
+                          className="min-w-0 flex-1 truncate text-left text-[11px] font-medium text-slate-600 hover:text-teal-800"
+                          onClick={() =>
+                            setSelection({ kind: "block", id: block.id })
+                          }
+                        >
+                          <span className="text-slate-400">{block.type}</span>
+                          {" · "}
+                          {blockLabel(block)}
+                        </button>
+                        <button
+                          type="button"
+                          title="Αφαίρεση από τον καμβά"
+                          aria-label={`Αφαίρεση ${blockLabel(block)}`}
+                          className="inline-flex items-center gap-1 rounded-md px-1.5 py-1 text-[11px] font-medium text-rose-600 hover:bg-rose-50"
+                          onClick={() => removeBlockById(block.id)}
+                        >
+                          <Trash2 size={12} />
+                          Αφαίρεση
+                        </button>
+                      </div>
+                      <div className="p-3">
+                        <FormExperienceRenderer
+                          config={{
+                            ...draft,
+                            page: { ...draft.page, root: [block] },
+                          }}
+                          builtins={builtins}
+                          customDefs={customDefs}
+                          values={previewValues}
+                          customValues={previewCustom}
+                          onSystemChange={(key, value) =>
+                            setPreviewValues((v) => ({ ...v, [key]: value }))
+                          }
+                          onCustomChange={(key, value) =>
+                            setPreviewCustom((v) => ({
+                              ...v,
+                              [key]: Array.isArray(value)
+                                ? value.join(",")
+                                : value,
+                            }))
+                          }
+                          modeOverride={previewMode}
+                          compact
+                        />
+                      </div>
+                    </div>
+                  );
+                })
               )}
             </div>
 
@@ -904,6 +1487,10 @@ export function FormExperienceDesigner({
                 depth={0}
                 selection={selection}
                 onSelect={setSelection}
+                onRemoveBlock={removeBlockById}
+                onRemoveField={removeFieldById}
+                onMoveBlock={moveBlockById}
+                onDuplicateBlock={duplicateBlockById}
               />
               {draft.page.root.length === 0 ? (
                 <p className="text-[11px] text-slate-400">Κενή δομή</p>
@@ -995,6 +1582,67 @@ export function FormExperienceDesigner({
             </div>
           ) : null}
 
+          {selection.kind === "slot" ? (
+            <div className="space-y-2">
+              <p className="text-xs font-medium text-slate-700">
+                Στόχος εισαγωγής
+              </p>
+              <p className="text-[11px] text-slate-500">
+                Νέα blocks/πεδία θα μπουν σε αυτό το slot (καρτέλα / στήλη /
+                accordion).
+              </p>
+              <Button
+                size="sm"
+                variant="secondary"
+                onClick={() =>
+                  setSelection({
+                    kind: "block",
+                    id: selection.containerId,
+                  })
+                }
+              >
+                Επιλογή container
+              </Button>
+            </div>
+          ) : null}
+
+          {selection.kind === "block" && selectedBlock ? (
+            <div className="flex flex-wrap gap-1 border-b border-slate-100 pb-2">
+              <button
+                type="button"
+                title="Πάνω"
+                className="rounded-md border border-slate-200 p-1.5 text-slate-600 hover:bg-slate-50"
+                onClick={() => moveBlockById(selectedBlock.id, -1)}
+              >
+                <ArrowUp size={12} />
+              </button>
+              <button
+                type="button"
+                title="Κάτω"
+                className="rounded-md border border-slate-200 p-1.5 text-slate-600 hover:bg-slate-50"
+                onClick={() => moveBlockById(selectedBlock.id, 1)}
+              >
+                <ArrowDown size={12} />
+              </button>
+              <button
+                type="button"
+                title="Αντίγραφο"
+                className="rounded-md border border-slate-200 p-1.5 text-slate-600 hover:bg-slate-50"
+                onClick={() => duplicateBlockById(selectedBlock.id)}
+              >
+                <Copy size={12} />
+              </button>
+              <button
+                type="button"
+                title="Αφαίρεση"
+                className="rounded-md border border-rose-200 p-1.5 text-rose-600 hover:bg-rose-50"
+                onClick={() => removeBlockById(selectedBlock.id)}
+              >
+                <Trash2 size={12} />
+              </button>
+            </div>
+          ) : null}
+
           {selection.kind === "block" && selectedBlock?.type === "section" ? (
             <div className="space-y-2">
               <FieldInput label="Τίτλος">
@@ -1040,17 +1688,26 @@ export function FormExperienceDesigner({
                 />
                 Collapsible
               </label>
-              <Button
-                size="sm"
-                variant="ghost"
-                className="text-rose-600"
-                onClick={() => {
-                  setRoot(removeBlock(draft.page.root, selectedBlock.id));
-                  setSelection({ kind: "page" });
-                }}
-              >
-                <Trash2 size={12} /> Αφαίρεση
-              </Button>
+              <label className="flex items-center gap-2 text-xs text-slate-600">
+                <input
+                  type="checkbox"
+                  checked={!!selectedBlock.collapsed}
+                  onChange={(e) =>
+                    patchBlock(selectedBlock.id, (b) =>
+                      b.type === "section"
+                        ? {
+                            ...b,
+                            collapsed: e.target.checked,
+                            collapsible: e.target.checked
+                              ? true
+                              : b.collapsible,
+                          }
+                        : b,
+                    )
+                  }
+                />
+                Αρχικά κλειστή
+              </label>
             </div>
           ) : null}
 
@@ -1077,6 +1734,32 @@ export function FormExperienceDesigner({
               </FieldInput>
               {selectedBlock.tabs.map((t, idx) => (
                 <div key={t.id} className="flex items-center gap-1">
+                  <button
+                    type="button"
+                    disabled={idx === 0}
+                    className="text-slate-400 disabled:opacity-30"
+                    onClick={() =>
+                      patchBlock(selectedBlock.id, (b) => {
+                        if (b.type !== "tabs") return b;
+                        return { ...b, tabs: moveItem(b.tabs, idx, -1) };
+                      })
+                    }
+                  >
+                    <ArrowUp size={12} />
+                  </button>
+                  <button
+                    type="button"
+                    disabled={idx === selectedBlock.tabs.length - 1}
+                    className="text-slate-400 disabled:opacity-30"
+                    onClick={() =>
+                      patchBlock(selectedBlock.id, (b) => {
+                        if (b.type !== "tabs") return b;
+                        return { ...b, tabs: moveItem(b.tabs, idx, 1) };
+                      })
+                    }
+                  >
+                    <ArrowDown size={12} />
+                  </button>
                   <input
                     className={inputCls}
                     value={t.title}
@@ -1090,6 +1773,20 @@ export function FormExperienceDesigner({
                       })
                     }
                   />
+                  <button
+                    type="button"
+                    title="Εισαγωγή εδώ"
+                    className="text-teal-700"
+                    onClick={() =>
+                      setSelection({
+                        kind: "slot",
+                        containerId: selectedBlock.id,
+                        slotId: t.id,
+                      })
+                    }
+                  >
+                    ▸
+                  </button>
                   <button
                     type="button"
                     className="text-rose-600 disabled:opacity-30"
@@ -1130,17 +1827,6 @@ export function FormExperienceDesigner({
               >
                 <Plus size={12} /> Tab
               </Button>
-              <Button
-                size="sm"
-                variant="ghost"
-                className="text-rose-600"
-                onClick={() => {
-                  setRoot(removeBlock(draft.page.root, selectedBlock.id));
-                  setSelection({ kind: "page" });
-                }}
-              >
-                <Trash2 size={12} /> Αφαίρεση
-              </Button>
             </div>
           ) : null}
 
@@ -1149,6 +1835,77 @@ export function FormExperienceDesigner({
               <p className="text-xs text-slate-500">
                 {selectedBlock.columns.length} στήλες
               </p>
+              <ul className="space-y-1">
+                {selectedBlock.columns.map((c, idx) => (
+                  <li
+                    key={c.id}
+                    className="flex items-center gap-1 rounded-lg border border-slate-100 px-1.5 py-1"
+                  >
+                    <button
+                      type="button"
+                      disabled={idx === 0}
+                      className="text-slate-400 disabled:opacity-30"
+                      onClick={() =>
+                        patchBlock(selectedBlock.id, (b) => {
+                          if (b.type !== "columns") return b;
+                          return {
+                            ...b,
+                            columns: moveItem(b.columns, idx, -1),
+                          };
+                        })
+                      }
+                    >
+                      <ArrowUp size={12} />
+                    </button>
+                    <button
+                      type="button"
+                      disabled={idx === selectedBlock.columns.length - 1}
+                      className="text-slate-400 disabled:opacity-30"
+                      onClick={() =>
+                        patchBlock(selectedBlock.id, (b) => {
+                          if (b.type !== "columns") return b;
+                          return {
+                            ...b,
+                            columns: moveItem(b.columns, idx, 1),
+                          };
+                        })
+                      }
+                    >
+                      <ArrowDown size={12} />
+                    </button>
+                    <button
+                      type="button"
+                      className="min-w-0 flex-1 truncate text-left text-[11px] text-slate-600"
+                      onClick={() =>
+                        setSelection({
+                          kind: "slot",
+                          containerId: selectedBlock.id,
+                          slotId: c.id,
+                        })
+                      }
+                    >
+                      Στήλη {idx + 1} · {c.children.length} blocks
+                    </button>
+                    <button
+                      type="button"
+                      className="text-rose-600 disabled:opacity-30"
+                      disabled={selectedBlock.columns.length <= 1}
+                      onClick={() =>
+                        patchBlock(selectedBlock.id, (b) => {
+                          if (b.type !== "columns" || b.columns.length <= 1)
+                            return b;
+                          return {
+                            ...b,
+                            columns: b.columns.filter((_, i) => i !== idx),
+                          };
+                        })
+                      }
+                    >
+                      <Trash2 size={12} />
+                    </button>
+                  </li>
+                ))}
+              </ul>
               <Button
                 size="sm"
                 variant="secondary"
@@ -1166,17 +1923,6 @@ export function FormExperienceDesigner({
                 }
               >
                 <Plus size={12} /> Στήλη
-              </Button>
-              <Button
-                size="sm"
-                variant="ghost"
-                className="text-rose-600"
-                onClick={() => {
-                  setRoot(removeBlock(draft.page.root, selectedBlock.id));
-                  setSelection({ kind: "page" });
-                }}
-              >
-                <Trash2 size={12} /> Αφαίρεση
               </Button>
             </div>
           ) : null}
@@ -1239,7 +1985,7 @@ export function FormExperienceDesigner({
                       type="button"
                       className="text-rose-600"
                       onClick={() =>
-                        setRoot(removeBlock(draft.page.root, f.id))
+                        removeFieldById(selectedBlock.id, f.id)
                       }
                     >
                       <Trash2 size={12} />
@@ -1251,10 +1997,7 @@ export function FormExperienceDesigner({
                 size="sm"
                 variant="ghost"
                 className="text-rose-600"
-                onClick={() => {
-                  setRoot(removeBlock(draft.page.root, selectedBlock.id));
-                  setSelection({ kind: "page" });
-                }}
+                onClick={() => removeBlockById(selectedBlock.id)}
               >
                 <Trash2 size={12} /> Αφαίρεση block
               </Button>
@@ -1326,6 +2069,18 @@ export function FormExperienceDesigner({
               <label className="flex items-center gap-2 text-xs text-slate-600">
                 <input
                   type="checkbox"
+                  checked={!!selectedField.hidden}
+                  onChange={(e) =>
+                    patchField(selection.blockId, selectedField.id, {
+                      hidden: e.target.checked,
+                    })
+                  }
+                />
+                Hidden
+              </label>
+              <label className="flex items-center gap-2 text-xs text-slate-600">
+                <input
+                  type="checkbox"
                   checked={!!selectedField.computed}
                   onChange={(e) =>
                     patchField(selection.blockId, selectedField.id, {
@@ -1335,6 +2090,19 @@ export function FormExperienceDesigner({
                 />
                 Computed
               </label>
+              {selectedField.computed ? (
+                <FieldInput label="Computed label">
+                  <input
+                    className={inputCls}
+                    value={selectedField.computedLabel ?? ""}
+                    onChange={(e) =>
+                      patchField(selection.blockId, selectedField.id, {
+                        computedLabel: e.target.value || undefined,
+                      })
+                    }
+                  />
+                </FieldInput>
+              ) : null}
               <FieldInput label="Width">
                 <select
                   className={inputCls}
@@ -1400,10 +2168,9 @@ export function FormExperienceDesigner({
                 size="sm"
                 variant="ghost"
                 className="text-rose-600"
-                onClick={() => {
-                  setRoot(removeBlock(draft.page.root, selectedField.id));
-                  setSelection({ kind: "block", id: selection.blockId });
-                }}
+                onClick={() =>
+                  removeFieldById(selection.blockId, selectedField.id)
+                }
               >
                 <Trash2 size={12} /> Αφαίρεση πεδίου
               </Button>
@@ -1446,10 +2213,7 @@ export function FormExperienceDesigner({
                 size="sm"
                 variant="ghost"
                 className="text-rose-600"
-                onClick={() => {
-                  setRoot(removeBlock(draft.page.root, selectedBlock.id));
-                  setSelection({ kind: "page" });
-                }}
+                onClick={() => removeBlockById(selectedBlock.id)}
               >
                 <Trash2 size={12} /> Αφαίρεση
               </Button>
@@ -1469,17 +2233,25 @@ export function FormExperienceDesigner({
                   }
                 />
               </FieldInput>
-              <Button
-                size="sm"
-                variant="ghost"
-                className="text-rose-600"
-                onClick={() => {
-                  setRoot(removeBlock(draft.page.root, selectedBlock.id));
-                  setSelection({ kind: "page" });
-                }}
-              >
-                <Trash2 size={12} /> Αφαίρεση
-              </Button>
+              <FieldInput label="Επίπεδο">
+                <select
+                  className={inputCls}
+                  value={selectedBlock.level ?? 2}
+                  onChange={(e) =>
+                    patchBlock(selectedBlock.id, (b) =>
+                      b.type === "heading"
+                        ? {
+                            ...b,
+                            level: Number(e.target.value) as 2 | 3,
+                          }
+                        : b,
+                    )
+                  }
+                >
+                  <option value={2}>H2</option>
+                  <option value={3}>H3</option>
+                </select>
+              </FieldInput>
             </div>
           ) : null}
 
@@ -1528,10 +2300,7 @@ export function FormExperienceDesigner({
                 size="sm"
                 variant="ghost"
                 className="text-rose-600"
-                onClick={() => {
-                  setRoot(removeBlock(draft.page.root, selectedBlock.id));
-                  setSelection({ kind: "page" });
-                }}
+                onClick={() => removeBlockById(selectedBlock.id)}
               >
                 <Trash2 size={12} /> Αφαίρεση
               </Button>
@@ -1541,8 +2310,7 @@ export function FormExperienceDesigner({
           {selection.kind === "block" &&
           selectedBlock &&
           (selectedBlock.type === "divider" ||
-            selectedBlock.type === "spacer" ||
-            selectedBlock.type === "accordion") ? (
+            selectedBlock.type === "spacer") ? (
             <div className="space-y-2">
               <p className="text-xs text-slate-500">{selectedBlock.type}</p>
               {selectedBlock.type === "spacer" ? (
@@ -1567,34 +2335,108 @@ export function FormExperienceDesigner({
                   </select>
                 </FieldInput>
               ) : null}
-              {selectedBlock.type === "accordion"
-                ? selectedBlock.items.map((it, idx) => (
-                    <input
-                      key={it.id}
-                      className={inputCls}
-                      value={it.title}
-                      onChange={(e) =>
-                        patchBlock(selectedBlock.id, (b) => {
-                          if (b.type !== "accordion") return b;
-                          const items = b.items.map((x, i) =>
-                            i === idx ? { ...x, title: e.target.value } : x,
-                          );
-                          return { ...b, items };
-                        })
-                      }
-                    />
-                  ))
-                : null}
+            </div>
+          ) : null}
+
+          {selection.kind === "block" &&
+          selectedBlock?.type === "accordion" ? (
+            <div className="space-y-2">
+              <p className="text-xs text-slate-500">Accordion items</p>
+              {selectedBlock.items.map((it, idx) => (
+                <div key={it.id} className="flex items-center gap-1">
+                  <button
+                    type="button"
+                    disabled={idx === 0}
+                    className="text-slate-400 disabled:opacity-30"
+                    onClick={() =>
+                      patchBlock(selectedBlock.id, (b) => {
+                        if (b.type !== "accordion") return b;
+                        return { ...b, items: moveItem(b.items, idx, -1) };
+                      })
+                    }
+                  >
+                    <ArrowUp size={12} />
+                  </button>
+                  <button
+                    type="button"
+                    disabled={idx === selectedBlock.items.length - 1}
+                    className="text-slate-400 disabled:opacity-30"
+                    onClick={() =>
+                      patchBlock(selectedBlock.id, (b) => {
+                        if (b.type !== "accordion") return b;
+                        return { ...b, items: moveItem(b.items, idx, 1) };
+                      })
+                    }
+                  >
+                    <ArrowDown size={12} />
+                  </button>
+                  <input
+                    className={inputCls}
+                    value={it.title}
+                    onChange={(e) =>
+                      patchBlock(selectedBlock.id, (b) => {
+                        if (b.type !== "accordion") return b;
+                        const items = b.items.map((x, i) =>
+                          i === idx ? { ...x, title: e.target.value } : x,
+                        );
+                        return { ...b, items };
+                      })
+                    }
+                  />
+                  <button
+                    type="button"
+                    title="Εισαγωγή εδώ"
+                    className="text-teal-700"
+                    onClick={() =>
+                      setSelection({
+                        kind: "slot",
+                        containerId: selectedBlock.id,
+                        slotId: it.id,
+                      })
+                    }
+                  >
+                    ▸
+                  </button>
+                  <button
+                    type="button"
+                    className="text-rose-600 disabled:opacity-30"
+                    disabled={selectedBlock.items.length <= 1}
+                    onClick={() =>
+                      patchBlock(selectedBlock.id, (b) => {
+                        if (b.type !== "accordion" || b.items.length <= 1)
+                          return b;
+                        return {
+                          ...b,
+                          items: b.items.filter((_, i) => i !== idx),
+                        };
+                      })
+                    }
+                  >
+                    <Trash2 size={12} />
+                  </button>
+                </div>
+              ))}
               <Button
                 size="sm"
-                variant="ghost"
-                className="text-rose-600"
-                onClick={() => {
-                  setRoot(removeBlock(draft.page.root, selectedBlock.id));
-                  setSelection({ kind: "page" });
-                }}
+                variant="secondary"
+                onClick={() =>
+                  patchBlock(selectedBlock.id, (b) => {
+                    if (b.type !== "accordion") return b;
+                    return {
+                      ...b,
+                      items: [
+                        ...b.items,
+                        {
+                          id: fxId("acci"),
+                          title: `Στοιχείο ${b.items.length + 1}`,
+                          children: [],
+                        },
+                      ],
+                    };
+                  })
+                }
               >
-                <Trash2 size={12} /> Αφαίρεση
+                <Plus size={12} /> Item
               </Button>
             </div>
           ) : null}
@@ -1720,12 +2562,18 @@ export function FormExperienceDesigner({
                       className={inputCls}
                       value={r.then.targetType}
                       onChange={(e) => {
+                        const targetType = e.target.value as "field" | "block";
+                        const opts =
+                          targetType === "field"
+                            ? ruleTargetOptions.fields
+                            : ruleTargetOptions.blocks;
                         const next = [...rules];
                         next[idx] = {
                           ...r,
                           then: {
                             ...r.then,
-                            targetType: e.target.value as "field" | "block",
+                            targetType,
+                            targetId: opts[0]?.id ?? "",
                           },
                         };
                         updateDraft({ ...draft, rules: next });
@@ -1735,9 +2583,8 @@ export function FormExperienceDesigner({
                       <option value="block">block</option>
                     </select>
                   </div>
-                  <input
+                  <select
                     className={inputCls}
-                    placeholder="targetId"
                     value={r.then.targetId}
                     onChange={(e) => {
                       const next = [...rules];
@@ -1747,7 +2594,37 @@ export function FormExperienceDesigner({
                       };
                       updateDraft({ ...draft, rules: next });
                     }}
-                  />
+                  >
+                    <option value="">— στόχος —</option>
+                    {(r.then.targetType === "block"
+                      ? ruleTargetOptions.blocks
+                      : ruleTargetOptions.fields
+                    ).map((o) => (
+                      <option key={o.id} value={o.id}>
+                        {o.label}
+                      </option>
+                    ))}
+                  </select>
+                  {r.then.action === "set_value" ? (
+                    <input
+                      className={inputCls}
+                      placeholder="τιμή set_value"
+                      value={
+                        r.then.value == null ? "" : String(r.then.value)
+                      }
+                      onChange={(e) => {
+                        const next = [...rules];
+                        next[idx] = {
+                          ...r,
+                          then: {
+                            ...r.then,
+                            value: e.target.value || null,
+                          },
+                        };
+                        updateDraft({ ...draft, rules: next });
+                      }}
+                    />
+                  ) : null}
                   <button
                     type="button"
                     className="text-rose-600"
@@ -1780,7 +2657,7 @@ export function FormExperienceDesigner({
                   then: {
                     action: "hide",
                     targetType: "field",
-                    targetId: "",
+                    targetId: ruleTargetOptions.fields[0]?.id ?? "",
                   },
                 };
                 updateDraft({ ...draft, rules: [...rules, rule] });

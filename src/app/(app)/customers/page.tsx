@@ -94,6 +94,8 @@ export default async function CustomersPage() {
           optionsJson: f.optionsJson,
           required: f.required,
         }))}
+        mapsApiKey={process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY ?? ""}
+        mapsMapId={process.env.NEXT_PUBLIC_GOOGLE_MAPS_MAP_ID || "DEMO_MAP_ID"}
       />
     </div>
   );

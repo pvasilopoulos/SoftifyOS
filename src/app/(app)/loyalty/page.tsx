@@ -28,27 +28,42 @@ export default async function LoyaltyPage({
   const program = await ensureLoyaltyProgram(prisma, session.tenantId);
   const rules = await getLoyaltyRules(prisma, session.tenantId);
 
-  const accounts = await prisma.loyaltyAccount.findMany({
-    where: { tenantId: session.tenantId },
-    orderBy: [{ updatedAt: "desc" }],
-    take: 100,
-    include: {
-      customer: {
-        select: { id: true, code: true, name: true, email: true },
-      },
-    },
-  });
+  const [accounts, allForStats, activeCount, customersWithout] =
+    await Promise.all([
+      prisma.loyaltyAccount.findMany({
+        where: { tenantId: session.tenantId },
+        orderBy: [{ updatedAt: "desc" }],
+        take: 50,
+        include: {
+          customer: {
+            select: { id: true, code: true, name: true, email: true },
+          },
+        },
+      }),
+      prisma.loyaltyAccount.findMany({
+        where: { tenantId: session.tenantId },
+        select: { pointsBalance: true, tier: true, isActive: true },
+      }),
+      prisma.loyaltyAccount.count({
+        where: { tenantId: session.tenantId, isActive: true },
+      }),
+      prisma.customer.findMany({
+        where: {
+          tenantId: session.tenantId,
+          status: "ACTIVE",
+          loyaltyAccounts: { none: {} },
+        },
+        orderBy: { name: "asc" },
+        take: 200,
+        select: { id: true, code: true, name: true },
+      }),
+    ]);
 
-  const customersWithout = await prisma.customer.findMany({
-    where: {
-      tenantId: session.tenantId,
-      status: "ACTIVE",
-      loyaltyAccounts: { none: {} },
-    },
-    orderBy: { name: "asc" },
-    take: 200,
-    select: { id: true, code: true, name: true },
-  });
+  const pointsTotal = allForStats.reduce((s, a) => s + a.pointsBalance, 0);
+  const byTier: Record<string, number> = {};
+  for (const a of allForStats) {
+    byTier[a.tier] = (byTier[a.tier] || 0) + 1;
+  }
 
   return (
     <LoyaltyAccountsClient
@@ -62,6 +77,13 @@ export default async function LoyaltyPage({
         isActive: program.isActive,
       }}
       customersWithout={customersWithout}
+      initialStats={{
+        totalAccounts: allForStats.length,
+        activeAccounts: activeCount,
+        pointsTotal,
+        valueTotal: pointsToEur(pointsTotal, rules),
+        byTier,
+      }}
       initialItems={accounts.map((a) => ({
         id: a.id,
         pointsBalance: a.pointsBalance,
@@ -70,6 +92,7 @@ export default async function LoyaltyPage({
         isActive: a.isActive,
         customer: a.customer,
         updatedAt: a.updatedAt.toISOString(),
+        createdAt: a.createdAt.toISOString(),
       }))}
     />
   );

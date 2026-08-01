@@ -173,6 +173,13 @@ export const defaultMenuTree: MenuNodeConfig[] = [
         mobileOrder: 1,
       },
       {
+        id: "crm",
+        type: "link",
+        label: "CRM",
+        href: "/crm",
+        icon: "FolderTree",
+      },
+      {
         id: "quotes",
         type: "link",
         label: "Προσφορές",
@@ -192,6 +199,13 @@ export const defaultMenuTree: MenuNodeConfig[] = [
         label: "Τιμολόγια",
         href: "/invoices",
         icon: "FileText",
+      },
+      {
+        id: "delivery-notes",
+        type: "link",
+        label: "Δελτία αποστολής",
+        href: "/delivery-notes",
+        icon: "Truck",
       },
       {
         id: "pos",
@@ -270,17 +284,9 @@ export const defaultMenuTree: MenuNodeConfig[] = [
       {
         id: "reports",
         type: "link",
-        label: "Αναφορές",
+        label: "Αναφορές & BI",
         href: "/reports",
         icon: "BarChart3",
-      },
-      {
-        id: "audit",
-        type: "link",
-        label: "Audit log",
-        href: "/audit",
-        icon: "ScrollText",
-        roles: ["OWNER", "ADMIN"],
       },
       {
         id: "settings",

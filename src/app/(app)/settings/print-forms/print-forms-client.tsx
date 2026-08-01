@@ -46,6 +46,7 @@ import {
   PRINT_MERGE_FIELDS,
   SAMPLE_PRINT_CONTEXT,
 } from "@/modules/print-forms/html-presets";
+import { ADVANCED_PRINT_PRESETS } from "@/modules/print-forms/advanced-presets";
 import {
   buildPrintDocument,
   renderPrintTemplate,
@@ -382,29 +383,58 @@ export function PrintFormsClient({ initialItems }: { initialItems: Item[] }) {
     setTab("html");
   };
 
-  const applyPreset = (kind: "invoice" | "receipt") => {
+  const applyPreset = (kind: "invoice" | "receipt" | string) => {
     if (!selected) return;
-    const receipt = kind === "receipt";
+    if (kind === "invoice" || kind === "receipt") {
+      const receipt = kind === "receipt";
+      patchLocalBody({
+        version: 2,
+        engine: "html",
+        html: receipt ? DEFAULT_RECEIPT_HTML : DEFAULT_INVOICE_HTML,
+        css: receipt ? DEFAULT_RECEIPT_CSS : DEFAULT_INVOICE_CSS,
+        page: receipt
+          ? pageFromPaperPreset("RECEIPT_80", "PORTRAIT")
+          : pageFromPaperPreset("A4", selected.orientation),
+        blocks: body.blocks,
+      });
+      patchLocalItem({
+        paper: receipt ? "RECEIPT_80" : "A4",
+        orientation: receipt ? "PORTRAIT" : selected.orientation,
+      });
+      setTab("preview");
+      setMessage(
+        receipt
+          ? "Φορτώθηκε preset ΑΠΥ HTML."
+          : "Φορτώθηκε preset τιμολογίου HTML.",
+      );
+      return;
+    }
+    const advanced = ADVANCED_PRINT_PRESETS.find((p) => p.id === kind);
+    if (!advanced) return;
+    const isThermal = kind === "receipt58";
     patchLocalBody({
       version: 2,
       engine: "html",
-      html: receipt ? DEFAULT_RECEIPT_HTML : DEFAULT_INVOICE_HTML,
-      css: receipt ? DEFAULT_RECEIPT_CSS : DEFAULT_INVOICE_CSS,
-      page: receipt
-        ? pageFromPaperPreset("RECEIPT_80", "PORTRAIT")
+      html: advanced.html,
+      css: advanced.css,
+      page: isThermal
+        ? {
+            widthMm: 58,
+            heightMm: 200,
+            marginTopMm: 2,
+            marginRightMm: 2,
+            marginBottomMm: 2,
+            marginLeftMm: 2,
+          }
         : pageFromPaperPreset("A4", selected.orientation),
       blocks: body.blocks,
     });
     patchLocalItem({
-      paper: receipt ? "RECEIPT_80" : "A4",
-      orientation: receipt ? "PORTRAIT" : selected.orientation,
+      paper: isThermal ? "CUSTOM" : "A4",
+      orientation: "PORTRAIT",
     });
     setTab("preview");
-    setMessage(
-      receipt
-        ? "Φορτώθηκε preset ΑΠΥ HTML."
-        : "Φορτώθηκε preset τιμολογίου HTML.",
-    );
+    setMessage(`Φορτώθηκε advanced preset: ${advanced.label}`);
   };
 
   const create = (e: FormEvent<HTMLFormElement>) => {
@@ -706,22 +736,27 @@ export function PrintFormsClient({ initialItems }: { initialItems: Item[] }) {
                     </button>
                   ))}
                 </div>
-                <Button
-                  size="sm"
-                  variant="secondary"
-                  type="button"
-                  onClick={() => applyPreset("invoice")}
+                <select
+                  className="h-9 rounded-xl border border-slate-200 bg-white px-2 text-xs font-medium text-slate-700 outline-none focus:border-teal-300"
+                  defaultValue=""
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    if (!v) return;
+                    applyPreset(v);
+                    e.currentTarget.value = "";
+                  }}
                 >
-                  Preset τιμολόγιο
-                </Button>
-                <Button
-                  size="sm"
-                  variant="secondary"
-                  type="button"
-                  onClick={() => applyPreset("receipt")}
-                >
-                  Preset ΑΠΥ
-                </Button>
+                  <option value="" disabled>
+                    Advanced presets…
+                  </option>
+                  <option value="invoice">Βασικό τιμολόγιο</option>
+                  <option value="receipt">Βασικό ΑΠΥ 80mm</option>
+                  {ADVANCED_PRINT_PRESETS.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.label}
+                    </option>
+                  ))}
+                </select>
                 <Button
                   size="sm"
                   variant="secondary"

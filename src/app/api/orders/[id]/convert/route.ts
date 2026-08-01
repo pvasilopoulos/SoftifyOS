@@ -3,9 +3,11 @@ import { z } from "zod";
 import { prisma } from "@/server/db";
 import { getSession } from "@/platform/auth/session";
 import { writeAuditEvent } from "@/platform/tenancy/audit";
+import { buildChangeMeta } from "@/platform/tenancy/audit-diff";
 import { getErrorMessage } from "@/shared/lib/safe";
 import { toNumber } from "@/modules/sales/invoice-utils";
 import { quoteConvertSchema } from "@/modules/sales/order-schemas";
+import { orderAuditSnapshot } from "@/modules/sales/order-audit";
 import {
   allocateFromSeries,
   resolveDefaultSeries,
@@ -137,17 +139,45 @@ export async function POST(
       return created;
     });
 
+    const quoteAfter = await prisma.order.findFirst({
+      where: { id: quote.id },
+      include: { lines: { orderBy: { position: "asc" } } },
+    });
+    const orderFull = await prisma.order.findFirst({
+      where: { id: order.id },
+      include: { lines: { orderBy: { position: "asc" } } },
+    });
+
     await writeAuditEvent({
       tenantId: session.tenantId,
       userId: session.sub,
       action: "quote.convert",
       entity: "order",
       entityId: order.id,
-      meta: {
-        orderNumber: order.number,
-        quoteId: quote.id,
-        quoteNumber: quote.number,
-      },
+      meta: buildChangeMeta({
+        before: {
+          quote: orderAuditSnapshot(quote),
+        },
+        after: {
+          quote: quoteAfter
+            ? orderAuditSnapshot(quoteAfter)
+            : { ...orderAuditSnapshot(quote), status: "CONFIRMED" },
+          order: orderFull
+            ? orderAuditSnapshot(orderFull)
+            : {
+                id: order.id,
+                number: order.number,
+                status: order.status,
+                total: toNumber(order.total),
+              },
+        },
+        extra: {
+          orderNumber: order.number,
+          quoteId: quote.id,
+          quoteNumber: quote.number,
+        },
+        omitKeys: ["id", "updatedAt", "createdAt", "lines", "lineCount"],
+      }),
     });
 
     return NextResponse.json(

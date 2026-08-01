@@ -17,43 +17,69 @@ type Db = PrismaClient | Prisma.TransactionClient;
 export async function ensureEntityViewDefaults(db: Db, tenantId: string) {
   for (const entity of ENTITY_MODULES) {
     const seed = defaultViewsSeed(entity);
+    // Refresh system CUSTOMERS views so ERP field expansions land in existing tenants
+    const refreshSystem = entity === "CUSTOMERS";
     for (const row of seed.list) {
-      await db.entityListView.upsert({
+      const existing = await db.entityListView.findUnique({
         where: {
           tenantId_entity_code: { tenantId, entity, code: row.code },
         },
-        create: {
-          tenantId,
-          entity,
-          code: row.code,
-          name: row.name,
-          description: row.description,
-          configJson: row.config,
-          isDefault: row.isDefault,
-          isSystem: row.isSystem,
-          isActive: true,
-        },
-        update: {},
       });
+      if (!existing) {
+        await db.entityListView.create({
+          data: {
+            tenantId,
+            entity,
+            code: row.code,
+            name: row.name,
+            description: row.description,
+            configJson: row.config,
+            isDefault: row.isDefault,
+            isSystem: row.isSystem,
+            isActive: true,
+          },
+        });
+      } else if (refreshSystem && row.isSystem && existing.isSystem) {
+        await db.entityListView.update({
+          where: { id: existing.id },
+          data: {
+            name: row.name,
+            description: row.description,
+            configJson: row.config,
+          },
+        });
+      }
     }
     for (const row of seed.form) {
-      await db.entityFormView.upsert({
+      const existing = await db.entityFormView.findUnique({
         where: {
           tenantId_entity_code: { tenantId, entity, code: row.code },
         },
-        create: {
-          tenantId,
-          entity,
-          code: row.code,
-          name: row.name,
-          description: row.description,
-          configJson: row.config,
-          isDefault: row.isDefault,
-          isSystem: row.isSystem,
-          isActive: true,
-        },
-        update: {},
       });
+      if (!existing) {
+        await db.entityFormView.create({
+          data: {
+            tenantId,
+            entity,
+            code: row.code,
+            name: row.name,
+            description: row.description,
+            configJson: row.config,
+            isDefault: row.isDefault,
+            isSystem: row.isSystem,
+            isActive: true,
+          },
+        });
+      } else if (refreshSystem && row.isSystem && existing.isSystem) {
+        await db.entityFormView.update({
+          where: { id: existing.id },
+          data: {
+            name: row.name,
+            description: row.description,
+            configJson: row.config,
+          },
+        });
+      }
     }
   }
 }

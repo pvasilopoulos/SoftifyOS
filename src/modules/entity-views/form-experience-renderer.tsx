@@ -11,6 +11,7 @@ import type {
   FormMode,
   FormViewConfig,
 } from "./form-experience-types";
+import { WIDTH_CLASS } from "./form-experience-types";
 import { evaluateFormRules } from "./form-rules";
 import type { CustomFieldDef } from "./dynamic-ui";
 
@@ -35,8 +36,7 @@ function mapCustomType(t: string): BuiltinField["type"] {
 }
 
 function widthClass(w?: FieldWidth) {
-  if (w === "full") return "sm:col-span-2";
-  return "";
+  return WIDTH_CLASS[w ?? "half"];
 }
 
 function FieldControl({
@@ -65,7 +65,7 @@ function FieldControl({
   const cls =
     "h-11 w-full rounded-xl border border-slate-200 px-3 text-sm outline-none focus:border-teal-400 disabled:bg-slate-50";
   return (
-    <label className={cn("block text-sm", wide && "sm:col-span-2")}>
+    <label className={cn("block text-sm", wide && "w-full")}>
       <span className="mb-1.5 block font-medium">
         {label}
         {required ? " *" : ""}
@@ -212,7 +212,7 @@ function RenderField({
             .filter(Boolean)
         : [];
     return (
-      <div className={cn("block text-sm sm:col-span-2", widthClass(field.width))}>
+      <div className={cn("block text-sm", widthClass(field.width ?? "full"))}>
         <span className="mb-1.5 block font-medium">
           {field.label || def.label}
           {required ? " *" : ""}
@@ -372,7 +372,7 @@ function Block({
 
   if (block.type === "fields") {
     return (
-      <div className="grid gap-3 sm:grid-cols-2">
+      <div className="grid grid-cols-12 gap-3">
         {block.fields.map((f) => {
           const st = ctx.fieldState[f.id];
           if (st?.hidden) return null;

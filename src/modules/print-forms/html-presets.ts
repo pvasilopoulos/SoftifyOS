@@ -9,6 +9,13 @@ export const PRINT_MERGE_FIELDS: MergeFieldGroup[] = [
     fields: [
       { token: "{{tenant.name}}", label: "Επωνυμία", sample: "Ακρόπολις ΑΕ" },
       { token: "{{tenant.code}}", label: "Κωδικός tenant" },
+      { token: "{{company.vatNumber}}", label: "ΑΦΜ εταιρείας" },
+      { token: "{{company.address}}", label: "Διεύθυνση" },
+      { token: "{{company.phone}}", label: "Τηλέφωνο εταιρείας" },
+      { token: "{{company.email}}", label: "Email εταιρείας" },
+      { token: "{{company.bankName}}", label: "Τράπεζα" },
+      { token: "{{company.iban}}", label: "IBAN" },
+      { token: "{{company.bic}}", label: "BIC" },
     ],
   },
   {
@@ -22,6 +29,8 @@ export const PRINT_MERGE_FIELDS: MergeFieldGroup[] = [
       { token: "{{doc.currency}}", label: "Νόμισμα" },
       { token: "{{doc.notes}}", label: "Σημειώσεις" },
       { token: "{{form.name}}", label: "Όνομα φόρμας" },
+      { token: "{{payment.terms}}", label: "Όροι πληρωμής" },
+      { token: "{{shipping.address}}", label: "Διεύθυνση αποστολής" },
     ],
   },
   {
@@ -48,8 +57,23 @@ export const PRINT_MERGE_FIELDS: MergeFieldGroup[] = [
       { token: "{{this.quantity|number}}", label: "Ποσότητα" },
       { token: "{{this.unitPrice|eur}}", label: "Τιμή" },
       { token: "{{this.vatRate|number}}", label: "ΦΠΑ %" },
+      { token: "{{this.net|eur}}", label: "Καθαρή γραμμής" },
       { token: "{{this.lineTotal|eur}}", label: "Σύνολο γραμμής" },
       { token: "{{@number}}", label: "Α/Α γραμμής" },
+    ],
+  },
+  {
+    title: "Ανάλυση ΦΠΑ",
+    fields: [
+      {
+        token:
+          "{{#each vatBreakdown}}\n<tr>\n  <td>{{this.rate|number}}%</td>\n  <td class=\"num\">{{this.base|eur}}</td>\n  <td class=\"num\">{{this.vat|eur}}</td>\n  <td class=\"num\">{{this.gross|eur}}</td>\n</tr>\n{{/each}}",
+        label: "Πίνακας ΦΠΑ",
+      },
+      { token: "{{this.rate|number}}", label: "Συντελεστής" },
+      { token: "{{this.base|eur}}", label: "Βάση" },
+      { token: "{{this.vat|eur}}", label: "ΦΠΑ ποσό" },
+      { token: "{{this.gross|eur}}", label: "Μικτό" },
     ],
   },
   {
@@ -201,6 +225,17 @@ td { padding: 4px 0; vertical-align: top; }
 
 export const SAMPLE_PRINT_CONTEXT: Record<string, unknown> = {
   tenant: { name: "Ακρόπολις ΑΕ", code: "akropolis" },
+  company: {
+    vatNumber: "999888777",
+    address: "Λεωφ. Συγγρού 100, Αθήνα 11745",
+    phone: "210-900-1000",
+    email: "billing@akropolis.gr",
+    bankName: "Εθνική Τράπεζα",
+    iban: "GR16 0110 1250 0000 1254 0123 456",
+    bic: "ETHNGRAA",
+  },
+  payment: { terms: "Καθαρό 30 ημέρες" },
+  shipping: { address: "Αποθήκη Ασπροπύργου, Οδός Βιομηχανίας 12" },
   form: { name: "Τιμολόγιο — HTML φόρμα" },
   doc: {
     number: "ΤΙΜ-2026-00042",
@@ -226,6 +261,7 @@ export const SAMPLE_PRINT_CONTEXT: Record<string, unknown> = {
       quantity: 1,
       unitPrice: 800,
       vatRate: 24,
+      net: 800,
       lineTotal: 992,
     },
     {
@@ -233,14 +269,27 @@ export const SAMPLE_PRINT_CONTEXT: Record<string, unknown> = {
       quantity: 3,
       unitPrice: 49,
       vatRate: 24,
+      net: 147,
       lineTotal: 182.28,
     },
+    {
+      description: "Εκπαιδευτικό υλικό",
+      quantity: 2,
+      unitPrice: 20,
+      vatRate: 13,
+      net: 40,
+      lineTotal: 45.2,
+    },
+  ],
+  vatBreakdown: [
+    { rate: 24, base: 947, vat: 227.28, gross: 1174.28 },
+    { rate: 13, base: 40, vat: 5.2, gross: 45.2 },
   ],
   totals: {
-    subtotal: 947,
-    vatAmount: 227.28,
-    total: 1174.28,
+    subtotal: 987,
+    vatAmount: 232.48,
+    total: 1219.48,
     paid: 0,
-    balance: 1174.28,
+    balance: 1219.48,
   },
 };

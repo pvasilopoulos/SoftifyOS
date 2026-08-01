@@ -629,6 +629,62 @@ export function PurchasingClient({
                     </button>
                   </div>
                 ) : null}
+
+                {selected.status !== "CANCELLED" &&
+                selected.status !== "DRAFT" ? (
+                  <div className="rounded-xl border border-sky-200 bg-sky-50/40 p-4">
+                    <h3 className="text-sm font-semibold text-sky-900">
+                      Πληρωμή προμηθευτή
+                    </h3>
+                    <p className="mt-1 text-xs text-sky-800/80">
+                      Καταχώρηση πληρωμής για {money(selected.total)} ·{" "}
+                      {selected.supplier.name}
+                    </p>
+                    <button
+                      type="button"
+                      disabled={busy}
+                      onClick={async () => {
+                        const amountStr = window.prompt(
+                          "Ποσό πληρωμής (€)",
+                          String(selected.total),
+                        );
+                        if (!amountStr) return;
+                        const amount = Number(amountStr);
+                        if (!Number.isFinite(amount) || amount <= 0) {
+                          setError("Μη έγκυρο ποσό");
+                          return;
+                        }
+                        setBusy(true);
+                        setError(null);
+                        try {
+                          const res = await fetch("/api/purchase-payments", {
+                            method: "POST",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify({
+                              supplierId: selected.supplier.id,
+                              purchaseOrderId: selected.id,
+                              amount,
+                              method: "TRANSFER",
+                            }),
+                          });
+                          const data = await res.json();
+                          if (!res.ok) {
+                            setError(data.error || "Αποτυχία πληρωμής");
+                            return;
+                          }
+                          setMessage(
+                            `Πληρωμή ${money(amount)} καταχωρήθηκε`,
+                          );
+                        } finally {
+                          setBusy(false);
+                        }
+                      }}
+                      className="mt-3 rounded-md bg-sky-700 px-3 py-2 text-sm font-medium text-white disabled:opacity-50"
+                    >
+                      Καταχώρηση πληρωμής
+                    </button>
+                  </div>
+                ) : null}
               </>
             ) : (
               <div className="rounded-xl border border-dashed border-slate-200 bg-white px-4 py-16 text-center text-sm text-slate-500">

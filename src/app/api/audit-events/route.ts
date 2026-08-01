@@ -22,6 +22,10 @@ const querySchema = z.object({
   from: z.string().optional(),
   to: z.string().optional(),
   userId: z.string().min(1).max(80).optional(),
+  summary: z
+    .enum(["0", "1", "true", "false"])
+    .optional()
+    .transform((v) => v === "1" || v === "true"),
 });
 
 function serialize(row: {
@@ -52,6 +56,57 @@ function serialize(row: {
   };
 }
 
+function buildWhere(
+  tenantId: string,
+  input: {
+    action?: string;
+    entity?: string;
+    userId?: string;
+    from?: string;
+    to?: string;
+    q?: string;
+  },
+): Prisma.AuditEventWhereInput[] {
+  const baseAnd: Prisma.AuditEventWhereInput[] = [{ tenantId }];
+
+  if (input.action) {
+    if (input.action.endsWith(".")) {
+      baseAnd.push({ action: { startsWith: input.action } });
+    } else {
+      baseAnd.push({ action: input.action });
+    }
+  }
+  if (input.entity) baseAnd.push({ entity: input.entity });
+  if (input.userId) baseAnd.push({ userId: input.userId });
+  if (input.from || input.to) {
+    baseAnd.push({
+      createdAt: {
+        ...(input.from ? { gte: new Date(input.from) } : {}),
+        ...(input.to ? { lte: new Date(input.to) } : {}),
+      },
+    });
+  }
+  const query = input.q?.trim();
+  if (query) {
+    baseAnd.push({
+      OR: [
+        { action: { contains: query, mode: "insensitive" } },
+        { entity: { contains: query, mode: "insensitive" } },
+        { entityId: { contains: query, mode: "insensitive" } },
+        {
+          user: {
+            OR: [
+              { name: { contains: query, mode: "insensitive" } },
+              { email: { contains: query, mode: "insensitive" } },
+            ],
+          },
+        },
+      ],
+    });
+  }
+  return baseAnd;
+}
+
 export async function GET(request: NextRequest) {
   const started = Date.now();
   try {
@@ -79,6 +134,7 @@ export async function GET(request: NextRequest) {
       from: fromRaw,
       to: toRaw,
       userId,
+      summary: wantSummary,
     } = parsed.data;
 
     const from = fromRaw?.trim() || undefined;
@@ -95,51 +151,24 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: "Invalid cursor" }, { status: 400 });
     }
 
-    const baseAnd: Prisma.AuditEventWhereInput[] = [
-      { tenantId: session.tenantId },
-    ];
-
-    if (action) {
-      if (action.endsWith(".")) {
-        baseAnd.push({ action: { startsWith: action } });
-      } else {
-        baseAnd.push({ action });
-      }
-    }
-    if (entity) baseAnd.push({ entity });
-    if (userId) baseAnd.push({ userId });
-    if (from || to) {
-      baseAnd.push({
-        createdAt: {
-          ...(from ? { gte: new Date(from) } : {}),
-          ...(to ? { lte: new Date(to) } : {}),
-        },
-      });
-    }
-    const query = q?.trim();
-    if (query) {
-      baseAnd.push({
-        OR: [
-          { action: { contains: query, mode: "insensitive" } },
-          { entity: { contains: query, mode: "insensitive" } },
-          { entityId: { contains: query, mode: "insensitive" } },
-          {
-            user: {
-              OR: [
-                { name: { contains: query, mode: "insensitive" } },
-                { email: { contains: query, mode: "insensitive" } },
-              ],
-            },
-          },
-        ],
-      });
-    }
+    const baseAnd = buildWhere(session.tenantId, {
+      action,
+      entity,
+      userId,
+      from,
+      to,
+      q,
+    });
 
     const listAnd = [...baseAnd];
     const cw = cursorWhere(cursor);
     if (cw) listAnd.push(cw);
 
-    const [rows, total] = await Promise.all([
+    const now = Date.now();
+    const hourAgo = new Date(now - 60 * 60_000);
+    const dayAgo = new Date(now - 24 * 60 * 60_000);
+
+    const [rows, total, summary] = await Promise.all([
       prisma.auditEvent.findMany({
         where: { AND: listAnd },
         orderBy: [{ createdAt: "desc" }, { id: "desc" }],
@@ -156,6 +185,45 @@ export async function GET(request: NextRequest) {
         },
       }),
       prisma.auditEvent.count({ where: { AND: baseAnd } }),
+      wantSummary
+        ? Promise.all([
+            prisma.auditEvent.count({
+              where: {
+                tenantId: session.tenantId,
+                createdAt: { gte: hourAgo },
+              },
+            }),
+            prisma.auditEvent.count({
+              where: {
+                tenantId: session.tenantId,
+                createdAt: { gte: dayAgo },
+              },
+            }),
+            prisma.auditEvent.count({
+              where: {
+                tenantId: session.tenantId,
+                createdAt: { gte: dayAgo },
+                action: { startsWith: "auth." },
+              },
+            }),
+            prisma.auditEvent.count({
+              where: {
+                tenantId: session.tenantId,
+                createdAt: { gte: dayAgo },
+                OR: [
+                  { action: { contains: "delete" } },
+                  { action: { contains: "fail" } },
+                  { action: { contains: "cancel" } },
+                ],
+              },
+            }),
+          ]).then(([lastHour, last24h, auth24h, risk24h]) => ({
+            lastHour,
+            last24h,
+            auth24h,
+            risk24h,
+          }))
+        : Promise.resolve(null),
     ]);
 
     const hasMore = rows.length > limit;
@@ -183,6 +251,7 @@ export async function GET(request: NextRequest) {
           hasMore,
           total,
         },
+        summary,
       },
       {
         headers: {

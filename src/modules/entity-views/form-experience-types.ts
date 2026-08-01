@@ -360,40 +360,241 @@ export function insertChild(
   blocks: FormBlock[],
   parentId: string | null,
   child: FormBlock,
+  slotId?: string | null,
 ): FormBlock[] {
   if (parentId == null) return [...blocks, child];
   return mapBlocks(blocks, (b) => {
     if (b.id !== parentId) return b;
     if (b.type === "section") return { ...b, children: [...b.children, child] };
-    if (b.type === "tabs" && b.tabs[0]) {
-      const first = b.tabs[0];
-      const tabs = [...b.tabs];
-      tabs[0] = {
-        ...first,
-        children: [...first.children, child],
+    if (b.type === "tabs" && b.tabs.length > 0) {
+      const idx = slotId ? b.tabs.findIndex((t) => t.id === slotId) : 0;
+      const i = idx >= 0 ? idx : 0;
+      return {
+        ...b,
+        tabs: b.tabs.map((t, n) =>
+          n === i ? { ...t, children: [...t.children, child] } : t,
+        ),
       };
-      return { ...b, tabs };
     }
-    if (b.type === "columns" && b.columns[0]) {
-      const first = b.columns[0];
-      const columns = [...b.columns];
-      columns[0] = {
-        ...first,
-        children: [...first.children, child],
+    if (b.type === "columns" && b.columns.length > 0) {
+      const idx = slotId ? b.columns.findIndex((c) => c.id === slotId) : 0;
+      const i = idx >= 0 ? idx : 0;
+      return {
+        ...b,
+        columns: b.columns.map((c, n) =>
+          n === i ? { ...c, children: [...c.children, child] } : c,
+        ),
       };
-      return { ...b, columns };
     }
-    if (b.type === "accordion" && b.items[0]) {
-      const first = b.items[0];
-      const items = [...b.items];
-      items[0] = {
-        ...first,
-        children: [...first.children, child],
+    if (b.type === "accordion" && b.items.length > 0) {
+      const idx = slotId ? b.items.findIndex((it) => it.id === slotId) : 0;
+      const i = idx >= 0 ? idx : 0;
+      return {
+        ...b,
+        items: b.items.map((it, n) =>
+          n === i ? { ...it, children: [...it.children, child] } : it,
+        ),
       };
-      return { ...b, items };
     }
     return b;
   });
+}
+
+function moveInList<T>(arr: T[], index: number, dir: -1 | 1): T[] {
+  const next = index + dir;
+  if (next < 0 || next >= arr.length) return arr;
+  const copy = [...arr];
+  [copy[index], copy[next]] = [copy[next]!, copy[index]!];
+  return copy;
+}
+
+/** Move a block among its siblings (root or inside a container). */
+export function moveBlock(
+  blocks: FormBlock[],
+  id: string,
+  dir: -1 | 1,
+): FormBlock[] {
+  const idx = blocks.findIndex((b) => b.id === id);
+  if (idx >= 0) return moveInList(blocks, idx, dir);
+  return blocks.map((b) => {
+    switch (b.type) {
+      case "section":
+        return { ...b, children: moveBlock(b.children, id, dir) };
+      case "tabs":
+        return {
+          ...b,
+          tabs: b.tabs.map((t) => ({
+            ...t,
+            children: moveBlock(t.children, id, dir),
+          })),
+        };
+      case "columns":
+        return {
+          ...b,
+          columns: b.columns.map((c) => ({
+            ...c,
+            children: moveBlock(c.children, id, dir),
+          })),
+        };
+      case "accordion":
+        return {
+          ...b,
+          items: b.items.map((it) => ({
+            ...it,
+            children: moveBlock(it.children, id, dir),
+          })),
+        };
+      default:
+        return b;
+    }
+  });
+}
+
+export function cloneBlockDeep(block: FormBlock): FormBlock {
+  switch (block.type) {
+    case "section":
+      return {
+        ...block,
+        id: fxId("sec"),
+        children: block.children.map(cloneBlockDeep),
+      };
+    case "tabs":
+      return {
+        ...block,
+        id: fxId("tabs"),
+        tabs: block.tabs.map((t) => ({
+          ...t,
+          id: fxId("tab"),
+          children: t.children.map(cloneBlockDeep),
+        })),
+      };
+    case "columns":
+      return {
+        ...block,
+        id: fxId("cols"),
+        columns: block.columns.map((c) => ({
+          ...c,
+          id: fxId("col"),
+          children: c.children.map(cloneBlockDeep),
+        })),
+      };
+    case "accordion":
+      return {
+        ...block,
+        id: fxId("acc"),
+        items: block.items.map((it) => ({
+          ...it,
+          id: fxId("acci"),
+          children: it.children.map(cloneBlockDeep),
+        })),
+      };
+    case "fields":
+      return {
+        ...block,
+        id: fxId("flds"),
+        fields: block.fields.map((f) => ({ ...f, id: fxId("f") })),
+      };
+    case "heading":
+      return { ...block, id: fxId("hd") };
+    case "divider":
+      return { ...block, id: fxId("div") };
+    case "callout":
+      return { ...block, id: fxId("call") };
+    case "spacer":
+      return { ...block, id: fxId("sp") };
+    case "related":
+      return { ...block, id: fxId("rel") };
+  }
+}
+
+/** Insert a deep clone of the block immediately after the original. */
+export function duplicateBlock(blocks: FormBlock[], id: string): FormBlock[] {
+  const next: FormBlock[] = [];
+  for (const b of blocks) {
+    if (b.id === id) {
+      next.push(b);
+      next.push(cloneBlockDeep(b));
+      continue;
+    }
+    switch (b.type) {
+      case "section":
+        next.push({ ...b, children: duplicateBlock(b.children, id) });
+        break;
+      case "tabs":
+        next.push({
+          ...b,
+          tabs: b.tabs.map((t) => ({
+            ...t,
+            children: duplicateBlock(t.children, id),
+          })),
+        });
+        break;
+      case "columns":
+        next.push({
+          ...b,
+          columns: b.columns.map((c) => ({
+            ...c,
+            children: duplicateBlock(c.children, id),
+          })),
+        });
+        break;
+      case "accordion":
+        next.push({
+          ...b,
+          items: b.items.map((it) => ({
+            ...it,
+            children: duplicateBlock(it.children, id),
+          })),
+        });
+        break;
+      default:
+        next.push(b);
+    }
+  }
+  return next;
+}
+
+/** Index of block among its siblings, or -1 if not found at this level. */
+export function siblingIndex(blocks: FormBlock[], id: string): number {
+  return blocks.findIndex((b) => b.id === id);
+}
+
+export function findSiblingContext(
+  blocks: FormBlock[],
+  id: string,
+): { siblings: FormBlock[]; index: number } | null {
+  const idx = blocks.findIndex((b) => b.id === id);
+  if (idx >= 0) return { siblings: blocks, index: idx };
+  for (const b of blocks) {
+    let found: { siblings: FormBlock[]; index: number } | null = null;
+    switch (b.type) {
+      case "section":
+        found = findSiblingContext(b.children, id);
+        break;
+      case "tabs":
+        for (const t of b.tabs) {
+          found = findSiblingContext(t.children, id);
+          if (found) return found;
+        }
+        break;
+      case "columns":
+        for (const c of b.columns) {
+          found = findSiblingContext(c.children, id);
+          if (found) return found;
+        }
+        break;
+      case "accordion":
+        for (const it of b.items) {
+          found = findSiblingContext(it.children, id);
+          if (found) return found;
+        }
+        break;
+      default:
+        break;
+    }
+    if (found) return found;
+  }
+  return null;
 }
 
 export function removeBlock(blocks: FormBlock[], id: string): FormBlock[] {
@@ -438,9 +639,10 @@ export function removeBlock(blocks: FormBlock[], id: string): FormBlock[] {
     });
 }
 
+/** 12-column responsive span classes for field widths */
 export const WIDTH_CLASS: Record<FieldWidth, string> = {
-  full: "sm:col-span-2",
-  half: "",
-  third: "sm:col-span-1",
-  quarter: "sm:col-span-1",
+  full: "col-span-12",
+  half: "col-span-12 sm:col-span-6",
+  third: "col-span-12 sm:col-span-4",
+  quarter: "col-span-12 sm:col-span-3",
 };

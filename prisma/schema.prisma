@@ -19,6 +19,38 @@ enum CustomerStatus {
   INACTIVE
 }
 
+/// Νομική μορφή πελάτη (Ελλάδα / ΕΕ)
+enum CustomerLegalForm {
+  AE
+  OE
+  EE
+  IKE
+  EPE
+  INDIVIDUAL
+  PUBLIC
+  NGO
+  OTHER
+}
+
+/// Καθεστώς ΦΠΑ
+enum CustomerVatStatus {
+  NORMAL
+  EXEMPT
+  INTRA_EU
+  EXPORT
+  OSS
+}
+
+/// Κατηγορία πελάτη
+enum CustomerCategory {
+  RETAIL
+  WHOLESALE
+  DISTRIBUTOR
+  PUBLIC
+  INTERNAL
+  OTHER
+}
+
 enum SpaceType {
   OFFICE
   WAREHOUSE
@@ -38,6 +70,7 @@ model Tenant {
   memberships      Membership[]
   auditEvents      AuditEvent[]
   customers        Customer[]
+  customerContacts CustomerContact[]
   branches         Branch[]
   spaces           Space[]
   invoices         Invoice[]
@@ -60,6 +93,14 @@ model Tenant {
   glAccounts                   GlAccount[]
   fiscalPeriods                FiscalPeriod[]
   journalEntries               JournalEntry[]
+  legalEntities                LegalEntity[]
+  costCenters                  CostCenter[]
+  fixedAssets                  FixedAsset[]
+  fixedAssetMovements          FixedAssetMovement[]
+  purchaseInvoices             PurchaseInvoice[]
+  parallelLedgers              ParallelLedger[]
+  costAllocations              CostAllocation[]
+  intercompanyMatches          IntercompanyMatch[]
   unitsOfMeasure               UnitOfMeasure[]
   tenantSettings               TenantSettings?
   appRoles                     AppRole[]
@@ -67,6 +108,7 @@ model Tenant {
   customFieldDefinitions       CustomFieldDefinition[]
   entityListViews              EntityListView[]
   entityFormViews              EntityFormView[]
+  entityDetailLayouts          EntityDetailLayout[]
   scriptDefinitions            ScriptDefinition[]
   scriptSecrets                ScriptSecret[]
   scriptHttpAllowlist          ScriptHttpAllowlist[]
@@ -76,6 +118,34 @@ model Tenant {
   stockMovements               StockMovement[]
   suppliers                    Supplier[]
   purchaseOrders               PurchaseOrder[]
+  deliveryNotes                DeliveryNote[]
+  myDataSubmissions            MyDataSubmission[]
+  employees                    Employee[]
+  leaveTypes                   LeaveType[]
+  leaveRequests                LeaveRequest[]
+  workCards                    WorkCard[]
+  workCardEvents               WorkCardEvent[]
+  erganiSubmissions            ErganiSubmission[]
+  payrollPeriods               PayrollPeriod[]
+  payrollLines                 PayrollLine[]
+  crmLeads                     CrmLead[]
+  crmActivities               CrmActivity[]
+  savedFilters                 SavedFilter[]
+  purchasePayments             PurchasePayment[]
+  bankAccounts                 BankAccount[]
+  bankStatementLines           BankStatementLine[]
+  stockLots                    StockLot[]
+  stockBins                    StockBin[]
+  stockTransfers               StockTransfer[]
+  stockCounts                  StockCount[]
+  stockReservations            StockReservation[]
+  stockSerials                 StockSerial[]
+  pickWaves                    PickWave[]
+  putawayRules                 PutawayRule[]
+  unitConversions              UnitConversion[]
+  orderStatusOptions           OrderStatusOption[]
+  invoiceStatusOptions         InvoiceStatusOption[]
+  documentTransformRules       DocumentTransformRule[]
 
   @@map("tenants")
 }
@@ -133,34 +203,118 @@ model AuditEvent {
   @@map("audit_events")
 }
 
-/// Πελάτης — έχει πολλά υποκαταστήματα
+/// Πελάτης — πλήρη master data ERP (ταυτότητα, φορολογικά, διεύθυνση, εμπορικά, τραπεζικά)
 model Customer {
   id        String         @id @default(cuid())
   tenantId  String
   code      String
+  /// Επωνυμία / νομική επωνυμία
   name      String
-  vatNumber String?
-  email     String?
-  phone     String?
-  status    CustomerStatus @default(ACTIVE)
-  notes     String?
+  /// Διακριτικός τίτλος
+  tradeName String?
+  legalForm CustomerLegalForm?
+  /// Φυσικό πρόσωπο
+  isPerson  Boolean        @default(false)
+
+  vatNumber   String?
+  taxOffice   String?
+  gemhNumber  String?
+  eoriNumber  String?
+  vatStatus   CustomerVatStatus @default(NORMAL)
+  profession  String?
+
+  email   String?
+  phone   String?
+  mobile  String?
+  fax     String?
+  website String?
+
+  address    String?
+  address2   String?
+  city       String?
+  postalCode String?
+  region     String?
+  country    String  @default("GR")
+  /// WGS84 — geocoded from customer HQ address (map pin)
+  lat          Float?
+  lng          Float?
+  geocodedAt   DateTime?
+  /// Last address string used for geocoding (skip re-geocode if unchanged)
+  geocodeQuery String?
+
+  shippingAddress    String?
+  shippingAddress2   String?
+  shippingCity       String?
+  shippingPostalCode String?
+  shippingRegion     String?
+  shippingCountry    String?
+
+  category           CustomerCategory?
+  salesperson        String?
+  paymentTermsDays   Int?
+  paymentTermsLabel  String?
+  creditLimit        Decimal? @db.Decimal(14, 2)
+  currency           String   @default("EUR")
+  locale             String   @default("el-GR")
+  discountPercent    Decimal? @db.Decimal(5, 2)
+  priceListCode      String?
+  shippingMethod     String?
+
+  iban              String?
+  bic               String?
+  bankName          String?
+  bankAccountHolder String?
+
+  isBlocked    Boolean        @default(false)
+  sendEinvoice Boolean        @default(false)
+  status       CustomerStatus @default(ACTIVE)
+  notes        String?
   /// Hybrid custom fields: { [fieldCode]: value }
   customFields Json?
-  createdAt DateTime       @default(now())
-  updatedAt DateTime       @updatedAt
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
 
-  tenant   Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tenant   Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  contacts CustomerContact[]
   branches Branch[]
   invoices Invoice[]
   orders   Order[]
   giftCards GiftCard[]
   loyaltyAccounts LoyaltyAccount[]
+  deliveryNotes DeliveryNote[]
 
   @@unique([tenantId, code])
   @@index([tenantId, name])
+  @@index([tenantId, vatNumber])
+  @@index([tenantId, city])
+  @@index([tenantId, category])
+  @@index([tenantId, lat, lng])
   @@index([tenantId, createdAt(sort: Desc), id(sort: Desc)])
   @@index([tenantId, status, createdAt(sort: Desc)])
   @@map("customers")
+}
+
+/// Επαφή / contact person πελάτη
+model CustomerContact {
+  id         String   @id @default(cuid())
+  tenantId   String
+  customerId String
+  name       String
+  title      String?
+  email      String?
+  phone      String?
+  mobile     String?
+  isPrimary  Boolean  @default(false)
+  notes      String?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  tenant   Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  customer Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, customerId, isPrimary])
+  @@index([tenantId, customerId, createdAt(sort: Desc)])
+  @@map("customer_contacts")
 }
 
 /// Υποκατάστημα πελάτη — έχει πολλούς χώρους
@@ -171,9 +325,19 @@ model Branch {
   code       String
   name       String
   address    String?
+  address2   String?
   city       String?
   postalCode String?
+  region     String?
+  country    String?  @default("GR")
+  email      String?
   phone      String?
+  fax        String?
+  /// WGS84 latitude for map / near-me queries
+  lat        Float?
+  /// WGS84 longitude for map / near-me queries
+  lng        Float?
+  geocodedAt DateTime?
   isPrimary  Boolean  @default(false)
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
@@ -187,6 +351,7 @@ model Branch {
   @@unique([tenantId, customerId, code])
   @@index([tenantId, customerId, createdAt(sort: Desc)])
   @@index([tenantId, createdAt(sort: Desc), id(sort: Desc)])
+  @@index([tenantId, lat, lng])
   @@map("branches")
 }
 
@@ -236,18 +401,40 @@ model Product {
   status    ProductStatus @default(ACTIVE)
   /// When false, stock movements skip this product (services)
   trackInventory Boolean  @default(true)
+  /// When true, IN/OUT can carry lot codes
+  trackLots      Boolean  @default(false)
+  /// When true, movements require serial numbers
+  trackSerials   Boolean  @default(false)
+  /// Soft reorder hint (units)
+  reorderPoint   Decimal? @db.Decimal(14, 3)
+  /// Moving average unit cost for inventory valuation
+  averageCost    Decimal? @db.Decimal(14, 4)
+  /// Secondary / pack UoM (dual UoM) — stock always in base unitId
+  altUnitId      String?
+  /// How many base units equal 1 alt unit (e.g. BOX→PCS = 12)
+  altToBaseFactor Decimal? @db.Decimal(14, 6)
   notes     String?
   customFields Json?
   createdAt DateTime      @default(now())
   updatedAt DateTime      @updatedAt
 
   tenant        Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  unitOfMeasure UnitOfMeasure? @relation(fields: [unitId], references: [id], onDelete: SetNull)
+  unitOfMeasure UnitOfMeasure? @relation("ProductBaseUnit", fields: [unitId], references: [id], onDelete: SetNull)
+  altUnit       UnitOfMeasure? @relation("ProductAltUnit", fields: [altUnitId], references: [id], onDelete: SetNull)
   lines         OrderLine[]
   invoiceLines  InvoiceLine[]
   stockBalances StockBalance[]
   stockMovements StockMovement[]
+  stockLots     StockLot[]
+  stockReservations StockReservation[]
+  stockCountLines   StockCountLine[]
+  stockTransferLines StockTransferLine[]
+  stockSerials      StockSerial[]
+  pickWaveLines     PickWaveLine[]
+  putawayRules      PutawayRule[]
+  unitConversions   UnitConversion[]
   purchaseOrderLines PurchaseOrderLine[]
+  deliveryNoteLines DeliveryNoteLine[]
 
   @@unique([tenantId, sku])
   @@unique([tenantId, barcode])
@@ -272,24 +459,54 @@ enum StockMovementSource {
   OPENING
   PURCHASE
   RECEIPT
+  DELIVERY
+  TRANSFER
+  COUNT
+  RESERVE
+}
+
+enum StockTransferStatus {
+  DRAFT
+  IN_TRANSIT
+  COMPLETED
+  CANCELLED
+}
+
+enum StockCountStatus {
+  DRAFT
+  IN_PROGRESS
+  COUNTED
+  POSTED
+  CANCELLED
+}
+
+enum StockReservationStatus {
+  ACTIVE
+  RELEASED
+  CONSUMED
+  EXPIRED
 }
 
 /// Υπόλοιπο αποθέματος ανά προϊόν × υποκατάστημα (Site)
 model StockBalance {
-  id        String   @id @default(cuid())
-  tenantId  String
-  siteId    String
-  productId String
-  qtyOnHand Decimal  @default(0) @db.Decimal(14, 3)
-  updatedAt DateTime @updatedAt
+  id          String   @id @default(cuid())
+  tenantId    String
+  siteId      String
+  productId   String
+  qtyOnHand   Decimal  @default(0) @db.Decimal(14, 3)
+  qtyReserved Decimal  @default(0) @db.Decimal(14, 3)
+  binId       String?
+  updatedAt   DateTime @updatedAt
 
-  tenant  Tenant  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  site    Site    @relation(fields: [siteId], references: [id], onDelete: Cascade)
-  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+  tenant  Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  site    Site     @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  product Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  bin     StockBin? @relation(fields: [binId], references: [id], onDelete: SetNull)
 
   @@unique([tenantId, siteId, productId])
   @@index([tenantId, productId])
   @@index([tenantId, siteId])
+  @@index([tenantId, binId])
   @@map("stock_balances")
 }
 
@@ -301,11 +518,18 @@ model StockMovement {
   productId String
   type      StockMovementType
   source    StockMovementSource @default(MANUAL)
-  /// Absolute quantity of the movement (always ≥ 0)
+  /// Absolute quantity of the movement (always ≥ 0) in base UoM
   qty       Decimal             @db.Decimal(14, 3)
   qtyBefore Decimal             @db.Decimal(14, 3)
   qtyAfter  Decimal             @db.Decimal(14, 3)
+  /// Optional snapshot unit cost for valuation / in-transit
+  unitCost  Decimal?            @db.Decimal(14, 4)
   note      String?
+  lotCode   String?
+  serial    String?
+  uomId     String?
+  /// Qty as entered in selected UoM (before conversion to base)
+  qtyInUom  Decimal?            @db.Decimal(14, 3)
   refType   String?
   refId     String?
   userId    String?
@@ -319,6 +543,7 @@ model StockMovement {
   @@index([tenantId, productId, createdAt(sort: Desc)])
   @@index([tenantId, siteId, createdAt(sort: Desc)])
   @@index([tenantId, refType, refId])
+  @@index([tenantId, serial])
   @@map("stock_movements")
 }
 
@@ -349,8 +574,10 @@ model Supplier {
   createdAt DateTime       @default(now())
   updatedAt DateTime       @updatedAt
 
-  tenant         Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  purchaseOrders PurchaseOrder[]
+  tenant           Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  purchaseOrders   PurchaseOrder[]
+  purchasePayments PurchasePayment[]
+  purchaseInvoices PurchaseInvoice[]
 
   @@unique([tenantId, code])
   @@index([tenantId, name])
@@ -381,6 +608,7 @@ model PurchaseOrder {
   site     Site?               @relation(fields: [siteId], references: [id], onDelete: SetNull)
   series   DocumentSeries?     @relation(fields: [seriesId], references: [id], onDelete: SetNull)
   lines    PurchaseOrderLine[]
+  payments PurchasePayment[]
 
   @@unique([tenantId, number])
   @@index([tenantId, status, orderedAt(sort: Desc)])
@@ -408,6 +636,850 @@ model PurchaseOrderLine {
   @@index([tenantId, purchaseOrderId, position])
   @@index([tenantId, productId])
   @@map("purchase_order_lines")
+}
+
+enum DeliveryNoteStatus {
+  DRAFT
+  ISSUED
+  CANCELLED
+}
+
+/// Δελτίο αποστολής — έξοδος εμπορευμάτων προς πελάτη
+model DeliveryNote {
+  id              String             @id @default(cuid())
+  tenantId        String
+  customerId      String
+  siteId          String?
+  seriesId        String?
+  invoiceId       String?
+  orderId         String?
+  number          String
+  status          DeliveryNoteStatus @default(DRAFT)
+  issuedAt        DateTime?
+  shippingAddress String?
+  notes           String?
+  createdAt       DateTime           @default(now())
+  updatedAt       DateTime           @updatedAt
+
+  tenant   Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  customer Customer           @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  site     Site?              @relation(fields: [siteId], references: [id], onDelete: SetNull)
+  series   DocumentSeries?    @relation(fields: [seriesId], references: [id], onDelete: SetNull)
+  invoice  Invoice?           @relation(fields: [invoiceId], references: [id], onDelete: SetNull)
+  order    Order?             @relation(fields: [orderId], references: [id], onDelete: SetNull)
+  lines    DeliveryNoteLine[]
+
+  @@unique([tenantId, number])
+  @@index([tenantId, status, issuedAt(sort: Desc)])
+  @@index([tenantId, customerId, createdAt(sort: Desc)])
+  @@index([tenantId, createdAt(sort: Desc), id(sort: Desc)])
+  @@index([tenantId, orderId])
+  @@index([tenantId, invoiceId])
+  @@map("delivery_notes")
+}
+
+model DeliveryNoteLine {
+  id             String  @id @default(cuid())
+  tenantId       String
+  deliveryNoteId String
+  productId      String?
+  orderLineId    String?
+  invoiceLineId  String?
+  position       Int
+  description    String
+  quantity       Decimal @db.Decimal(14, 3)
+  /// Qty already invoiced from this delivery line
+  quantityInvoiced Decimal @default(0) @db.Decimal(14, 3)
+  unit           String  @default("τεμ")
+
+  deliveryNote DeliveryNote @relation(fields: [deliveryNoteId], references: [id], onDelete: Cascade)
+  product      Product?     @relation(fields: [productId], references: [id], onDelete: SetNull)
+  orderLine    OrderLine?   @relation(fields: [orderLineId], references: [id], onDelete: SetNull)
+  invoiceLine  InvoiceLine? @relation(fields: [invoiceLineId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, deliveryNoteId, position])
+  @@index([tenantId, productId])
+  @@index([tenantId, orderLineId])
+  @@index([tenantId, invoiceLineId])
+  @@map("delivery_note_lines")
+}
+
+enum TransformCoverageMode {
+  FULL_COPY
+  QUANTITY
+}
+
+enum TransformIssueMode {
+  DRAFT
+  ISSUE_NOW
+}
+
+/// Παραμετρικοί κανόνες μετασχηματισμού παραστατικών (τι → τι)
+model DocumentTransformRule {
+  id              String                @id @default(cuid())
+  tenantId        String
+  code            String
+  name            String
+  description     String?
+  sourceKind      DocumentKind
+  targetKind      DocumentKind
+  /// Built-in engine handler key
+  handlerKey      String
+  isActive        Boolean               @default(true)
+  isSystem        Boolean               @default(false)
+  sortOrder       Int                   @default(0)
+  allowPartial    Boolean               @default(true)
+  coverageMode    TransformCoverageMode @default(QUANTITY)
+  issueMode       TransformIssueMode    @default(ISSUE_NOW)
+  copyNotes       Boolean               @default(true)
+  defaultSeriesId String?
+  createdAt       DateTime              @default(now())
+  updatedAt       DateTime              @updatedAt
+
+  tenant        Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  defaultSeries DocumentSeries? @relation(fields: [defaultSeriesId], references: [id], onDelete: SetNull)
+
+  @@unique([tenantId, code])
+  @@index([tenantId, sourceKind, isActive, sortOrder])
+  @@index([tenantId, handlerKey])
+  @@index([tenantId, defaultSeriesId])
+  @@map("document_transform_rules")
+}
+
+enum MyDataSubmissionStatus {
+  PENDING
+  SENT
+  ACCEPTED
+  REJECTED
+  CANCELLED
+}
+
+/// Ουρά διαβίβασης myDATA / ΑΑΔΕ (simulator / test / live prod)
+model MyDataSubmission {
+  id           String                 @id @default(cuid())
+  tenantId     String
+  entityType   String
+  entityId     String
+  entityNumber String?
+  invoiceType  String?
+  vatCategory  String?
+  status       MyDataSubmissionStatus @default(PENDING)
+  payload      Json?
+  response     Json?
+  mark         String?
+  uid          String?
+  errorMessage String?
+  attempts     Int                    @default(0)
+  lastAttemptAt DateTime?
+  createdAt    DateTime               @default(now())
+  updatedAt    DateTime               @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, status, createdAt(sort: Desc)])
+  @@index([tenantId, entityType, entityId])
+  @@map("mydata_submissions")
+}
+
+enum EmployeeStatus {
+  ACTIVE
+  INACTIVE
+  TERMINATED
+}
+
+enum LeaveRequestStatus {
+  DRAFT
+  PENDING
+  APPROVED
+  REJECTED
+  CANCELLED
+}
+
+enum WorkCardStatus {
+  ACTIVE
+  INACTIVE
+  LOST
+}
+
+enum WorkCardEventType {
+  CLOCK_IN
+  CLOCK_OUT
+  BREAK_START
+  BREAK_END
+}
+
+enum WorkCardEventSource {
+  MANUAL
+  CARD
+  APP
+}
+
+enum ErganiSubmissionStatus {
+  PENDING
+  SENT
+  ACCEPTED
+  REJECTED
+  CANCELLED
+}
+
+enum PayrollPeriodStatus {
+  DRAFT
+  CLOSED
+}
+
+/// Εργαζόμενος — ελληνικό HR master (ΑΦΜ/ΑΜΚΑ/ΕΦΚΑ, σύμβαση)
+model Employee {
+  id               String         @id @default(cuid())
+  tenantId         String
+  code             String
+  firstName        String
+  lastName         String
+  email            String?
+  phone            String?
+  title            String?
+  department       String?
+  /// ΑΦΜ
+  vatNumber        String?
+  /// ΑΜΚΑ
+  amka             String?
+  /// ΑΜΑ ΕΦΚΑ
+  ama              String?
+  iban             String?
+  birthDate        DateTime?
+  address          String?
+  city             String?
+  postalCode       String?
+  nationality      String         @default("GR")
+  /// INDEFINITE | FIXED | PART_TIME | SEASONAL | INTERNSHIP
+  contractType     String         @default("INDEFINITE")
+  specialty        String?
+  weeklyHours      Decimal?       @db.Decimal(5, 2)
+  siteId           String?
+  hireDate         DateTime?
+  terminationDate  DateTime?
+  erganiEmployeeId String?
+  status           EmployeeStatus @default(ACTIVE)
+  notes            String?
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+
+  tenant          Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  site            Site?              @relation(fields: [siteId], references: [id], onDelete: SetNull)
+  leaveRequests   LeaveRequest[]
+  workCards       WorkCard[]
+  workCardEvents  WorkCardEvent[]
+  payrollLines    PayrollLine[]
+
+  @@unique([tenantId, code])
+  @@index([tenantId, lastName, firstName])
+  @@index([tenantId, status, createdAt(sort: Desc)])
+  @@index([tenantId, vatNumber])
+  @@index([tenantId, siteId])
+  @@map("employees")
+}
+
+model LeaveType {
+  id              String   @id @default(cuid())
+  tenantId        String
+  code            String
+  name            String
+  daysPerYear     Int      @default(20)
+  isPaid          Boolean  @default(true)
+  isSystem        Boolean  @default(false)
+  isActive        Boolean  @default(true)
+  sortOrder       Int      @default(0)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  tenant   Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  requests LeaveRequest[]
+
+  @@unique([tenantId, code])
+  @@index([tenantId, isActive, sortOrder])
+  @@map("leave_types")
+}
+
+model LeaveRequest {
+  id          String             @id @default(cuid())
+  tenantId    String
+  employeeId  String
+  leaveTypeId String
+  fromDate    DateTime
+  toDate      DateTime
+  days        Decimal            @db.Decimal(6, 2)
+  status      LeaveRequestStatus @default(PENDING)
+  notes       String?
+  decidedAt   DateTime?
+  createdAt   DateTime           @default(now())
+  updatedAt   DateTime           @updatedAt
+
+  tenant    Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  employee  Employee  @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  leaveType LeaveType @relation(fields: [leaveTypeId], references: [id], onDelete: Restrict)
+
+  @@index([tenantId, status, fromDate(sort: Desc)])
+  @@index([tenantId, employeeId, fromDate(sort: Desc)])
+  @@map("leave_requests")
+}
+
+/// Ψηφιακή κάρτα εργασίας (φυσική/εικονική κάρτα εργαζομένου)
+model WorkCard {
+  id         String         @id @default(cuid())
+  tenantId   String
+  employeeId String
+  cardNumber String
+  status     WorkCardStatus @default(ACTIVE)
+  issuedAt   DateTime       @default(now())
+  notes      String?
+  createdAt  DateTime       @default(now())
+  updatedAt  DateTime       @updatedAt
+
+  tenant   Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  employee Employee        @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  events   WorkCardEvent[]
+
+  @@unique([tenantId, cardNumber])
+  @@index([tenantId, employeeId, status])
+  @@map("work_cards")
+}
+
+/// Χτύπημα κάρτας / παρουσία
+model WorkCardEvent {
+  id           String              @id @default(cuid())
+  tenantId     String
+  employeeId   String
+  workCardId   String?
+  type         WorkCardEventType
+  source       WorkCardEventSource @default(MANUAL)
+  occurredAt   DateTime            @default(now())
+  siteId       String?
+  note         String?
+  erganiStatus ErganiSubmissionStatus @default(PENDING)
+  createdAt    DateTime            @default(now())
+
+  tenant   Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  employee Employee  @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  workCard WorkCard? @relation(fields: [workCardId], references: [id], onDelete: SetNull)
+  site     Site?     @relation(fields: [siteId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, occurredAt(sort: Desc)])
+  @@index([tenantId, employeeId, occurredAt(sort: Desc)])
+  @@index([tenantId, erganiStatus, occurredAt(sort: Desc)])
+  @@map("work_card_events")
+}
+
+/// Ουρά δηλώσεων Εργάνη / Ψηφιακή Κάρτα (simulator έως live credentials)
+model ErganiSubmission {
+  id           String                 @id @default(cuid())
+  tenantId     String
+  entityType   String
+  entityId     String
+  eventKind    String
+  status       ErganiSubmissionStatus @default(PENDING)
+  externalRef  String?
+  payload      Json?
+  attempts     Int                    @default(0)
+  lastError    String?
+  processedAt  DateTime?
+  createdAt    DateTime               @default(now())
+  updatedAt    DateTime               @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, status, createdAt(sort: Desc)])
+  @@index([tenantId, entityType, entityId])
+  @@map("ergani_submissions")
+}
+
+model PayrollPeriod {
+  id        String              @id @default(cuid())
+  tenantId  String
+  code      String
+  year      Int
+  month     Int
+  status    PayrollPeriodStatus @default(DRAFT)
+  fromDate  DateTime
+  toDate    DateTime
+  notes     String?
+  createdAt DateTime            @default(now())
+  updatedAt DateTime            @updatedAt
+
+  tenant Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  lines  PayrollLine[]
+
+  @@unique([tenantId, year, month])
+  @@unique([tenantId, code])
+  @@index([tenantId, status, year, month])
+  @@map("payroll_periods")
+}
+
+model PayrollLine {
+  id           String   @id @default(cuid())
+  tenantId     String
+  periodId     String
+  employeeId   String
+  gross        Decimal  @db.Decimal(14, 2)
+  employeeEfka Decimal  @default(0) @db.Decimal(14, 2)
+  employerEfka Decimal  @default(0) @db.Decimal(14, 2)
+  tax          Decimal  @default(0) @db.Decimal(14, 2)
+  net          Decimal  @db.Decimal(14, 2)
+  notes        String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  tenant   Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  period   PayrollPeriod @relation(fields: [periodId], references: [id], onDelete: Cascade)
+  employee Employee      @relation(fields: [employeeId], references: [id], onDelete: Restrict)
+
+  @@unique([periodId, employeeId])
+  @@index([tenantId, periodId])
+  @@map("payroll_lines")
+}
+
+enum CrmLeadStatus {
+  NEW
+  CONTACTED
+  QUALIFIED
+  PROPOSAL
+  WON
+  LOST
+}
+
+model CrmLead {
+  id          String        @id @default(cuid())
+  tenantId    String
+  title       String
+  company     String?
+  contactName String?
+  email       String?
+  phone       String?
+  status      CrmLeadStatus @default(NEW)
+  value       Decimal       @default(0) @db.Decimal(14, 2)
+  customerId  String?
+  notes       String?
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  tenant     Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  activities CrmActivity[]
+
+  @@index([tenantId, status, updatedAt(sort: Desc)])
+  @@index([tenantId, createdAt(sort: Desc)])
+  @@map("crm_leads")
+}
+
+enum CrmActivityKind {
+  CALL
+  EMAIL
+  MEETING
+  TASK
+  NOTE
+}
+
+model CrmActivity {
+  id          String          @id @default(cuid())
+  tenantId    String
+  leadId      String?
+  customerId  String?
+  kind        CrmActivityKind @default(NOTE)
+  title       String
+  body        String?
+  dueAt       DateTime?
+  doneAt      DateTime?
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+
+  tenant Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  lead   CrmLead? @relation(fields: [leadId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, dueAt])
+  @@index([tenantId, customerId, createdAt(sort: Desc)])
+  @@index([tenantId, leadId, createdAt(sort: Desc)])
+  @@map("crm_activities")
+}
+
+model SavedFilter {
+  id        String   @id @default(cuid())
+  tenantId  String
+  userId    String
+  module    String
+  name      String
+  payload   Json
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, userId, module, name])
+  @@index([tenantId, userId, module])
+  @@map("saved_filters")
+}
+
+model PurchasePayment {
+  id               String   @id @default(cuid())
+  tenantId         String
+  supplierId       String
+  purchaseOrderId  String?
+  amount           Decimal  @db.Decimal(14, 2)
+  method           String   @default("TRANSFER")
+  reference        String?
+  paidAt           DateTime @default(now())
+  notes            String?
+  createdAt        DateTime @default(now())
+
+  tenant   Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  supplier Supplier       @relation(fields: [supplierId], references: [id], onDelete: Restrict)
+  purchaseOrder PurchaseOrder? @relation(fields: [purchaseOrderId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, supplierId, paidAt(sort: Desc)])
+  @@index([tenantId, purchaseOrderId])
+  @@map("purchase_payments")
+}
+
+enum BankLineStatus {
+  UNMATCHED
+  MATCHED
+  IGNORED
+}
+
+model BankAccount {
+  id        String   @id @default(cuid())
+  tenantId  String
+  code      String
+  name      String
+  iban      String?
+  currency  String   @default("EUR")
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  lines  BankStatementLine[]
+
+  @@unique([tenantId, code])
+  @@index([tenantId, isActive])
+  @@map("bank_accounts")
+}
+
+model BankStatementLine {
+  id              String         @id @default(cuid())
+  tenantId        String
+  bankAccountId   String
+  bookedAt        DateTime
+  amount          Decimal        @db.Decimal(14, 2)
+  description     String
+  reference       String?
+  counterparty    String?
+  status          BankLineStatus @default(UNMATCHED)
+  matchedInvoiceId String?
+  matchNote       String?
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+
+  tenant      Tenant      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  bankAccount BankAccount @relation(fields: [bankAccountId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, status, bookedAt(sort: Desc)])
+  @@index([tenantId, bankAccountId, bookedAt(sort: Desc)])
+  @@index([tenantId, matchedInvoiceId])
+  @@map("bank_statement_lines")
+}
+
+/// Lot / batch balance per product × site × lot code
+model StockLot {
+  id        String    @id @default(cuid())
+  tenantId  String
+  siteId    String
+  productId String
+  lotCode   String
+  qtyOnHand Decimal   @default(0) @db.Decimal(14, 3)
+  expiresAt DateTime?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  tenant  Tenant  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  site    Site    @relation(fields: [siteId], references: [id], onDelete: Restrict)
+  product Product @relation(fields: [productId], references: [id], onDelete: Restrict)
+
+  @@unique([tenantId, siteId, productId, lotCode])
+  @@index([tenantId, productId, expiresAt])
+  @@index([tenantId, siteId, updatedAt(sort: Desc)])
+  @@map("stock_lots")
+}
+
+/// Τοποθεσία / bin μέσα σε αποθήκη (Site)
+model StockBin {
+  id        String   @id @default(cuid())
+  tenantId  String
+  siteId    String
+  code      String
+  name      String
+  zone      String?
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant   Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  site     Site           @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  balances StockBalance[]
+  serials  StockSerial[]
+  putawayRules PutawayRule[]
+  pickWaveLines PickWaveLine[]
+
+  @@unique([tenantId, siteId, code])
+  @@index([tenantId, siteId, isActive])
+  @@map("stock_bins")
+}
+
+enum StockSerialStatus {
+  AVAILABLE
+  RESERVED
+  IN_TRANSIT
+  SHIPPED
+  SCRAPPED
+}
+
+model StockSerial {
+  id        String            @id @default(cuid())
+  tenantId  String
+  siteId    String
+  productId String
+  serial    String
+  status    StockSerialStatus @default(AVAILABLE)
+  binId     String?
+  lotCode   String?
+  note      String?
+  createdAt DateTime          @default(now())
+  updatedAt DateTime          @updatedAt
+
+  tenant  Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  site    Site      @relation(fields: [siteId], references: [id], onDelete: Restrict)
+  product Product   @relation(fields: [productId], references: [id], onDelete: Restrict)
+  bin     StockBin? @relation(fields: [binId], references: [id], onDelete: SetNull)
+
+  @@unique([tenantId, productId, serial])
+  @@index([tenantId, siteId, status])
+  @@index([tenantId, status, updatedAt(sort: Desc)])
+  @@map("stock_serials")
+}
+
+enum PickWaveStatus {
+  DRAFT
+  RELEASED
+  PICKING
+  DONE
+  CANCELLED
+}
+
+enum PickWaveLineStatus {
+  OPEN
+  PICKED
+  SHORT
+  CANCELLED
+}
+
+model PickWave {
+  id              String         @id @default(cuid())
+  tenantId        String
+  number          String
+  siteId          String
+  status          PickWaveStatus @default(DRAFT)
+  note            String?
+  releasedAt      DateTime?
+  completedAt     DateTime?
+  createdByUserId String?
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+
+  tenant Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  site   Site           @relation(fields: [siteId], references: [id], onDelete: Restrict)
+  lines  PickWaveLine[]
+
+  @@unique([tenantId, number])
+  @@index([tenantId, status, createdAt(sort: Desc)])
+  @@map("pick_waves")
+}
+
+model PickWaveLine {
+  id            String              @id @default(cuid())
+  tenantId      String
+  waveId        String
+  productId     String
+  qty           Decimal             @db.Decimal(14, 3)
+  qtyPicked     Decimal             @default(0) @db.Decimal(14, 3)
+  status        PickWaveLineStatus  @default(OPEN)
+  lotCode       String?
+  fromBinId     String?
+  serial        String?
+  reservationId String?
+  refType       String?
+  refId         String?
+  lineNo        Int                 @default(0)
+
+  wave    PickWave  @relation(fields: [waveId], references: [id], onDelete: Cascade)
+  product Product   @relation(fields: [productId], references: [id], onDelete: Restrict)
+  fromBin StockBin? @relation(fields: [fromBinId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, waveId])
+  @@index([tenantId, productId, status])
+  @@map("pick_wave_lines")
+}
+
+enum PutawayStrategy {
+  FIXED
+  ZONE
+  EMPTY_BIN
+}
+
+model PutawayRule {
+  id          String          @id @default(cuid())
+  tenantId    String
+  siteId      String
+  code        String
+  name        String
+  priority    Int             @default(100)
+  strategy    PutawayStrategy @default(FIXED)
+  productId   String?
+  zone        String?
+  targetBinId String
+  isActive    Boolean         @default(true)
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+
+  tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  site      Site     @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  product   Product? @relation(fields: [productId], references: [id], onDelete: SetNull)
+  targetBin StockBin @relation(fields: [targetBinId], references: [id], onDelete: Restrict)
+
+  @@unique([tenantId, siteId, code])
+  @@index([tenantId, siteId, priority])
+  @@map("putaway_rules")
+}
+
+/// Optional explicit conversion (product-scoped or global when productId null)
+model UnitConversion {
+  id         String  @id @default(cuid())
+  tenantId   String
+  productId  String?
+  fromUnitId String
+  toUnitId   String
+  /// Multiply qty in fromUnit by factor → toUnit
+  factor     Decimal @db.Decimal(14, 6)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  tenant   Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  product  Product?      @relation(fields: [productId], references: [id], onDelete: Cascade)
+  fromUnit UnitOfMeasure @relation("ConversionFrom", fields: [fromUnitId], references: [id], onDelete: Restrict)
+  toUnit   UnitOfMeasure @relation("ConversionTo", fields: [toUnitId], references: [id], onDelete: Restrict)
+
+  @@index([tenantId, productId])
+  @@index([tenantId, fromUnitId, toUnitId])
+  @@map("unit_conversions")
+}
+
+model StockTransfer {
+  id           String              @id @default(cuid())
+  tenantId     String
+  number       String
+  status       StockTransferStatus @default(DRAFT)
+  fromSiteId   String
+  toSiteId     String
+  note         String?
+  shippedAt    DateTime?
+  receivedAt   DateTime?
+  createdByUserId String?
+  createdAt    DateTime            @default(now())
+  updatedAt    DateTime            @updatedAt
+
+  tenant   Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  fromSite Site                @relation("TransferFromSite", fields: [fromSiteId], references: [id], onDelete: Restrict)
+  toSite   Site                @relation("TransferToSite", fields: [toSiteId], references: [id], onDelete: Restrict)
+  lines    StockTransferLine[]
+
+  @@unique([tenantId, number])
+  @@index([tenantId, status, createdAt(sort: Desc)])
+  @@map("stock_transfers")
+}
+
+model StockTransferLine {
+  id         String  @id @default(cuid())
+  tenantId   String
+  transferId String
+  productId  String
+  qty        Decimal @db.Decimal(14, 3)
+  lotCode    String?
+  lineNo     Int     @default(0)
+
+  transfer StockTransfer @relation(fields: [transferId], references: [id], onDelete: Cascade)
+  product  Product       @relation(fields: [productId], references: [id], onDelete: Restrict)
+
+  @@index([tenantId, transferId])
+  @@map("stock_transfer_lines")
+}
+
+model StockCount {
+  id        String           @id @default(cuid())
+  tenantId  String
+  number    String
+  siteId    String
+  status    StockCountStatus @default(DRAFT)
+  note      String?
+  countedAt DateTime?
+  postedAt  DateTime?
+  createdByUserId String?
+  createdAt DateTime         @default(now())
+  updatedAt DateTime         @updatedAt
+
+  tenant Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  site   Site            @relation(fields: [siteId], references: [id], onDelete: Restrict)
+  lines  StockCountLine[]
+
+  @@unique([tenantId, number])
+  @@index([tenantId, status, createdAt(sort: Desc)])
+  @@map("stock_counts")
+}
+
+model StockCountLine {
+  id           String  @id @default(cuid())
+  tenantId     String
+  countId      String
+  productId    String
+  systemQty    Decimal @db.Decimal(14, 3)
+  countedQty   Decimal? @db.Decimal(14, 3)
+  varianceQty  Decimal? @db.Decimal(14, 3)
+  lineNo       Int     @default(0)
+
+  count   StockCount @relation(fields: [countId], references: [id], onDelete: Cascade)
+  product Product    @relation(fields: [productId], references: [id], onDelete: Restrict)
+
+  @@index([tenantId, countId])
+  @@map("stock_count_lines")
+}
+
+model StockReservation {
+  id         String                 @id @default(cuid())
+  tenantId   String
+  siteId     String
+  productId  String
+  qty        Decimal                @db.Decimal(14, 3)
+  status     StockReservationStatus @default(ACTIVE)
+  refType    String?
+  refId      String?
+  note       String?
+  expiresAt  DateTime?
+  createdByUserId String?
+  createdAt  DateTime               @default(now())
+  updatedAt  DateTime               @updatedAt
+
+  tenant  Tenant  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  site    Site    @relation(fields: [siteId], references: [id], onDelete: Restrict)
+  product Product @relation(fields: [productId], references: [id], onDelete: Restrict)
+
+  @@index([tenantId, status, siteId])
+  @@index([tenantId, productId, status])
+  @@index([tenantId, refType, refId])
+  @@map("stock_reservations")
 }
 
 enum UnitOfMeasureKind {
@@ -441,7 +1513,10 @@ model UnitOfMeasure {
   updatedAt   DateTime          @updatedAt
 
   tenant   Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  products Product[]
+  products Product[] @relation("ProductBaseUnit")
+  altProducts Product[] @relation("ProductAltUnit")
+  conversionsFrom UnitConversion[] @relation("ConversionFrom")
+  conversionsTo   UnitConversion[] @relation("ConversionTo")
 
   @@unique([tenantId, code])
   @@unique([tenantId, symbol])
@@ -457,6 +1532,31 @@ enum InvoiceStatus {
   PAID
   OVERDUE
   CANCELLED
+}
+
+/// Παραμετρικές καταστάσεις τιμολογίου (ετικέτα + workflow)
+model InvoiceStatusOption {
+  id                 String        @id @default(cuid())
+  tenantId           String
+  code               String
+  name               String
+  /// Workflow value stored on Invoice.status
+  workflow           InvoiceStatus
+  sortOrder          Int           @default(0)
+  isActive           Boolean       @default(true)
+  isSystem           Boolean       @default(false)
+  selectableOnCreate Boolean       @default(false)
+  tone               String        @default("slate")
+  createdAt          DateTime      @default(now())
+  updatedAt          DateTime      @updatedAt
+
+  tenant   Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  invoices Invoice[]
+
+  @@unique([tenantId, code])
+  @@index([tenantId, isActive, sortOrder])
+  @@index([tenantId, selectableOnCreate, isActive])
+  @@map("invoice_status_options")
 }
 
 /// Sales fiscal docs that share the Invoice table / workspace
@@ -480,6 +1580,7 @@ model Invoice {
   kind              InvoiceKind   @default(SALES_INVOICE)
   number            String
   status            InvoiceStatus @default(DRAFT)
+  statusOptionId    String?
   issuedAt          DateTime?
   dueAt             DateTime?
   currency          String        @default("EUR")
@@ -492,17 +1593,19 @@ model Invoice {
   createdAt         DateTime      @default(now())
   updatedAt         DateTime      @updatedAt
 
-  tenant          Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  customer        Customer         @relation(fields: [customerId], references: [id], onDelete: Restrict)
-  branch          Branch?          @relation(fields: [branchId], references: [id], onDelete: SetNull)
-  space           Space?           @relation(fields: [spaceId], references: [id], onDelete: SetNull)
-  order           Order?           @relation(fields: [orderId], references: [id], onDelete: SetNull)
-  series          DocumentSeries?  @relation(fields: [seriesId], references: [id], onDelete: SetNull)
-  site            Site?            @relation(fields: [siteId], references: [id], onDelete: SetNull)
-  relatedInvoice  Invoice?         @relation("InvoiceCredits", fields: [relatedInvoiceId], references: [id], onDelete: SetNull)
-  creditNotes     Invoice[]        @relation("InvoiceCredits")
+  tenant          Tenant               @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  statusOption    InvoiceStatusOption? @relation(fields: [statusOptionId], references: [id], onDelete: SetNull)
+  customer        Customer             @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  branch          Branch?              @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  space           Space?               @relation(fields: [spaceId], references: [id], onDelete: SetNull)
+  order           Order?               @relation(fields: [orderId], references: [id], onDelete: SetNull)
+  series          DocumentSeries?      @relation(fields: [seriesId], references: [id], onDelete: SetNull)
+  site            Site?                @relation(fields: [siteId], references: [id], onDelete: SetNull)
+  relatedInvoice  Invoice?             @relation("InvoiceCredits", fields: [relatedInvoiceId], references: [id], onDelete: SetNull)
+  creditNotes     Invoice[]            @relation("InvoiceCredits")
   lines           InvoiceLine[]
   payments        InvoicePayment[]
+  deliveryNotes   DeliveryNote[]
 
   @@unique([tenantId, number])
   @@index([tenantId, status, issuedAt(sort: Desc)])
@@ -513,29 +1616,37 @@ model Invoice {
   @@index([tenantId, seriesId])
   @@index([tenantId, kind, createdAt(sort: Desc)])
   @@index([tenantId, relatedInvoiceId])
+  @@index([tenantId, statusOptionId])
   @@map("invoices")
 }
 
 model InvoiceLine {
-  id          String  @id @default(cuid())
-  tenantId    String
-  invoiceId   String
-  productId   String?
-  orderLineId String?
-  position    Int
-  description String
-  quantity    Decimal @db.Decimal(14, 3)
-  unitPrice   Decimal @db.Decimal(14, 2)
-  vatRate     Decimal @db.Decimal(5, 2)
-  lineTotal   Decimal @db.Decimal(14, 2)
+  id                  String  @id @default(cuid())
+  tenantId            String
+  invoiceId           String
+  productId           String?
+  orderLineId         String?
+  /// For credit notes: source invoice line being credited
+  sourceInvoiceLineId String?
+  position            Int
+  description         String
+  quantity            Decimal @db.Decimal(14, 3)
+  quantityCredited    Decimal @default(0) @db.Decimal(14, 3)
+  unitPrice           Decimal @db.Decimal(14, 2)
+  vatRate             Decimal @db.Decimal(5, 2)
+  lineTotal           Decimal @db.Decimal(14, 2)
 
-  invoice   Invoice    @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
-  product   Product?   @relation(fields: [productId], references: [id], onDelete: SetNull)
-  orderLine OrderLine? @relation(fields: [orderLineId], references: [id], onDelete: SetNull)
+  invoice           Invoice            @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  product           Product?           @relation(fields: [productId], references: [id], onDelete: SetNull)
+  orderLine         OrderLine?         @relation(fields: [orderLineId], references: [id], onDelete: SetNull)
+  sourceInvoiceLine InvoiceLine?       @relation("InvoiceLineCredits", fields: [sourceInvoiceLineId], references: [id], onDelete: SetNull)
+  creditLines       InvoiceLine[]      @relation("InvoiceLineCredits")
+  deliveryNoteLines DeliveryNoteLine[]
 
   @@index([tenantId, invoiceId, position])
   @@index([tenantId, productId])
   @@index([tenantId, orderLineId])
+  @@index([tenantId, sourceInvoiceLineId])
   @@map("invoice_lines")
 }
 
@@ -577,6 +1688,31 @@ enum OrderStatus {
   CANCELLED
 }
 
+/// Παραμετρικές καταστάσεις παραγγελίας/προσφοράς (ετικέτα + workflow)
+model OrderStatusOption {
+  id                 String      @id @default(cuid())
+  tenantId           String
+  code               String
+  name               String
+  /// Workflow value stored on Order.status
+  workflow           OrderStatus
+  sortOrder          Int         @default(0)
+  isActive           Boolean     @default(true)
+  isSystem           Boolean     @default(false)
+  selectableOnCreate Boolean     @default(false)
+  tone               String      @default("slate")
+  createdAt          DateTime    @default(now())
+  updatedAt          DateTime    @updatedAt
+
+  tenant Tenant  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  orders Order[]
+
+  @@unique([tenantId, code])
+  @@index([tenantId, isActive, sortOrder])
+  @@index([tenantId, selectableOnCreate, isActive])
+  @@map("order_status_options")
+}
+
 enum OrderKind {
   SALES_ORDER
   SALES_QUOTE
@@ -595,6 +1731,7 @@ model Order {
   kind          OrderKind   @default(SALES_ORDER)
   number        String
   status        OrderStatus @default(DRAFT)
+  statusOptionId String?
   orderedAt     DateTime    @default(now())
   currency      String      @default("EUR")
   subtotal      Decimal     @db.Decimal(14, 2)
@@ -605,16 +1742,18 @@ model Order {
   createdAt     DateTime    @default(now())
   updatedAt     DateTime    @updatedAt
 
-  tenant      Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  customer    Customer        @relation(fields: [customerId], references: [id], onDelete: Restrict)
-  branch      Branch?         @relation(fields: [branchId], references: [id], onDelete: SetNull)
-  space       Space?          @relation(fields: [spaceId], references: [id], onDelete: SetNull)
+  tenant       Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  statusOption OrderStatusOption? @relation(fields: [statusOptionId], references: [id], onDelete: SetNull)
+  customer     Customer           @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  branch       Branch?            @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  space        Space?             @relation(fields: [spaceId], references: [id], onDelete: SetNull)
   series      DocumentSeries? @relation(fields: [seriesId], references: [id], onDelete: SetNull)
   site        Site?           @relation(fields: [siteId], references: [id], onDelete: SetNull)
   sourceQuote Order?          @relation("QuoteToOrder", fields: [sourceQuoteId], references: [id], onDelete: SetNull)
   convertedOrders Order[]     @relation("QuoteToOrder")
-  lines       OrderLine[]
-  invoices    Invoice[]
+  lines         OrderLine[]
+  invoices      Invoice[]
+  deliveryNotes DeliveryNote[]
 
   @@unique([tenantId, number])
   @@index([tenantId, status, orderedAt(sort: Desc)])
@@ -623,25 +1762,28 @@ model Order {
   @@index([tenantId, seriesId])
   @@index([tenantId, kind, createdAt(sort: Desc)])
   @@index([tenantId, sourceQuoteId])
+  @@index([tenantId, statusOptionId])
   @@map("orders")
 }
 
 model OrderLine {
-  id               String  @id @default(cuid())
-  tenantId         String
-  orderId          String
-  productId        String?
-  position         Int
-  description      String
-  quantity         Decimal @db.Decimal(14, 3)
-  quantityInvoiced Decimal @default(0) @db.Decimal(14, 3)
-  unitPrice        Decimal @db.Decimal(14, 2)
-  vatRate          Decimal @db.Decimal(5, 2)
-  lineTotal        Decimal @db.Decimal(14, 2)
+  id                String  @id @default(cuid())
+  tenantId          String
+  orderId           String
+  productId         String?
+  position          Int
+  description       String
+  quantity          Decimal @db.Decimal(14, 3)
+  quantityInvoiced  Decimal @default(0) @db.Decimal(14, 3)
+  quantityDelivered Decimal @default(0) @db.Decimal(14, 3)
+  unitPrice         Decimal @db.Decimal(14, 2)
+  vatRate           Decimal @db.Decimal(5, 2)
+  lineTotal         Decimal @db.Decimal(14, 2)
 
-  order        Order         @relation(fields: [orderId], references: [id], onDelete: Cascade)
-  product      Product?      @relation(fields: [productId], references: [id], onDelete: SetNull)
-  invoiceLines InvoiceLine[]
+  order             Order             @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  product           Product?          @relation(fields: [productId], references: [id], onDelete: SetNull)
+  invoiceLines      InvoiceLine[]
+  deliveryNoteLines DeliveryNoteLine[]
 
   @@index([tenantId, orderId, position])
   @@index([tenantId, productId])
@@ -650,6 +1792,7 @@ model OrderLine {
 
 enum SiteKind {
   BRANCH
+  WAREHOUSE
   TILL
 }
 
@@ -673,9 +1816,21 @@ model Site {
   orders   Order[]
   posSessions PosSession[]
   posTerminals PosTerminal[]
-  stockBalances  StockBalance[]
-  stockMovements StockMovement[]
-  purchaseOrders PurchaseOrder[]
+  stockBalances     StockBalance[]
+  stockMovements    StockMovement[]
+  stockLots         StockLot[]
+  stockBins         StockBin[]
+  transfersFrom     StockTransfer[] @relation("TransferFromSite")
+  transfersTo       StockTransfer[] @relation("TransferToSite")
+  stockCounts       StockCount[]
+  stockReservations StockReservation[]
+  stockSerials      StockSerial[]
+  pickWaves         PickWave[]
+  putawayRules      PutawayRule[]
+  purchaseOrders    PurchaseOrder[]
+  deliveryNotes     DeliveryNote[]
+  employees         Employee[]
+  workCardEvents    WorkCardEvent[]
 
   @@unique([tenantId, code])
   @@index([tenantId, kind, isActive])
@@ -751,8 +1906,10 @@ model DocumentSeries {
   invoices       Invoice[]
   orders         Order[]
   purchaseOrders PurchaseOrder[]
+  deliveryNotes  DeliveryNote[]
   paymentMethods DocumentSeriesPaymentMethod[]
   printForms     DocumentSeriesPrintForm[]
+  transformRules DocumentTransformRule[]
 
   @@unique([tenantId, code])
   @@index([tenantId, kind, isActive])
@@ -1030,6 +2187,31 @@ model TenantSettings {
   menuJson  Json?
   /// Default expand state for sidebar nav folders (user localStorage can override)
   navGroupsDefaultExpanded Boolean @default(true)
+  /// Mobile footer shortcuts per user / group:
+  /// { byUserId?: Record<userId, linkId[]>, byGroupId?: Record<groupId, linkId[]> }
+  mobileFooterOverrides Json?
+
+  /// Επωνυμία / εμπορική επωνυμία (override του Tenant.name για παραστατικά)
+  legalName   String?
+  tradeName   String?
+  vatNumber   String?
+  taxOffice   String?
+  address     String?
+  city        String?
+  postalCode  String?
+  country     String  @default("GR")
+  phone       String?
+  email       String?
+  website     String?
+  logoUrl     String?
+  currency    String  @default("EUR")
+  locale      String  @default("el-GR")
+  timezone    String  @default("Europe/Athens")
+  /// Όταν true, μη-OWNER βλέπουν banner συντήρησης
+  maintenanceMode Boolean @default(false)
+  /// Ελεύθερο JSON για integrations (webhooks, keys metadata)
+  integrationsJson Json?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -1168,7 +2350,7 @@ model DocumentSeriesPrintForm {
   @@map("document_series_print_forms")
 }
 
-// ─── General Ledger ─────────────────────────────────────────────────
+// ─── General Ledger / Accounting Suite ──────────────────────────────
 
 enum GlAccountType {
   ASSET
@@ -1183,29 +2365,65 @@ enum FiscalPeriodStatus {
   CLOSED
 }
 
+enum FiscalPeriodKind {
+  YEAR
+  MONTH
+}
+
 enum JournalStatus {
   DRAFT
   POSTED
   VOID
 }
 
+enum FixedAssetStatus {
+  ACTIVE
+  DISPOSED
+}
+
+enum FixedAssetDepreciationMethod {
+  STRAIGHT_LINE
+}
+
+enum FixedAssetMovementKind {
+  ACQUIRE
+  DEPRECIATE
+  DISPOSE
+  ADJUST
+}
+
+enum PurchaseInvoiceStatus {
+  DRAFT
+  POSTED
+  PARTIAL
+  PAID
+  CANCELLED
+}
+
 model GlAccount {
-  id         String        @id @default(cuid())
-  tenantId   String
-  code       String
-  name       String
-  type       GlAccountType
-  parentId   String?
-  isPostable Boolean       @default(true)
-  isSystem   Boolean       @default(false)
-  isActive   Boolean       @default(true)
-  createdAt  DateTime      @default(now())
-  updatedAt  DateTime      @updatedAt
+  id          String        @id @default(cuid())
+  tenantId    String
+  code        String
+  name        String
+  type        GlAccountType
+  parentId    String?
+  /// BS_ASSET | BS_LIABILITY | BS_EQUITY | PL_REVENUE | PL_EXPENSE | PL_COGS
+  reportGroup String?
+  isPostable  Boolean       @default(true)
+  isSystem    Boolean       @default(false)
+  isActive    Boolean       @default(true)
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
 
   tenant   Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   parent   GlAccount?     @relation("GlAccountTree", fields: [parentId], references: [id], onDelete: SetNull)
   children GlAccount[]    @relation("GlAccountTree")
   lines    JournalLine[]
+  assetsAsAsset      FixedAsset[] @relation("FixedAssetGross")
+  assetsAsAccumDepr  FixedAsset[] @relation("FixedAssetAccum")
+  assetsAsDeprExp    FixedAsset[] @relation("FixedAssetDeprExp")
+  purchaseInvoiceLines PurchaseInvoiceLine[]
+  costAllocations    CostAllocation[] @relation("AllocationAccount")
 
   @@unique([tenantId, code])
   @@index([tenantId, type, isActive])
@@ -1214,46 +2432,131 @@ model GlAccount {
 }
 
 model FiscalPeriod {
-  id        String             @id @default(cuid())
-  tenantId  String
-  code      String
-  name      String
-  year      Int
-  startsAt  DateTime
-  endsAt    DateTime
-  status    FiscalPeriodStatus @default(OPEN)
-  createdAt DateTime           @default(now())
-  updatedAt DateTime           @updatedAt
+  id             String             @id @default(cuid())
+  tenantId       String
+  code           String
+  name           String
+  year           Int
+  month          Int?
+  kind           FiscalPeriodKind   @default(YEAR)
+  startsAt       DateTime
+  endsAt         DateTime
+  status         FiscalPeriodStatus @default(OPEN)
+  closedAt       DateTime?
+  closedByUserId String?
+  createdAt      DateTime           @default(now())
+  updatedAt      DateTime           @updatedAt
 
-  tenant  Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tenant   Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   journals JournalEntry[]
 
   @@unique([tenantId, code])
   @@index([tenantId, year, status])
+  @@index([tenantId, kind, year, month])
   @@map("fiscal_periods")
 }
 
-model JournalEntry {
-  id             String        @id @default(cuid())
-  tenantId       String
-  number         String
-  status         JournalStatus @default(DRAFT)
-  description    String?
-  sourceType     String?
-  sourceId       String?
-  fiscalPeriodId String?
-  postedAt       DateTime?
-  createdByUserId String?
-  createdAt      DateTime      @default(now())
-  updatedAt      DateTime      @updatedAt
+model LegalEntity {
+  id         String   @id @default(cuid())
+  tenantId   String
+  code       String
+  name       String
+  vatNumber  String?
+  isDefault  Boolean  @default(false)
+  isActive   Boolean  @default(true)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
 
-  tenant       Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  fiscalPeriod FiscalPeriod?  @relation(fields: [fiscalPeriodId], references: [id], onDelete: SetNull)
-  lines        JournalLine[]
+  tenant  Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  lines   JournalLine[]
+  assets  FixedAsset[]
+  purchaseInvoices PurchaseInvoice[]
+  icMatchesA IntercompanyMatch[] @relation("IcEntityA")
+  icMatchesB IntercompanyMatch[] @relation("IcEntityB")
+
+  @@unique([tenantId, code])
+  @@index([tenantId, isActive])
+  @@map("legal_entities")
+}
+
+model CostCenter {
+  id        String   @id @default(cuid())
+  tenantId  String
+  code      String
+  name      String
+  parentId  String?
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant   Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  parent   CostCenter?  @relation("CostCenterTree", fields: [parentId], references: [id], onDelete: SetNull)
+  children CostCenter[] @relation("CostCenterTree")
+  lines    JournalLine[]
+  assets   FixedAsset[]
+  purchaseInvoiceLines PurchaseInvoiceLine[]
+  allocationsFrom CostAllocation[] @relation("AllocationSource")
+  allocationTargets CostAllocationTarget[] @relation("AllocationTarget")
+
+  @@unique([tenantId, code])
+  @@index([tenantId, isActive])
+  @@map("cost_centers")
+}
+
+model ParallelLedger {
+  id        String   @id @default(cuid())
+  tenantId  String
+  code      String
+  name      String
+  /// STATUTORY | IFRS | MANAGEMENT | TAX
+  kind      String   @default("STATUTORY")
+  isDefault Boolean  @default(false)
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant   Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  journals JournalEntry[]
+
+  @@unique([tenantId, code])
+  @@index([tenantId, isActive])
+  @@map("parallel_ledgers")
+}
+
+model JournalEntry {
+  id               String        @id @default(cuid())
+  tenantId         String
+  number           String
+  status           JournalStatus @default(DRAFT)
+  description      String?
+  sourceType       String?
+  sourceId         String?
+  fiscalPeriodId   String?
+  parallelLedgerId String?
+  entryDate        DateTime      @default(now())
+  isOpening        Boolean       @default(false)
+  reversesId       String?       @unique
+  postedAt         DateTime?
+  voidedAt         DateTime?
+  createdByUserId  String?
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
+
+  tenant         Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  fiscalPeriod   FiscalPeriod?   @relation(fields: [fiscalPeriodId], references: [id], onDelete: SetNull)
+  parallelLedger ParallelLedger? @relation(fields: [parallelLedgerId], references: [id], onDelete: SetNull)
+  reverses       JournalEntry?   @relation("JournalReversal", fields: [reversesId], references: [id], onDelete: SetNull)
+  reversedBy     JournalEntry?   @relation("JournalReversal")
+  lines          JournalLine[]
+  assetMovements FixedAssetMovement[]
+  costAllocations CostAllocation[]
+  intercompanyMatches IntercompanyMatch[]
 
   @@unique([tenantId, number])
   @@index([tenantId, status, postedAt])
   @@index([tenantId, sourceType, sourceId])
+  @@index([tenantId, entryDate])
+  @@index([tenantId, parallelLedgerId])
   @@map("journal_entries")
 }
 
@@ -1262,6 +2565,8 @@ model JournalLine {
   tenantId       String
   journalEntryId String
   glAccountId    String
+  costCenterId   String?
+  legalEntityId  String?
   lineNo         Int     @default(0)
   memo           String?
   debit          Decimal @default(0) @db.Decimal(14, 2)
@@ -1269,10 +2574,208 @@ model JournalLine {
 
   journalEntry JournalEntry @relation(fields: [journalEntryId], references: [id], onDelete: Cascade)
   glAccount    GlAccount    @relation(fields: [glAccountId], references: [id], onDelete: Restrict)
+  costCenter   CostCenter?  @relation(fields: [costCenterId], references: [id], onDelete: SetNull)
+  legalEntity  LegalEntity? @relation(fields: [legalEntityId], references: [id], onDelete: SetNull)
+  icMatchLinesA IntercompanyMatchLine[] @relation("IcLineA")
+  icMatchLinesB IntercompanyMatchLine[] @relation("IcLineB")
 
   @@index([tenantId, journalEntryId])
   @@index([tenantId, glAccountId])
+  @@index([tenantId, costCenterId])
+  @@index([tenantId, legalEntityId])
   @@map("journal_lines")
+}
+
+/// Κατανομή κόστους μεταξύ κέντρων κόστους (CO)
+model CostAllocation {
+  id               String   @id @default(cuid())
+  tenantId         String
+  code             String
+  name             String
+  /// EQUAL | PERCENT | DRIVER
+  method           String   @default("PERCENT")
+  sourceCostCenterId String
+  glAccountId      String
+  amount           Decimal  @db.Decimal(14, 2)
+  status           String   @default("DRAFT")
+  journalEntryId   String?
+  postedAt         DateTime?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  tenant           Tenant      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  sourceCostCenter CostCenter  @relation("AllocationSource", fields: [sourceCostCenterId], references: [id], onDelete: Restrict)
+  glAccount        GlAccount   @relation("AllocationAccount", fields: [glAccountId], references: [id], onDelete: Restrict)
+  journalEntry     JournalEntry? @relation(fields: [journalEntryId], references: [id], onDelete: SetNull)
+  targets          CostAllocationTarget[]
+
+  @@unique([tenantId, code])
+  @@index([tenantId, status])
+  @@map("cost_allocations")
+}
+
+model CostAllocationTarget {
+  id               String  @id @default(cuid())
+  tenantId         String
+  allocationId     String
+  costCenterId     String
+  /// Percent 0-100 or driver weight
+  weight           Decimal @default(0) @db.Decimal(10, 4)
+  amount           Decimal @default(0) @db.Decimal(14, 2)
+
+  allocation CostAllocation @relation(fields: [allocationId], references: [id], onDelete: Cascade)
+  costCenter CostCenter     @relation("AllocationTarget", fields: [costCenterId], references: [id], onDelete: Restrict)
+
+  @@index([tenantId, allocationId])
+  @@map("cost_allocation_targets")
+}
+
+/// Διαταιρική αντιστοίχιση για consolidation eliminations
+model IntercompanyMatch {
+  id              String   @id @default(cuid())
+  tenantId        String
+  code            String
+  legalEntityAId  String
+  legalEntityBId  String
+  amount          Decimal  @db.Decimal(14, 2)
+  status          String   @default("OPEN")
+  /// OPEN | MATCHED | ELIMINATED
+  difference      Decimal  @default(0) @db.Decimal(14, 2)
+  journalEntryId  String?
+  notes           String?
+  matchedAt       DateTime?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  tenant       Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  legalEntityA LegalEntity   @relation("IcEntityA", fields: [legalEntityAId], references: [id], onDelete: Restrict)
+  legalEntityB LegalEntity   @relation("IcEntityB", fields: [legalEntityBId], references: [id], onDelete: Restrict)
+  journalEntry JournalEntry? @relation(fields: [journalEntryId], references: [id], onDelete: SetNull)
+  lines        IntercompanyMatchLine[]
+
+  @@unique([tenantId, code])
+  @@index([tenantId, status])
+  @@map("intercompany_matches")
+}
+
+model IntercompanyMatchLine {
+  id        String  @id @default(cuid())
+  tenantId  String
+  matchId   String
+  lineAId   String?
+  lineBId   String?
+  amount    Decimal @db.Decimal(14, 2)
+
+  match IntercompanyMatch @relation(fields: [matchId], references: [id], onDelete: Cascade)
+  lineA JournalLine?      @relation("IcLineA", fields: [lineAId], references: [id], onDelete: SetNull)
+  lineB JournalLine?      @relation("IcLineB", fields: [lineBId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, matchId])
+  @@map("intercompany_match_lines")
+}
+
+model FixedAsset {
+  id                   String                        @id @default(cuid())
+  tenantId             String
+  code                 String
+  name                 String
+  acquisitionDate      DateTime
+  acquisitionCost      Decimal                       @db.Decimal(14, 2)
+  residualValue        Decimal                       @default(0) @db.Decimal(14, 2)
+  usefulLifeMonths     Int                           @default(60)
+  depreciationMethod   FixedAssetDepreciationMethod  @default(STRAIGHT_LINE)
+  status               FixedAssetStatus              @default(ACTIVE)
+  glAssetAccountId     String
+  glAccumDeprAccountId String
+  glDeprExpenseAccountId String
+  costCenterId         String?
+  legalEntityId        String?
+  notes                String?
+  createdAt            DateTime                      @default(now())
+  updatedAt            DateTime                      @updatedAt
+
+  tenant           Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  glAssetAccount   GlAccount    @relation("FixedAssetGross", fields: [glAssetAccountId], references: [id], onDelete: Restrict)
+  glAccumDeprAccount GlAccount  @relation("FixedAssetAccum", fields: [glAccumDeprAccountId], references: [id], onDelete: Restrict)
+  glDeprExpenseAccount GlAccount @relation("FixedAssetDeprExp", fields: [glDeprExpenseAccountId], references: [id], onDelete: Restrict)
+  costCenter       CostCenter?  @relation(fields: [costCenterId], references: [id], onDelete: SetNull)
+  legalEntity      LegalEntity? @relation(fields: [legalEntityId], references: [id], onDelete: SetNull)
+  movements        FixedAssetMovement[]
+
+  @@unique([tenantId, code])
+  @@index([tenantId, status])
+  @@map("fixed_assets")
+}
+
+model FixedAssetMovement {
+  id             String                 @id @default(cuid())
+  tenantId       String
+  fixedAssetId   String
+  kind           FixedAssetMovementKind
+  amount         Decimal                @db.Decimal(14, 2)
+  movedAt        DateTime               @default(now())
+  memo           String?
+  journalEntryId String?
+  createdAt      DateTime               @default(now())
+
+  tenant       Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  fixedAsset   FixedAsset    @relation(fields: [fixedAssetId], references: [id], onDelete: Cascade)
+  journalEntry JournalEntry? @relation(fields: [journalEntryId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, fixedAssetId, movedAt])
+  @@map("fixed_asset_movements")
+}
+
+model PurchaseInvoice {
+  id          String                @id @default(cuid())
+  tenantId    String
+  number      String
+  supplierId  String
+  status      PurchaseInvoiceStatus @default(DRAFT)
+  issueDate   DateTime              @default(now())
+  dueDate     DateTime?
+  netAmount   Decimal               @default(0) @db.Decimal(14, 2)
+  vatAmount   Decimal               @default(0) @db.Decimal(14, 2)
+  total       Decimal               @default(0) @db.Decimal(14, 2)
+  paidAmount  Decimal               @default(0) @db.Decimal(14, 2)
+  notes       String?
+  seriesId    String?
+  legalEntityId String?
+  journalEntryId String?
+  createdAt   DateTime              @default(now())
+  updatedAt   DateTime              @updatedAt
+
+  tenant      Tenant               @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  supplier    Supplier             @relation(fields: [supplierId], references: [id], onDelete: Restrict)
+  legalEntity LegalEntity?         @relation(fields: [legalEntityId], references: [id], onDelete: SetNull)
+  lines       PurchaseInvoiceLine[]
+
+  @@unique([tenantId, number])
+  @@index([tenantId, status, issueDate])
+  @@index([tenantId, supplierId])
+  @@map("purchase_invoices")
+}
+
+model PurchaseInvoiceLine {
+  id                String  @id @default(cuid())
+  tenantId          String
+  purchaseInvoiceId String
+  lineNo            Int     @default(0)
+  description       String
+  qty               Decimal @default(1) @db.Decimal(14, 3)
+  unitPrice         Decimal @default(0) @db.Decimal(14, 4)
+  vatRate           Decimal @default(24) @db.Decimal(5, 2)
+  netAmount         Decimal @default(0) @db.Decimal(14, 2)
+  vatAmount         Decimal @default(0) @db.Decimal(14, 2)
+  glAccountId       String?
+  costCenterId      String?
+
+  purchaseInvoice PurchaseInvoice @relation(fields: [purchaseInvoiceId], references: [id], onDelete: Cascade)
+  glAccount       GlAccount?      @relation(fields: [glAccountId], references: [id], onDelete: SetNull)
+  costCenter      CostCenter?     @relation(fields: [costCenterId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, purchaseInvoiceId])
+  @@map("purchase_invoice_lines")
 }
 
 // ─── Custom Fields & Entity Views ───────────────────────────────────
@@ -1365,6 +2868,23 @@ model EntityFormView {
   @@unique([tenantId, entity, code])
   @@index([tenantId, entity, isActive, sortOrder])
   @@map("entity_form_views")
+}
+
+/// Detail page layout per entity (tab order / visibility on 360 views)
+model EntityDetailLayout {
+  id         String       @id @default(cuid())
+  tenantId   String
+  entity     EntityModule
+  /// { tabs: [{ key, label?, visible }], defaultTab?: string }
+  configJson Json
+  createdAt  DateTime     @default(now())
+  updatedAt  DateTime     @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, entity])
+  @@index([tenantId, entity])
+  @@map("entity_detail_layouts")
 }
 
 // ─── Script Hooks Engine ────────────────────────────────────────────

@@ -53,26 +53,53 @@ export function NewInvoiceForm({ kind }: { kind: InvoiceDocKind }) {
   const [branchId, setBranchId] = useState("");
   const [spaceId, setSpaceId] = useState("");
   const [seriesId, setSeriesId] = useState("");
-  const [status, setStatus] = useState<"DRAFT" | "ISSUED">("DRAFT");
+  const [statusOptionId, setStatusOptionId] = useState("");
+  const [statusOptions, setStatusOptions] = useState<
+    Array<{ id: string; code: string; name: string; workflow: string }>
+  >([]);
   const [dueAt, setDueAt] = useState("");
   const [notes, setNotes] = useState("");
   const [lines, setLines] = useState<LineDraft[]>([newLine()]);
   const [loadingCustomers, setLoadingCustomers] = useState(true);
   const [loadingHierarchy, setLoadingHierarchy] = useState(false);
 
+  const selectedStatus = useMemo(
+    () => statusOptions.find((s) => s.id === statusOptionId) ?? null,
+    [statusOptions, statusOptionId],
+  );
+  const issuesNow = selectedStatus?.workflow === "ISSUED";
+
   useEffect(() => {
     let cancelled = false;
     (async () => {
       setLoadingCustomers(true);
       try {
-        const res = await fetch("/api/customers?limit=50&status=ACTIVE");
-        const data = (await res.json()) as {
+        const [custRes, statusRes] = await Promise.all([
+          fetch("/api/customers?limit=50&status=ACTIVE"),
+          fetch("/api/settings/invoice-statuses?selectableOnCreate=1"),
+        ]);
+        const custData = (await custRes.json()) as {
           items?: CustomerOption[];
           error?: string;
         };
+        const statusData = (await statusRes.json()) as {
+          items?: Array<{
+            id: string;
+            code: string;
+            name: string;
+            workflow: string;
+          }>;
+        };
         if (!cancelled) {
-          setCustomers(data.items ?? []);
-          if (!res.ok) setError(data.error || "Αποτυχία φόρτωσης πελατών");
+          setCustomers(custData.items ?? []);
+          const opts = statusData.items ?? [];
+          setStatusOptions(opts);
+          const draft =
+            opts.find((o) => o.code === "DRAFT") ??
+            opts.find((o) => o.workflow === "DRAFT") ??
+            opts[0];
+          if (draft) setStatusOptionId(draft.id);
+          if (!custRes.ok) setError(custData.error || "Αποτυχία φόρτωσης πελατών");
         }
       } catch {
         if (!cancelled) setError("Αποτυχία φόρτωσης πελατών");
@@ -160,7 +187,7 @@ export function NewInvoiceForm({ kind }: { kind: InvoiceDocKind }) {
         spaceId: spaceId || null,
         seriesId,
         kind,
-        status,
+        statusOptionId: statusOptionId || null,
         dueAt: dueAt || null,
         notes: notes.trim() || null,
         lines: lines.map((line) => ({
@@ -291,16 +318,28 @@ export function NewInvoiceForm({ kind }: { kind: InvoiceDocKind }) {
             </label>
 
             <label className="block">
-              <span className="mb-1.5 block text-sm font-medium">Κατάσταση</span>
+              <span className="mb-1.5 flex items-center justify-between gap-2 text-sm font-medium">
+                <span>Κατάσταση</span>
+                <Link
+                  href="/settings/invoice-statuses"
+                  className="text-xs font-normal text-teal-700 hover:underline"
+                >
+                  Διαχείριση
+                </Link>
+              </span>
               <select
-                value={status}
-                onChange={(e) =>
-                  setStatus(e.target.value as "DRAFT" | "ISSUED")
-                }
+                value={statusOptionId}
+                onChange={(e) => setStatusOptionId(e.target.value)}
                 className="h-11 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm outline-none ring-teal-500/30 focus:ring-2"
               >
-                <option value="DRAFT">Πρόχειρο</option>
-                <option value="ISSUED">Έκδοση τώρα</option>
+                {statusOptions.length === 0 ? (
+                  <option value="">— Φόρτωση —</option>
+                ) : null}
+                {statusOptions.map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.name}
+                  </option>
+                ))}
               </select>
             </label>
 
@@ -466,7 +505,7 @@ export function NewInvoiceForm({ kind }: { kind: InvoiceDocKind }) {
           <Button type="submit" disabled={pending || !seriesId}>
             {pending
               ? "Αποθήκευση..."
-              : status === "ISSUED"
+              : issuesNow
                 ? `Έκδοση ${kindTitle.toLowerCase()}`
                 : "Αποθήκευση πρόχειρου"}
           </Button>

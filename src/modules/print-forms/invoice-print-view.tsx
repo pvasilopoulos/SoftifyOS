@@ -36,6 +36,17 @@ export type InvoicePrintModel = {
   tenantName: string;
   tenantCode: string;
   formName: string;
+  company?: {
+    vatNumber?: string | null;
+    address?: string | null;
+    phone?: string | null;
+    email?: string | null;
+    bankName?: string | null;
+    iban?: string | null;
+    bic?: string | null;
+  };
+  paymentTerms?: string | null;
+  shippingAddress?: string | null;
   customer: {
     name: string;
     code: string;
@@ -55,11 +66,53 @@ export type InvoicePrintModel = {
   }>;
 };
 
+function buildVatBreakdown(
+  lines: InvoicePrintModel["lines"],
+): Array<{ rate: number; base: number; vat: number; gross: number }> {
+  const map = new Map<number, { base: number; vat: number; gross: number }>();
+  for (const l of lines) {
+    const rate = l.vatRate;
+    const gross = l.lineTotal;
+    const base =
+      rate > 0 ? Math.round((gross / (1 + rate / 100)) * 100) / 100 : gross;
+    const vat = Math.round((gross - base) * 100) / 100;
+    const cur = map.get(rate) ?? { base: 0, vat: 0, gross: 0 };
+    cur.base += base;
+    cur.vat += vat;
+    cur.gross += gross;
+    map.set(rate, cur);
+  }
+  return [...map.entries()]
+    .sort((a, b) => a[0] - b[0])
+    .map(([rate, v]) => ({
+      rate,
+      base: Math.round(v.base * 100) / 100,
+      vat: Math.round(v.vat * 100) / 100,
+      gross: Math.round(v.gross * 100) / 100,
+    }));
+}
+
 export function invoiceToTemplateContext(
   invoice: InvoicePrintModel,
 ): Record<string, unknown> {
+  const company = invoice.company ?? {};
   return {
     tenant: { name: invoice.tenantName, code: invoice.tenantCode },
+    company: {
+      vatNumber: company.vatNumber ?? "",
+      address: company.address ?? "",
+      phone: company.phone ?? "",
+      email: company.email ?? "",
+      bankName: company.bankName ?? "",
+      iban: company.iban ?? "",
+      bic: company.bic ?? "",
+    },
+    payment: { terms: invoice.paymentTerms ?? "Καθαρό 30 ημέρες" },
+    shipping: {
+      address:
+        invoice.shippingAddress ??
+        [invoice.branchName, invoice.spaceName].filter(Boolean).join(" · "),
+    },
     form: { name: invoice.formName },
     doc: {
       number: invoice.number,
@@ -79,13 +132,21 @@ export function invoiceToTemplateContext(
     },
     branch: { name: invoice.branchName ?? "" },
     space: { name: invoice.spaceName ?? "" },
-    lines: invoice.lines.map((l) => ({
-      description: l.description,
-      quantity: l.quantity,
-      unitPrice: l.unitPrice,
-      vatRate: l.vatRate,
-      lineTotal: l.lineTotal,
-    })),
+    lines: invoice.lines.map((l) => {
+      const net =
+        l.vatRate > 0
+          ? Math.round((l.lineTotal / (1 + l.vatRate / 100)) * 100) / 100
+          : l.lineTotal;
+      return {
+        description: l.description,
+        quantity: l.quantity,
+        unitPrice: l.unitPrice,
+        vatRate: l.vatRate,
+        net,
+        lineTotal: l.lineTotal,
+      };
+    }),
+    vatBreakdown: buildVatBreakdown(invoice.lines),
     totals: {
       subtotal: invoice.subtotal,
       vatAmount: invoice.vatAmount,

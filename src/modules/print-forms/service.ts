@@ -26,6 +26,8 @@ export async function ensureDefaultPrintForms(db: Db, tenantId: string) {
           code: row.code,
           name: row.name,
           documentKind: row.documentKind,
+          paper: row.paper ?? "A4",
+          orientation: row.orientation ?? "PORTRAIT",
           bodyJson: row.body as unknown as Prisma.InputJsonValue,
           isDefault: row.isDefault,
           isSystem: true,

@@ -1,10 +1,27 @@
-import type { DocumentKind } from "@/generated/prisma/client";
+import type { DocumentKind, PrintOrientation, PrintPaperSize } from "@/generated/prisma/client";
 import {
   DEFAULT_INVOICE_CSS,
   DEFAULT_INVOICE_HTML,
   DEFAULT_RECEIPT_CSS,
   DEFAULT_RECEIPT_HTML,
 } from "./html-presets";
+import {
+  ADVANCED_DELIVERY_CSS,
+  ADVANCED_DELIVERY_HTML,
+  ADVANCED_INVOICE_BILINGUAL_CSS,
+  ADVANCED_INVOICE_BILINGUAL_HTML,
+  ADVANCED_INVOICE_PRO_CSS,
+  ADVANCED_INVOICE_PRO_HTML,
+  ADVANCED_INVOICE_VAT_CSS,
+  ADVANCED_INVOICE_VAT_HTML,
+  ADVANCED_ORDER_CSS,
+  ADVANCED_ORDER_HTML,
+  ADVANCED_QUOTE_CSS,
+  ADVANCED_QUOTE_HTML,
+  ADVANCED_RECEIPT_58_CSS,
+  ADVANCED_RECEIPT_58_HTML,
+  bodyFromHtmlCss,
+} from "./advanced-presets";
 import {
   DEFAULT_PAGE_SETTINGS,
   normalizePageSettings,
@@ -180,6 +197,8 @@ export const DEFAULT_PRINT_FORMS: Array<{
   documentKind: DocumentKind;
   body: PrintFormBody;
   isDefault: boolean;
+  paper?: PrintPaperSize;
+  orientation?: PrintOrientation;
 }> = [
   {
     code: "INV-STD",
@@ -187,6 +206,34 @@ export const DEFAULT_PRINT_FORMS: Array<{
     documentKind: "SALES_INVOICE",
     body: DEFAULT_INVOICE_PRINT_BODY,
     isDefault: true,
+    paper: "A4",
+  },
+  {
+    code: "INV-PRO",
+    name: "Τιμολόγιο Pro — τράπεζα & υπογραφές",
+    documentKind: "SALES_INVOICE",
+    body: bodyFromHtmlCss(ADVANCED_INVOICE_PRO_HTML, ADVANCED_INVOICE_PRO_CSS),
+    isDefault: false,
+    paper: "A4",
+  },
+  {
+    code: "INV-BIL",
+    name: "Τιμολόγιο δίγλωσσο EL/EN",
+    documentKind: "SALES_INVOICE",
+    body: bodyFromHtmlCss(
+      ADVANCED_INVOICE_BILINGUAL_HTML,
+      ADVANCED_INVOICE_BILINGUAL_CSS,
+    ),
+    isDefault: false,
+    paper: "A4",
+  },
+  {
+    code: "INV-VAT",
+    name: "Τιμολόγιο — ανάλυση ΦΠΑ",
+    documentKind: "SALES_INVOICE",
+    body: bodyFromHtmlCss(ADVANCED_INVOICE_VAT_HTML, ADVANCED_INVOICE_VAT_CSS),
+    isDefault: false,
+    paper: "A4",
   },
   {
     code: "APY-STD",
@@ -194,6 +241,22 @@ export const DEFAULT_PRINT_FORMS: Array<{
     documentKind: "RETAIL_RECEIPT",
     body: DEFAULT_RECEIPT_PRINT_BODY,
     isDefault: true,
+    paper: "RECEIPT_80",
+  },
+  {
+    code: "APY-58",
+    name: "ΑΠΥ Thermal 58mm",
+    documentKind: "RETAIL_RECEIPT",
+    body: bodyFromHtmlCss(ADVANCED_RECEIPT_58_HTML, ADVANCED_RECEIPT_58_CSS, {
+      widthMm: 58,
+      heightMm: 200,
+      marginTopMm: 2,
+      marginRightMm: 2,
+      marginBottomMm: 2,
+      marginLeftMm: 2,
+    }),
+    isDefault: false,
+    paper: "CUSTOM",
   },
   {
     code: "CR-STD",
@@ -201,5 +264,38 @@ export const DEFAULT_PRINT_FORMS: Array<{
     documentKind: "SALES_CREDIT",
     body: DEFAULT_INVOICE_PRINT_BODY,
     isDefault: true,
+    paper: "A4",
+  },
+  {
+    code: "CR-PRO",
+    name: "Πιστωτικό Pro",
+    documentKind: "SALES_CREDIT",
+    body: bodyFromHtmlCss(ADVANCED_INVOICE_PRO_HTML, ADVANCED_INVOICE_PRO_CSS),
+    isDefault: false,
+    paper: "A4",
+  },
+  {
+    code: "QUO-PRO",
+    name: "Προσφορά / Proforma",
+    documentKind: "SALES_QUOTE",
+    body: bodyFromHtmlCss(ADVANCED_QUOTE_HTML, ADVANCED_QUOTE_CSS),
+    isDefault: true,
+    paper: "A4",
+  },
+  {
+    code: "ORD-CONF",
+    name: "Επιβεβαίωση παραγγελίας",
+    documentKind: "SALES_ORDER",
+    body: bodyFromHtmlCss(ADVANCED_ORDER_HTML, ADVANCED_ORDER_CSS),
+    isDefault: true,
+    paper: "A4",
+  },
+  {
+    code: "DN-PACK",
+    name: "Δελτίο αποστολής / Packing list",
+    documentKind: "DELIVERY_NOTE",
+    body: bodyFromHtmlCss(ADVANCED_DELIVERY_HTML, ADVANCED_DELIVERY_CSS),
+    isDefault: true,
+    paper: "A4",
   },
 ];

@@ -4,6 +4,7 @@ import { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/server/db";
 import { getSession } from "@/platform/auth/session";
 import { writeAuditEvent } from "@/platform/tenancy/audit";
+import { buildChangeMeta } from "@/platform/tenancy/audit-diff";
 import { getErrorMessage } from "@/shared/lib/safe";
 import {
   calcInvoiceTotals,
@@ -11,6 +12,7 @@ import {
   toNumber,
 } from "@/modules/sales/invoice-utils";
 import { orderInvoiceSchema } from "@/modules/sales/order-schemas";
+import { orderAuditSnapshot } from "@/modules/sales/order-audit";
 import {
   allocateFromSeries,
   resolveDefaultSeries,
@@ -244,19 +246,36 @@ export async function POST(
       return invoice;
     });
 
+    const orderAfter = await prisma.order.findFirst({
+      where: { id: order.id },
+      include: { lines: { orderBy: { position: "asc" } } },
+    });
+
     await writeAuditEvent({
       tenantId: session.tenantId,
       userId: session.sub,
       action: "order.invoice",
       entity: "order",
       entityId: order.id,
-      meta: {
-        orderNumber: order.number,
-        invoiceId: result.id,
-        invoiceNumber: result.number,
-        partial: preparedLines.length > 0,
-        total: roundMoney(totals.total),
-      },
+      meta: buildChangeMeta({
+        before: orderAuditSnapshot(order),
+        after: {
+          ...(orderAfter
+            ? orderAuditSnapshot(orderAfter)
+            : { status: "INVOICED" }),
+          invoiceId: result.id,
+          invoiceNumber: result.number,
+          invoiceTotal: roundMoney(totals.total),
+        },
+        extra: {
+          orderNumber: order.number,
+          invoiceId: result.id,
+          invoiceNumber: result.number,
+          partial: preparedLines.length > 0,
+          total: roundMoney(totals.total),
+        },
+        omitKeys: ["id", "updatedAt", "createdAt", "lines"],
+      }),
     });
 
     return NextResponse.json(
