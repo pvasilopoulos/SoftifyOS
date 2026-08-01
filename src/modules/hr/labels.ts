@@ -46,6 +46,29 @@ export const payrollPeriodStatusLabel = {
   CLOSED: "Κλειστή",
 } as const;
 
+export const workShiftKindLabel = {
+  REGULAR: "Κανονική",
+  OVERTIME: "Υπερωρία",
+  REMOTE: "Τηλεργασία",
+  ON_CALL: "Εφημερία",
+} as const;
+
+export const WEEKDAY_BITS = [
+  { bit: 1, label: "Δευ" },
+  { bit: 2, label: "Τρι" },
+  { bit: 4, label: "Τετ" },
+  { bit: 8, label: "Πεμ" },
+  { bit: 16, label: "Παρ" },
+  { bit: 32, label: "Σαβ" },
+  { bit: 64, label: "Κυρ" },
+] as const;
+
+export function formatWorkDays(mask: number) {
+  return WEEKDAY_BITS.filter((d) => mask & d.bit)
+    .map((d) => d.label)
+    .join("·");
+}
+
 /** Ελληνικά πρότυπα αδειών (ενδεικτικά δικαιώματα / έτος) */
 export const DEFAULT_LEAVE_TYPES: Array<{
   code: string;

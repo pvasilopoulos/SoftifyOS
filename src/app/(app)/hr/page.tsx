@@ -8,8 +8,12 @@ import {
   listLeaveRequests,
   listLeaveTypes,
   listPayrollPeriods,
+  listScheduleAssignments,
   listWorkCardEvents,
   listWorkCards,
+  listWorkSchedules,
+  listWorkShifts,
+  loadLeaveBalances,
   serializeEmployee,
 } from "@/modules/hr/service";
 import { HrClient } from "./hr-client";
@@ -23,24 +27,33 @@ export default async function HrPage() {
 
   const tenantId = session.tenantId;
   await ensureLeaveTypes(prisma, tenantId);
+  const year = new Date().getFullYear();
 
   const [
     employees,
     leaveTypes,
     leaveRequests,
+    leaveBalances,
     workCards,
     events,
     ergani,
     payroll,
+    schedules,
+    assignments,
+    shifts,
     sites,
   ] = await Promise.all([
     listEmployees(prisma, tenantId),
     listLeaveTypes(prisma, tenantId),
     listLeaveRequests(prisma, tenantId),
+    loadLeaveBalances(prisma, tenantId, { year }),
     listWorkCards(prisma, tenantId),
     listWorkCardEvents(prisma, tenantId),
     listErganiSubmissions(prisma, tenantId),
     listPayrollPeriods(prisma, tenantId),
+    listWorkSchedules(prisma, tenantId),
+    listScheduleAssignments(prisma, tenantId),
+    listWorkShifts(prisma, tenantId),
     prisma.site.findMany({
       where: { tenantId, isActive: true },
       select: { id: true, code: true, name: true },
@@ -50,85 +63,110 @@ export default async function HrPage() {
   ]);
 
   return (
-    <div className="space-y-4 p-4 md:p-6">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight text-slate-900">
-          HR
-        </h1>
-        <p className="mt-1 text-sm text-slate-600">
-          Μητρώο εργαζομένων · άδειες · ψηφιακή κάρτα εργασίας · Εργάνη ·
-          μισθοδοσία (ελληνικά πρότυπα).
-        </p>
-      </div>
-      <HrClient
-        sites={sites}
-        initialEmployees={employees.map(serializeEmployee)}
-        initialLeaveTypes={leaveTypes.map((t) => ({
-          id: t.id,
-          code: t.code,
-          name: t.name,
-          daysPerYear: t.daysPerYear,
-          isPaid: t.isPaid,
-        }))}
-        initialLeaveRequests={leaveRequests.map((r) => ({
-          id: r.id,
-          days: Number(r.days),
-          status: r.status,
-          fromDate: r.fromDate.toISOString(),
-          toDate: r.toDate.toISOString(),
-          notes: r.notes,
-          employee: r.employee,
-          leaveType: r.leaveType,
-        }))}
-        initialWorkCards={workCards.map((c) => ({
-          id: c.id,
-          cardNumber: c.cardNumber,
-          status: c.status,
-          issuedAt: c.issuedAt.toISOString(),
-          employee: c.employee,
-        }))}
-        initialEvents={events.map((e) => ({
-          id: e.id,
-          type: e.type,
-          source: e.source,
-          occurredAt: e.occurredAt.toISOString(),
-          erganiStatus: e.erganiStatus,
-          employee: e.employee,
-          workCard: e.workCard,
-        }))}
-        initialErgani={ergani.map((i) => ({
-          id: i.id,
-          entityType: i.entityType,
-          eventKind: i.eventKind,
-          status: i.status,
-          externalRef: i.externalRef,
-          attempts: i.attempts,
-          lastError: i.lastError,
-          createdAt: i.createdAt.toISOString(),
-        }))}
-        initialPayroll={payroll.map((p) => {
-          const totals = p.lines.reduce(
-            (acc, l) => {
-              acc.gross += Number(l.gross);
-              acc.net += Number(l.net);
-              acc.employeeEfka += Number(l.employeeEfka);
-              acc.employerEfka += Number(l.employerEfka);
-              acc.tax += Number(l.tax);
-              return acc;
-            },
-            { gross: 0, net: 0, employeeEfka: 0, employerEfka: 0, tax: 0 },
-          );
-          return {
-            id: p.id,
-            code: p.code,
-            year: p.year,
-            month: p.month,
-            status: p.status,
-            lineCount: p._count.lines,
-            totals,
-          };
-        })}
-      />
-    </div>
+    <HrClient
+      canWrite={session.role !== "VIEWER"}
+      sites={sites}
+      initialEmployees={employees.map(serializeEmployee)}
+      initialLeaveTypes={leaveTypes.map((t) => ({
+        id: t.id,
+        code: t.code,
+        name: t.name,
+        daysPerYear: t.daysPerYear,
+        isPaid: t.isPaid,
+        isActive: t.isActive,
+      }))}
+      initialLeaveRequests={leaveRequests.map((r) => ({
+        id: r.id,
+        days: Number(r.days),
+        status: r.status,
+        fromDate: r.fromDate.toISOString(),
+        toDate: r.toDate.toISOString(),
+        notes: r.notes,
+        employee: r.employee,
+        leaveType: r.leaveType,
+      }))}
+      initialLeaveBalances={leaveBalances}
+      initialWorkCards={workCards.map((c) => ({
+        id: c.id,
+        cardNumber: c.cardNumber,
+        status: c.status,
+        issuedAt: c.issuedAt.toISOString(),
+        employee: c.employee,
+      }))}
+      initialEvents={events.map((e) => ({
+        id: e.id,
+        type: e.type,
+        source: e.source,
+        occurredAt: e.occurredAt.toISOString(),
+        erganiStatus: e.erganiStatus,
+        employee: e.employee,
+        workCard: e.workCard,
+        site: e.site,
+      }))}
+      initialErgani={ergani.map((i) => ({
+        id: i.id,
+        entityType: i.entityType,
+        eventKind: i.eventKind,
+        status: i.status,
+        externalRef: i.externalRef,
+        attempts: i.attempts,
+        lastError: i.lastError,
+        createdAt: i.createdAt.toISOString(),
+      }))}
+      initialPayroll={payroll.map((p) => {
+        const totals = p.lines.reduce(
+          (acc, l) => {
+            acc.gross += Number(l.gross);
+            acc.net += Number(l.net);
+            acc.employeeEfka += Number(l.employeeEfka);
+            acc.employerEfka += Number(l.employerEfka);
+            acc.tax += Number(l.tax);
+            return acc;
+          },
+          { gross: 0, net: 0, employeeEfka: 0, employerEfka: 0, tax: 0 },
+        );
+        return {
+          id: p.id,
+          code: p.code,
+          year: p.year,
+          month: p.month,
+          status: p.status,
+          lineCount: p._count.lines,
+          totals,
+        };
+      })}
+      initialSchedules={schedules.map((s) => ({
+        id: s.id,
+        code: s.code,
+        name: s.name,
+        workDays: s.workDays,
+        startTime: s.startTime,
+        endTime: s.endTime,
+        breakMinutes: s.breakMinutes,
+        weeklyHours: Number(s.weeklyHours),
+        isActive: s.isActive,
+        notes: s.notes,
+        assignmentCount: s._count.assignments,
+      }))}
+      initialAssignments={assignments.map((a) => ({
+        id: a.id,
+        fromDate: a.fromDate.toISOString(),
+        toDate: a.toDate?.toISOString() ?? null,
+        notes: a.notes,
+        employee: a.employee,
+        schedule: a.schedule,
+      }))}
+      initialShifts={shifts.map((s) => ({
+        id: s.id,
+        workDate: s.workDate.toISOString(),
+        startTime: s.startTime,
+        endTime: s.endTime,
+        breakMinutes: s.breakMinutes,
+        kind: s.kind,
+        notes: s.notes,
+        employee: s.employee,
+        site: s.site,
+      }))}
+    />
   );
 }

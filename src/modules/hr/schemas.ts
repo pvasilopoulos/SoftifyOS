@@ -57,6 +57,8 @@ export const employeeUpsertSchema = z.object({
   contractType: contractTypeSchema.optional().default("INDEFINITE"),
   specialty: optStr(120),
   weeklyHours: z.coerce.number().min(0).max(168).optional().nullable(),
+  baseGross: z.coerce.number().min(0).max(100000).optional().nullable(),
+  monthlyAllowance: z.coerce.number().min(0).max(100000).optional().default(0),
   siteId: optStr(40),
   hireDate: dateLike,
   terminationDate: dateLike,
@@ -128,9 +130,66 @@ export const payrollLineUpsertSchema = z.object({
   notes: optStr(500),
 });
 
+export const workCardStatusPatchSchema = z.object({
+  status: z.enum(["ACTIVE", "INACTIVE", "LOST"]),
+  notes: optStr(500),
+});
+
+export const workScheduleUpsertSchema = z.object({
+  code: z
+    .string()
+    .trim()
+    .min(2)
+    .max(40)
+    .transform((v) => v.toUpperCase()),
+  name: z.string().trim().min(2).max(120),
+  workDays: z.coerce.number().int().min(1).max(127).optional().default(31),
+  startTime: z
+    .string()
+    .regex(/^\d{2}:\d{2}$/)
+    .optional()
+    .default("09:00"),
+  endTime: z
+    .string()
+    .regex(/^\d{2}:\d{2}$/)
+    .optional()
+    .default("17:00"),
+  breakMinutes: z.coerce.number().int().min(0).max(240).optional().default(30),
+  weeklyHours: z.coerce.number().min(0).max(168).optional().default(40),
+  isActive: z.boolean().optional().default(true),
+  notes: optStr(500),
+});
+
+export const workScheduleAssignSchema = z.object({
+  employeeId: z.string().trim().min(1),
+  scheduleId: z.string().trim().min(1),
+  fromDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  toDate: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/)
+    .optional()
+    .nullable()
+    .or(z.literal("").transform(() => null)),
+  notes: optStr(500),
+});
+
+export const workShiftCreateSchema = z.object({
+  employeeId: z.string().trim().min(1),
+  workDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  startTime: z.string().regex(/^\d{2}:\d{2}$/),
+  endTime: z.string().regex(/^\d{2}:\d{2}$/),
+  breakMinutes: z.coerce.number().int().min(0).max(240).optional().default(0),
+  kind: z.enum(["REGULAR", "OVERTIME", "REMOTE", "ON_CALL"]).optional().default("REGULAR"),
+  siteId: optStr(40),
+  notes: optStr(500),
+});
+
 export type EmployeeUpsertInput = z.infer<typeof employeeUpsertSchema>;
 export type LeaveTypeUpsertInput = z.infer<typeof leaveTypeUpsertSchema>;
 export type LeaveRequestCreateInput = z.infer<typeof leaveRequestCreateSchema>;
 export type WorkCardCreateInput = z.infer<typeof workCardCreateSchema>;
 export type WorkCardEventCreateInput = z.infer<typeof workCardEventCreateSchema>;
 export type PayrollPeriodCreateInput = z.infer<typeof payrollPeriodCreateSchema>;
+export type WorkScheduleUpsertInput = z.infer<typeof workScheduleUpsertSchema>;
+export type WorkScheduleAssignInput = z.infer<typeof workScheduleAssignSchema>;
+export type WorkShiftCreateInput = z.infer<typeof workShiftCreateSchema>;

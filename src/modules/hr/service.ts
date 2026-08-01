@@ -8,6 +8,9 @@ import type {
   PayrollPeriodCreateInput,
   WorkCardCreateInput,
   WorkCardEventCreateInput,
+  WorkScheduleAssignInput,
+  WorkScheduleUpsertInput,
+  WorkShiftCreateInput,
 } from "./schemas";
 
 type Db = PrismaClient | Prisma.TransactionClient;
@@ -98,6 +101,19 @@ function employeeData(data: EmployeeUpsertInput | Partial<EmployeeUpsertInput>) 
               : new Prisma.Decimal(data.weeklyHours),
         }
       : {}),
+    ...(data.baseGross !== undefined
+      ? {
+          baseGross:
+            data.baseGross == null
+              ? null
+              : new Prisma.Decimal(data.baseGross),
+        }
+      : {}),
+    ...(data.monthlyAllowance !== undefined
+      ? {
+          monthlyAllowance: new Prisma.Decimal(data.monthlyAllowance ?? 0),
+        }
+      : {}),
     ...(data.siteId !== undefined ? { siteId: emptyToNull(data.siteId) } : {}),
     ...(data.hireDate !== undefined ? { hireDate: parseDate(data.hireDate) } : {}),
     ...(data.terminationDate !== undefined
@@ -184,6 +200,11 @@ export async function createEmployee(
         input.data.weeklyHours == null
           ? null
           : new Prisma.Decimal(input.data.weeklyHours),
+      baseGross:
+        input.data.baseGross == null
+          ? null
+          : new Prisma.Decimal(input.data.baseGross),
+      monthlyAllowance: new Prisma.Decimal(input.data.monthlyAllowance ?? 0),
       siteId: emptyToNull(input.data.siteId),
       hireDate: parseDate(input.data.hireDate),
       terminationDate: parseDate(input.data.terminationDate),
@@ -398,7 +419,7 @@ export async function decideLeaveRequest(
     throw new HrError("Η αίτηση είναι ήδη εγκεκριμένη");
   }
 
-  return db.leaveRequest.update({
+  const updated = await db.leaveRequest.update({
     where: { id: row.id },
     data: {
       status: input.status,
@@ -412,6 +433,98 @@ export async function decideLeaveRequest(
       leaveType: { select: { id: true, code: true, name: true, isPaid: true } },
     },
   });
+
+  if (input.status === "APPROVED") {
+    await enqueueErganiSubmission(db, {
+      tenantId: input.tenantId,
+      entityType: "leave_request",
+      entityId: updated.id,
+      eventKind: "LEAVE_DECLARE",
+      payload: {
+        employeeId: updated.employeeId,
+        employeeCode: updated.employee.code,
+        leaveType: updated.leaveType.code,
+        fromDate: updated.fromDate.toISOString(),
+        toDate: updated.toDate.toISOString(),
+        days: Number(updated.days),
+      },
+    });
+  }
+
+  return updated;
+}
+
+/** Υπόλοιπα αδειών έτους ανά εργαζόμενο / τύπο */
+export async function loadLeaveBalances(
+  db: Db,
+  tenantId: string,
+  opts?: { year?: number; employeeId?: string },
+) {
+  await ensureLeaveTypes(db, tenantId);
+  const year = opts?.year ?? new Date().getFullYear();
+  const from = new Date(Date.UTC(year, 0, 1));
+  const to = new Date(Date.UTC(year, 11, 31, 23, 59, 59, 999));
+
+  const [types, employees, approved] = await Promise.all([
+    db.leaveType.findMany({
+      where: { tenantId, isActive: true },
+      orderBy: [{ sortOrder: "asc" }, { name: "asc" }],
+    }),
+    db.employee.findMany({
+      where: {
+        tenantId,
+        status: { in: ["ACTIVE", "INACTIVE"] },
+        ...(opts?.employeeId ? { id: opts.employeeId } : {}),
+      },
+      select: {
+        id: true,
+        code: true,
+        firstName: true,
+        lastName: true,
+        status: true,
+      },
+      orderBy: [{ lastName: "asc" }, { firstName: "asc" }],
+      take: 500,
+    }),
+    db.leaveRequest.findMany({
+      where: {
+        tenantId,
+        status: "APPROVED",
+        fromDate: { lte: to },
+        toDate: { gte: from },
+        ...(opts?.employeeId ? { employeeId: opts.employeeId } : {}),
+      },
+      select: {
+        employeeId: true,
+        leaveTypeId: true,
+        days: true,
+      },
+    }),
+  ]);
+
+  const usedMap = new Map<string, number>();
+  for (const r of approved) {
+    const key = `${r.employeeId}:${r.leaveTypeId}`;
+    usedMap.set(key, (usedMap.get(key) ?? 0) + Number(r.days));
+  }
+
+  return employees.map((e) => ({
+    employee: e,
+    year,
+    balances: types.map((t) => {
+      const used = usedMap.get(`${e.id}:${t.id}`) ?? 0;
+      const entitlement = t.daysPerYear;
+      return {
+        leaveTypeId: t.id,
+        code: t.code,
+        name: t.name,
+        isPaid: t.isPaid,
+        entitlement,
+        used,
+        remaining: Math.max(0, Math.round((entitlement - used) * 100) / 100),
+      };
+    }),
+  }));
 }
 
 export async function listWorkCards(db: Db, tenantId: string) {
@@ -425,6 +538,60 @@ export async function listWorkCards(db: Db, tenantId: string) {
     orderBy: { issuedAt: "desc" },
     take: 200,
   });
+}
+
+export async function updateWorkCardStatus(
+  db: Db,
+  input: {
+    tenantId: string;
+    id: string;
+    status: "ACTIVE" | "INACTIVE" | "LOST";
+    notes?: string | null;
+  },
+) {
+  const card = await db.workCard.findFirst({
+    where: { id: input.id, tenantId: input.tenantId },
+    include: {
+      employee: {
+        select: { id: true, code: true, firstName: true, lastName: true },
+      },
+    },
+  });
+  if (!card) throw new HrError("Η κάρτα δεν βρέθηκε", 404);
+
+  const updated = await db.workCard.update({
+    where: { id: card.id },
+    data: {
+      status: input.status,
+      ...(input.notes !== undefined ? { notes: emptyToNull(input.notes) } : {}),
+    },
+    include: {
+      employee: {
+        select: { id: true, code: true, firstName: true, lastName: true },
+      },
+    },
+  });
+
+  if (input.status !== card.status) {
+    await enqueueErganiSubmission(db, {
+      tenantId: input.tenantId,
+      entityType: "work_card",
+      entityId: updated.id,
+      eventKind:
+        input.status === "LOST"
+          ? "CARD_LOST"
+          : input.status === "INACTIVE"
+            ? "CARD_DEACTIVATE"
+            : "CARD_REACTIVATE",
+      payload: {
+        cardNumber: updated.cardNumber,
+        status: updated.status,
+        employeeCode: updated.employee.code,
+      },
+    });
+  }
+
+  return updated;
 }
 
 export async function createWorkCard(
@@ -812,7 +979,7 @@ export async function createPayrollPeriod(
 
   const employees = await db.employee.findMany({
     where: { tenantId: input.tenantId, status: "ACTIVE" },
-    select: { id: true },
+    select: { id: true, baseGross: true, monthlyAllowance: true },
   });
 
   return db.payrollPeriod.create({
@@ -827,11 +994,14 @@ export async function createPayrollPeriod(
       status: "DRAFT",
       lines: {
         create: employees.map((e) => {
-          const splits = estimatePayrollSplits(defaultGross);
+          const base = e.baseGross != null ? Number(e.baseGross) : defaultGross;
+          const allowance = Number(e.monthlyAllowance ?? 0);
+          const gross = Math.round((base + allowance) * 100) / 100;
+          const splits = estimatePayrollSplits(gross);
           return {
             tenantId: input.tenantId,
             employeeId: e.id,
-            gross: new Prisma.Decimal(defaultGross),
+            gross: new Prisma.Decimal(gross),
             employeeEfka: new Prisma.Decimal(splits.employeeEfka),
             employerEfka: new Prisma.Decimal(splits.employerEfka),
             tax: new Prisma.Decimal(splits.tax),
@@ -872,6 +1042,254 @@ export async function closePayrollPeriod(
   });
 }
 
+export async function upsertPayrollLine(
+  db: Db,
+  input: {
+    tenantId: string;
+    periodId: string;
+    employeeId: string;
+    gross: number;
+    notes?: string | null;
+  },
+) {
+  const period = await db.payrollPeriod.findFirst({
+    where: { id: input.periodId, tenantId: input.tenantId },
+  });
+  if (!period) throw new HrError("Η περίοδος δεν βρέθηκε", 404);
+  if (period.status === "CLOSED") {
+    throw new HrError("Η περίοδος είναι κλειστή — δεν αλλάζει");
+  }
+  const employee = await db.employee.findFirst({
+    where: { id: input.employeeId, tenantId: input.tenantId },
+  });
+  if (!employee) throw new HrError("Ο εργαζόμενος δεν βρέθηκε", 404);
+
+  const splits = estimatePayrollSplits(input.gross);
+  return db.payrollLine.upsert({
+    where: {
+      periodId_employeeId: {
+        periodId: period.id,
+        employeeId: employee.id,
+      },
+    },
+    create: {
+      tenantId: input.tenantId,
+      periodId: period.id,
+      employeeId: employee.id,
+      gross: new Prisma.Decimal(input.gross),
+      employeeEfka: new Prisma.Decimal(splits.employeeEfka),
+      employerEfka: new Prisma.Decimal(splits.employerEfka),
+      tax: new Prisma.Decimal(splits.tax),
+      net: new Prisma.Decimal(splits.net),
+      notes: emptyToNull(input.notes),
+    },
+    update: {
+      gross: new Prisma.Decimal(input.gross),
+      employeeEfka: new Prisma.Decimal(splits.employeeEfka),
+      employerEfka: new Prisma.Decimal(splits.employerEfka),
+      tax: new Prisma.Decimal(splits.tax),
+      net: new Prisma.Decimal(splits.net),
+      notes: emptyToNull(input.notes),
+    },
+    include: {
+      employee: {
+        select: {
+          id: true,
+          code: true,
+          firstName: true,
+          lastName: true,
+          vatNumber: true,
+          ama: true,
+        },
+      },
+    },
+  });
+}
+
+export async function listWorkSchedules(db: Db, tenantId: string) {
+  return db.workSchedule.findMany({
+    where: { tenantId },
+    include: {
+      _count: { select: { assignments: true } },
+    },
+    orderBy: { code: "asc" },
+    take: 100,
+  });
+}
+
+export async function createWorkSchedule(
+  db: Db,
+  input: { tenantId: string; data: WorkScheduleUpsertInput },
+) {
+  const existing = await db.workSchedule.findUnique({
+    where: {
+      tenantId_code: { tenantId: input.tenantId, code: input.data.code },
+    },
+  });
+  if (existing) throw new HrError(`Υπάρχει ωράριο ${input.data.code}`, 409);
+  return db.workSchedule.create({
+    data: {
+      tenantId: input.tenantId,
+      code: input.data.code,
+      name: input.data.name,
+      workDays: input.data.workDays ?? 31,
+      startTime: input.data.startTime ?? "09:00",
+      endTime: input.data.endTime ?? "17:00",
+      breakMinutes: input.data.breakMinutes ?? 30,
+      weeklyHours: new Prisma.Decimal(input.data.weeklyHours ?? 40),
+      isActive: input.data.isActive ?? true,
+      notes: emptyToNull(input.data.notes),
+    },
+  });
+}
+
+export async function assignWorkSchedule(
+  db: Db,
+  input: { tenantId: string; data: WorkScheduleAssignInput },
+) {
+  const [employee, schedule] = await Promise.all([
+    db.employee.findFirst({
+      where: { id: input.data.employeeId, tenantId: input.tenantId },
+    }),
+    db.workSchedule.findFirst({
+      where: { id: input.data.scheduleId, tenantId: input.tenantId },
+    }),
+  ]);
+  if (!employee) throw new HrError("Ο εργαζόμενος δεν βρέθηκε", 404);
+  if (!schedule) throw new HrError("Το ωράριο δεν βρέθηκε", 404);
+
+  const fromDate = parseDate(input.data.fromDate);
+  if (!fromDate) throw new HrError("Μη έγκυρη ημερομηνία έναρξης");
+  const toDate = parseDate(input.data.toDate);
+
+  return db.workScheduleAssignment.create({
+    data: {
+      tenantId: input.tenantId,
+      employeeId: employee.id,
+      scheduleId: schedule.id,
+      fromDate,
+      toDate,
+      notes: emptyToNull(input.data.notes),
+    },
+    include: {
+      employee: {
+        select: { id: true, code: true, firstName: true, lastName: true },
+      },
+      schedule: {
+        select: {
+          id: true,
+          code: true,
+          name: true,
+          startTime: true,
+          endTime: true,
+          workDays: true,
+        },
+      },
+    },
+  });
+}
+
+export async function listScheduleAssignments(db: Db, tenantId: string) {
+  return db.workScheduleAssignment.findMany({
+    where: { tenantId },
+    include: {
+      employee: {
+        select: { id: true, code: true, firstName: true, lastName: true },
+      },
+      schedule: {
+        select: {
+          id: true,
+          code: true,
+          name: true,
+          startTime: true,
+          endTime: true,
+          workDays: true,
+        },
+      },
+    },
+    orderBy: { fromDate: "desc" },
+    take: 200,
+  });
+}
+
+export async function listWorkShifts(
+  db: Db,
+  tenantId: string,
+  opts?: { from?: string; to?: string; take?: number },
+) {
+  const from = opts?.from ? parseDate(opts.from) : null;
+  const to = opts?.to ? parseDate(opts.to) : null;
+  return db.workShift.findMany({
+    where: {
+      tenantId,
+      ...(from || to
+        ? {
+            workDate: {
+              ...(from ? { gte: from } : {}),
+              ...(to ? { lte: to } : {}),
+            },
+          }
+        : {}),
+    },
+    include: {
+      employee: {
+        select: { id: true, code: true, firstName: true, lastName: true },
+      },
+      site: { select: { id: true, code: true, name: true } },
+    },
+    orderBy: [{ workDate: "desc" }, { startTime: "asc" }],
+    take: opts?.take ?? 200,
+  });
+}
+
+export async function createWorkShift(
+  db: Db,
+  input: { tenantId: string; data: WorkShiftCreateInput },
+) {
+  const employee = await db.employee.findFirst({
+    where: { id: input.data.employeeId, tenantId: input.tenantId },
+  });
+  if (!employee) throw new HrError("Ο εργαζόμενος δεν βρέθηκε", 404);
+  const workDate = parseDate(input.data.workDate);
+  if (!workDate) throw new HrError("Μη έγκυρη ημερομηνία");
+  if (input.data.siteId) {
+    const site = await db.site.findFirst({
+      where: { id: input.data.siteId, tenantId: input.tenantId },
+    });
+    if (!site) throw new HrError("Η εγκατάσταση δεν βρέθηκε", 404);
+  }
+
+  try {
+    return await db.workShift.create({
+      data: {
+        tenantId: input.tenantId,
+        employeeId: employee.id,
+        workDate,
+        startTime: input.data.startTime,
+        endTime: input.data.endTime,
+        breakMinutes: input.data.breakMinutes ?? 0,
+        kind: input.data.kind ?? "REGULAR",
+        siteId: emptyToNull(input.data.siteId),
+        notes: emptyToNull(input.data.notes),
+      },
+      include: {
+        employee: {
+          select: { id: true, code: true, firstName: true, lastName: true },
+        },
+        site: { select: { id: true, code: true, name: true } },
+      },
+    });
+  } catch (err) {
+    if (
+      err instanceof Prisma.PrismaClientKnownRequestError &&
+      err.code === "P2002"
+    ) {
+      throw new HrError("Υπάρχει ήδη βάρδια για αυτή την έναρξη", 409);
+    }
+    throw err;
+  }
+}
+
 export function serializeEmployee(e: {
   id: string;
   code: string;
@@ -893,6 +1311,8 @@ export function serializeEmployee(e: {
   contractType: string;
   specialty: string | null;
   weeklyHours: Prisma.Decimal | null;
+  baseGross?: Prisma.Decimal | null;
+  monthlyAllowance?: Prisma.Decimal | null;
   siteId: string | null;
   hireDate: Date | null;
   terminationDate: Date | null;
@@ -924,6 +1344,9 @@ export function serializeEmployee(e: {
     contractType: e.contractType,
     specialty: e.specialty,
     weeklyHours: e.weeklyHours == null ? null : Number(e.weeklyHours),
+    baseGross: e.baseGross == null ? null : Number(e.baseGross),
+    monthlyAllowance:
+      e.monthlyAllowance == null ? 0 : Number(e.monthlyAllowance),
     siteId: e.siteId,
     site: e.site ?? null,
     hireDate: e.hireDate?.toISOString() ?? null,
