@@ -4,33 +4,58 @@ import { prisma } from "@/server/db";
 import { getSession } from "@/platform/auth/session";
 import { writeAuditEvent } from "@/platform/tenancy/audit";
 import { getErrorMessage } from "@/shared/lib/safe";
+import {
+  createWebhookSecret,
+  normalizeWebhookEvents,
+  publicTokenView,
+} from "@/modules/integrations/service";
+import {
+  asIntegrationsConfig,
+  maskSecret,
+  type IntegrationsConfig,
+} from "@/modules/integrations/types";
 
 export const dynamic = "force-dynamic";
 
 const schema = z.object({
   webhookUrl: z.string().trim().url().optional().nullable().or(z.literal("")),
   webhookSecretHint: z.string().trim().max(80).optional().nullable(),
+  webhookEnabled: z.boolean().optional(),
+  webhookEvents: z.array(z.string()).optional(),
+  regenerateWebhookSecret: z.boolean().optional(),
+  clearWebhookSecret: z.boolean().optional(),
   skroutzEnabled: z.boolean().optional(),
+  skroutzShopId: z.string().trim().max(80).optional().nullable(),
+  marketplaceNotes: z.string().trim().max(2000).optional().nullable(),
   myDataEnv: z.enum(["simulator", "test", "prod"]).optional(),
   myDataUserId: z.string().trim().max(120).optional().nullable(),
   myDataSubscriptionKey: z.string().trim().max(200).optional().nullable(),
+  clearMyDataSubscriptionKey: z.boolean().optional(),
   notes: z.string().trim().max(2000).optional().nullable(),
+  erganiEnv: z.enum(["simulator", "test", "prod"]).optional(),
 });
 
-type Integrations = {
-  webhookUrl?: string | null;
-  webhookSecretHint?: string | null;
-  skroutzEnabled?: boolean;
-  myDataEnv?: "simulator" | "test" | "prod";
-  myDataUserId?: string | null;
-  myDataSubscriptionKey?: string | null;
-  notes?: string | null;
-};
-
-function maskKey(key: string | null | undefined) {
-  if (!key) return "";
-  if (key.length <= 8) return "••••";
-  return `${key.slice(0, 4)}…${key.slice(-4)}`;
+function publicView(integrations: IntegrationsConfig) {
+  return {
+    webhookUrl: integrations.webhookUrl ?? "",
+    webhookSecretHint: integrations.webhookSecretHint ?? "",
+    webhookEnabled: integrations.webhookEnabled !== false,
+    webhookEvents: normalizeWebhookEvents(integrations.webhookEvents),
+    hasWebhookSecret: Boolean(integrations.webhookSecret),
+    webhookSecretHintMasked: maskSecret(integrations.webhookSecret),
+    skroutzEnabled: Boolean(integrations.skroutzEnabled),
+    skroutzShopId: integrations.skroutzShopId ?? "",
+    marketplaceNotes: integrations.marketplaceNotes ?? "",
+    myDataEnv: integrations.myDataEnv ?? "simulator",
+    myDataUserId: integrations.myDataUserId ?? "",
+    myDataSubscriptionKeyHint: maskSecret(integrations.myDataSubscriptionKey),
+    hasMyDataSubscriptionKey: Boolean(integrations.myDataSubscriptionKey),
+    notes: integrations.notes ?? "",
+    erganiEnv: integrations.erganiEnv ?? "simulator",
+    lastWebhookTest: integrations.lastWebhookTest ?? null,
+    lastMyDataTest: integrations.lastMyDataTest ?? null,
+    apiTokens: (integrations.apiTokens ?? []).map(publicTokenView),
+  };
 }
 
 async function ensureSettings(tenantId: string) {
@@ -48,22 +73,16 @@ export async function GET() {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
     const settings = await ensureSettings(session.tenantId);
-    const integrations = (settings.integrationsJson as Integrations | null) ?? {};
+    const integrations = asIntegrationsConfig(settings.integrationsJson);
     return NextResponse.json({
-      integrations: {
-        webhookUrl: integrations.webhookUrl ?? "",
-        webhookSecretHint: integrations.webhookSecretHint ?? "",
-        skroutzEnabled: Boolean(integrations.skroutzEnabled),
-        myDataEnv: integrations.myDataEnv ?? "simulator",
-        myDataUserId: integrations.myDataUserId ?? "",
-        myDataSubscriptionKeyHint: maskKey(integrations.myDataSubscriptionKey),
-        hasMyDataSubscriptionKey: Boolean(integrations.myDataSubscriptionKey),
-        notes: integrations.notes ?? "",
-      },
+      integrations: publicView(integrations),
       endpoints: {
         health: "/api/health",
         scriptsUiEvent: "/api/scripts/ui-event",
         myDataQueue: "/api/mydata/submissions",
+        configExport: "/api/settings/export",
+        integrationsTest: "/api/settings/integrations/test",
+        apiTokens: "/api/settings/integrations/tokens",
       },
     });
   } catch (error) {
@@ -88,8 +107,10 @@ export async function PUT(request: Request) {
     const current = await prisma.tenantSettings.findUnique({
       where: { tenantId: session.tenantId },
     });
-    const prev = (current?.integrationsJson as Integrations | null) ?? {};
-    const next: Integrations = {
+    const prev = asIntegrationsConfig(current?.integrationsJson);
+    let generatedSecret: string | undefined;
+
+    const next: IntegrationsConfig = {
       ...prev,
       ...(body.webhookUrl !== undefined
         ? { webhookUrl: body.webhookUrl || null }
@@ -97,27 +118,48 @@ export async function PUT(request: Request) {
       ...(body.webhookSecretHint !== undefined
         ? { webhookSecretHint: body.webhookSecretHint || null }
         : {}),
+      ...(body.webhookEnabled !== undefined
+        ? { webhookEnabled: body.webhookEnabled }
+        : {}),
+      ...(body.webhookEvents !== undefined
+        ? { webhookEvents: normalizeWebhookEvents(body.webhookEvents) }
+        : {}),
       ...(body.skroutzEnabled !== undefined
         ? { skroutzEnabled: body.skroutzEnabled }
+        : {}),
+      ...(body.skroutzShopId !== undefined
+        ? { skroutzShopId: body.skroutzShopId || null }
+        : {}),
+      ...(body.marketplaceNotes !== undefined
+        ? { marketplaceNotes: body.marketplaceNotes || null }
         : {}),
       ...(body.myDataEnv !== undefined ? { myDataEnv: body.myDataEnv } : {}),
       ...(body.myDataUserId !== undefined
         ? { myDataUserId: body.myDataUserId || null }
         : {}),
-      ...(body.myDataSubscriptionKey !== undefined
-        ? {
-            myDataSubscriptionKey:
-              body.myDataSubscriptionKey === "" ||
-              body.myDataSubscriptionKey == null
-                ? null
-                : body.myDataSubscriptionKey.startsWith("••••") ||
-                    body.myDataSubscriptionKey.includes("…")
-                  ? prev.myDataSubscriptionKey
-                  : body.myDataSubscriptionKey,
-          }
-        : {}),
       ...(body.notes !== undefined ? { notes: body.notes || null } : {}),
+      ...(body.erganiEnv !== undefined ? { erganiEnv: body.erganiEnv } : {}),
     };
+
+    if (body.clearWebhookSecret) {
+      next.webhookSecret = null;
+    } else if (body.regenerateWebhookSecret) {
+      generatedSecret = createWebhookSecret();
+      next.webhookSecret = generatedSecret;
+      next.webhookSecretHint = maskSecret(generatedSecret);
+    }
+
+    if (body.clearMyDataSubscriptionKey) {
+      next.myDataSubscriptionKey = null;
+    } else if (body.myDataSubscriptionKey !== undefined) {
+      const key = body.myDataSubscriptionKey;
+      next.myDataSubscriptionKey =
+        key === "" || key == null
+          ? prev.myDataSubscriptionKey ?? null
+          : key.startsWith("••••") || key.includes("…")
+            ? prev.myDataSubscriptionKey
+            : key;
+    }
 
     await prisma.tenantSettings.update({
       where: { tenantId: session.tenantId },
@@ -131,19 +173,20 @@ export async function PUT(request: Request) {
       entity: "tenant_settings",
       entityId: current?.id,
       meta: {
-        keys: Object.keys(body).filter((k) => k !== "myDataSubscriptionKey"),
+        keys: Object.keys(body).filter(
+          (k) =>
+            k !== "myDataSubscriptionKey" && k !== "regenerateWebhookSecret",
+        ),
         myDataEnv: next.myDataEnv,
         hasMyDataKey: Boolean(next.myDataSubscriptionKey),
+        webhookEnabled: next.webhookEnabled !== false,
+        regeneratedWebhookSecret: Boolean(generatedSecret),
       },
     });
 
     return NextResponse.json({
-      integrations: {
-        ...next,
-        myDataSubscriptionKey: undefined,
-        myDataSubscriptionKeyHint: maskKey(next.myDataSubscriptionKey),
-        hasMyDataSubscriptionKey: Boolean(next.myDataSubscriptionKey),
-      },
+      integrations: publicView(next),
+      ...(generatedSecret ? { webhookSecret: generatedSecret } : {}),
     });
   } catch (error) {
     if (error instanceof z.ZodError) {
