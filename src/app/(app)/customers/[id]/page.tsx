@@ -11,8 +11,6 @@ import {
   serializeFormView,
 } from "@/modules/entity-views/service";
 import { parseCustomFields } from "@/modules/entity-views/types";
-import { CustomerHierarchyClient } from "./customer-hierarchy-client";
-import { CustomerEditPanel } from "./customer-edit-panel";
 import { Customer360 } from "./customer-360";
 import { toNumber } from "@/modules/sales/invoice-utils";
 
@@ -97,23 +95,6 @@ export default async function CustomerDetailPage({
     0,
   );
 
-  const payload = {
-    ...customer,
-    createdAt: customer.createdAt.toISOString(),
-    updatedAt: customer.updatedAt.toISOString(),
-    branches: customer.branches.map((b) => ({
-      ...b,
-      createdAt: b.createdAt.toISOString(),
-      updatedAt: b.updatedAt.toISOString(),
-      spaces: b.spaces.map((s) => ({
-        ...s,
-        areaSqm: s.areaSqm == null ? null : Number(s.areaSqm),
-        createdAt: s.createdAt.toISOString(),
-        updatedAt: s.updatedAt.toISOString(),
-      })),
-    })),
-  };
-
   const fieldDefs = customFields.map((f) => ({
     code: f.code,
     label: f.label,
@@ -122,8 +103,29 @@ export default async function CustomerDetailPage({
     required: f.required,
   }));
 
+  const branches = customer.branches.map((b) => ({
+    id: b.id,
+    code: b.code,
+    name: b.name,
+    address: b.address,
+    city: b.city,
+    postalCode: b.postalCode,
+    phone: b.phone,
+    isPrimary: b.isPrimary,
+    spaces: b.spaces.map((s) => ({
+      id: s.id,
+      code: s.code,
+      name: s.name,
+      type: s.type,
+      floorLabel: s.floorLabel,
+      areaSqm: s.areaSqm == null ? null : Number(s.areaSqm),
+      notes: s.notes,
+    })),
+  }));
+
   return (
     <div className="space-y-5">
+      {/* Region: header */}
       <div>
         <Link
           href="/customers"
@@ -145,9 +147,22 @@ export default async function CustomerDetailPage({
 
       <Customer360
         customerId={customer.id}
+        canWrite={session.role !== "VIEWER"}
         openBalance={openBalance}
         openInvoices={openInvoices.length}
-        canWrite={session.role !== "VIEWER"}
+        customer={{
+          code: customer.code,
+          name: customer.name,
+          vatNumber: customer.vatNumber,
+          email: customer.email,
+          phone: customer.phone,
+          notes: customer.notes,
+          status: customer.status,
+          customFields: parseCustomFields(customer.customFields),
+        }}
+        formViews={formViews.map(serializeFormView)}
+        customFields={fieldDefs}
+        branches={branches}
         invoices={invoices.map((i) => ({
           id: i.id,
           number: i.number,
@@ -170,29 +185,6 @@ export default async function CustomerDetailPage({
           dueAt: a.dueAt?.toISOString() ?? null,
           createdAt: a.createdAt.toISOString(),
         }))}
-      />
-
-      <CustomerEditPanel
-        customerId={customer.id}
-        canEdit={session.role !== "VIEWER"}
-        formViews={formViews.map(serializeFormView)}
-        customFields={fieldDefs}
-        initial={{
-          code: customer.code,
-          name: customer.name,
-          vatNumber: customer.vatNumber,
-          email: customer.email,
-          phone: customer.phone,
-          notes: customer.notes,
-          status: customer.status,
-          customFields: parseCustomFields(customer.customFields),
-        }}
-      />
-
-      <CustomerHierarchyClient
-        customerId={customer.id}
-        initialBranches={payload.branches}
-        canEdit={session.role !== "VIEWER"}
       />
     </div>
   );
