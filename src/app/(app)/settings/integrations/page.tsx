@@ -9,6 +9,7 @@ import {
   normalizeWebhookEvents,
   publicTokenView,
 } from "@/modules/integrations/service";
+import { INTEGRATION_API_CATALOG } from "@/modules/integrations/api-catalog";
 import { IntegrationsHubClient } from "./integrations-client";
 
 export const metadata = { title: "API & Integrations" };
@@ -108,56 +109,7 @@ export default async function IntegrationsSettingsPage() {
             ? Boolean((l.meta as Record<string, unknown>).ok)
             : null,
       }))}
-      endpoints={[
-        {
-          key: "health",
-          path: "/api/health",
-          method: "GET",
-          desc: "Health check υπηρεσίας",
-        },
-        {
-          key: "myDataQueue",
-          path: "/api/mydata/submissions",
-          method: "GET",
-          desc: "Ουρά myDATA submissions",
-        },
-        {
-          key: "myDataProcess",
-          path: "/api/mydata/submissions/process-batch",
-          method: "POST",
-          desc: "Επεξεργασία ουράς myDATA",
-        },
-        {
-          key: "scriptsUiEvent",
-          path: "/api/scripts/ui-event",
-          method: "POST",
-          desc: "Script Hooks / UI events",
-        },
-        {
-          key: "configExport",
-          path: "/api/settings/export",
-          method: "GET",
-          desc: "Εξαγωγή ρυθμίσεων tenant",
-        },
-        {
-          key: "integrationsTest",
-          path: "/api/settings/integrations/test",
-          method: "POST",
-          desc: "Test webhook / myDATA",
-        },
-        {
-          key: "apiTokens",
-          path: "/api/settings/integrations/tokens",
-          method: "GET|POST",
-          desc: "Διαχείριση API tokens",
-        },
-        {
-          key: "audit",
-          path: "/api/audit-events?action=integrations.",
-          method: "GET",
-          desc: "Integration audit trail",
-        },
-      ]}
+      endpoints={INTEGRATION_API_CATALOG}
     />
   );
 }

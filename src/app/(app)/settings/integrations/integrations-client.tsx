@@ -5,7 +5,9 @@ import { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import {
   Activity,
+  BookOpen,
   Cable,
+  ChevronDown,
   Copy,
   KeyRound,
   Landmark,
@@ -25,6 +27,7 @@ import {
   type MyDataEnv,
   type WebhookEventKey,
 } from "@/modules/integrations/types";
+import type { ApiEndpointDoc } from "@/modules/integrations/api-catalog";
 
 type Section =
   | "overview"
@@ -52,13 +55,6 @@ type LogRow = {
   message: string;
   userName: string | null;
   ok: boolean | null;
-};
-
-type Endpoint = {
-  key: string;
-  path: string;
-  method: string;
-  desc: string;
 };
 
 type FormState = {
@@ -100,7 +96,7 @@ const NAV: Array<{
   {
     group: "Platform",
     items: [
-      { id: "developer", label: "Developer API", icon: KeyRound },
+      { id: "developer", label: "API endpoints", icon: KeyRound },
       { id: "logs", label: "Monitor / Logs", icon: Activity },
     ],
   },
@@ -129,7 +125,7 @@ export function IntegrationsHubClient({
     activeTokens: number;
   };
   logs: LogRow[];
-  endpoints: Endpoint[];
+  endpoints: ApiEndpointDoc[];
 }) {
   const router = useRouter();
   const [section, setSection] = useState<Section>("overview");
@@ -143,6 +139,9 @@ export function IntegrationsHubClient({
   const [newTokenSecret, setNewTokenSecret] = useState<string | null>(null);
   const [tokenName, setTokenName] = useState("ERP Integration");
   const [testBusy, setTestBusy] = useState<"webhook" | "mydata" | null>(null);
+  const [openEndpoint, setOpenEndpoint] = useState<string | null>(
+    endpoints[0]?.key ?? null,
+  );
 
   const readiness = useMemo(() => {
     const items = [
@@ -1014,39 +1013,218 @@ export function IntegrationsHubClient({
                 </ul>
               </section>
 
-              <section className="soft-panel space-y-3 p-5">
-                <div className="flex items-center justify-between gap-2">
-                  <h2 className="text-sm font-semibold">API catalog</h2>
+              <section className="soft-panel space-y-4 p-5">
+                <div className="flex flex-wrap items-start justify-between gap-2">
+                  <div>
+                    <h2 className="flex items-center gap-2 text-sm font-semibold">
+                      <BookOpen className="h-4 w-4 text-teal-700" />
+                      Διαθέσιμα API endpoints
+                    </h2>
+                    <p className="mt-1 text-xs text-slate-500">
+                      Αναλυτική αναφορά με auth, παραμέτρους, curl και παράδειγμα
+                      απάντησης. Άνοιξε κάθε endpoint για λεπτομέρειες.
+                    </p>
+                  </div>
                   <Link2 className="h-4 w-4 text-slate-400" />
                 </div>
-                <ul className="space-y-2">
-                  {endpoints.map((ep) => (
-                    <li
-                      key={ep.key}
-                      className="flex flex-wrap items-center justify-between gap-2 rounded-xl bg-slate-50 px-3 py-2.5 text-sm"
-                    >
-                      <div className="min-w-0">
-                        <p className="font-medium text-ink-950">
-                          <span className="mr-2 rounded bg-slate-200 px-1.5 py-0.5 font-mono text-[10px] uppercase">
-                            {ep.method}
-                          </span>
-                          {ep.key}
-                        </p>
-                        <p className="truncate font-mono text-xs text-teal-800">
-                          {ep.path}
-                        </p>
-                        <p className="text-xs text-slate-500">{ep.desc}</p>
-                      </div>
-                      <button
-                        type="button"
-                        className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs hover:bg-slate-50"
-                        onClick={() => copyText(ep.path)}
-                      >
-                        <Copy className="h-3 w-3" />
-                        Copy
-                      </button>
+
+                <div className="rounded-xl border border-teal-100 bg-teal-50/50 px-3 py-2.5 text-xs text-slate-600">
+                  <p className="font-semibold text-ink-950">Auth γρήγορα</p>
+                  <ul className="mt-1 list-inside list-disc space-y-0.5">
+                    <li>
+                      Browser / ERP: session cookie μετά από{" "}
+                      <code className="rounded bg-white px-1">/login</code>
                     </li>
-                  ))}
+                    <li>
+                      Εξωτερικά:{" "}
+                      <code className="rounded bg-white px-1">
+                        Authorization: Bearer &lt;token&gt;
+                      </code>{" "}
+                      ή{" "}
+                      <code className="rounded bg-white px-1">
+                        X-Softify-Api-Key
+                      </code>
+                    </li>
+                    <li>
+                      <code className="rounded bg-white px-1">/api/health</code>{" "}
+                      είναι δημόσιο (χωρίς auth)
+                    </li>
+                  </ul>
+                </div>
+
+                <ul className="space-y-3">
+                  {endpoints.map((ep) => {
+                    const open = openEndpoint === ep.key;
+                    return (
+                      <li
+                        key={ep.key}
+                        className="overflow-hidden rounded-2xl border border-slate-200 bg-white"
+                      >
+                        <button
+                          type="button"
+                          className="flex w-full items-start justify-between gap-3 px-4 py-3 text-left hover:bg-slate-50/80"
+                          onClick={() =>
+                            setOpenEndpoint(open ? null : ep.key)
+                          }
+                        >
+                          <div className="min-w-0">
+                            <p className="flex flex-wrap items-center gap-2 text-sm font-semibold text-ink-950">
+                              <span className="rounded bg-slate-900 px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-wide text-white">
+                                {ep.method}
+                              </span>
+                              {ep.title}
+                              <span className="font-mono text-[11px] font-normal text-slate-400">
+                                {ep.key}
+                              </span>
+                            </p>
+                            <p className="mt-1 font-mono text-xs text-teal-800">
+                              {ep.path}
+                            </p>
+                            <p className="mt-1 text-xs text-slate-500">
+                              {ep.desc}
+                            </p>
+                          </div>
+                          <ChevronDown
+                            className={cn(
+                              "mt-1 h-4 w-4 shrink-0 text-slate-400 transition",
+                              open && "rotate-180",
+                            )}
+                          />
+                        </button>
+
+                        {open ? (
+                          <div className="space-y-4 border-t border-slate-100 bg-slate-50/40 px-4 py-4 text-sm">
+                            <div className="grid gap-3 sm:grid-cols-2">
+                              <DocBlock label="Authentication" value={ep.auth} />
+                              <DocBlock label="Πρόσβαση" value={ep.access} />
+                            </div>
+
+                            {ep.headers?.length ? (
+                              <div>
+                                <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                                  Headers
+                                </p>
+                                <ul className="space-y-1 text-xs">
+                                  {ep.headers.map((h) => (
+                                    <li key={h.name}>
+                                      <code className="rounded bg-white px-1.5 py-0.5 font-mono text-teal-800">
+                                        {h.name}
+                                      </code>{" "}
+                                      <span className="text-slate-600">
+                                        — {h.desc}
+                                      </span>
+                                    </li>
+                                  ))}
+                                </ul>
+                              </div>
+                            ) : null}
+
+                            {ep.params?.length ? (
+                              <div>
+                                <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                                  Query / path params
+                                </p>
+                                <ul className="space-y-1.5 text-xs">
+                                  {ep.params.map((p) => (
+                                    <li
+                                      key={p.name}
+                                      className="rounded-lg border border-slate-100 bg-white px-2.5 py-1.5"
+                                    >
+                                      <code className="font-mono text-teal-800">
+                                        {p.name}
+                                      </code>
+                                      {p.required ? (
+                                        <Badge tone="rose" className="ml-2">
+                                          required
+                                        </Badge>
+                                      ) : (
+                                        <span className="ml-2 text-slate-400">
+                                          optional
+                                        </span>
+                                      )}
+                                      <p className="mt-0.5 text-slate-600">
+                                        {p.desc}
+                                      </p>
+                                    </li>
+                                  ))}
+                                </ul>
+                              </div>
+                            ) : null}
+
+                            {ep.body?.length ? (
+                              <div>
+                                <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                                  Request body
+                                </p>
+                                <ul className="space-y-1.5 text-xs">
+                                  {ep.body.map((p) => (
+                                    <li
+                                      key={p.name}
+                                      className="rounded-lg border border-slate-100 bg-white px-2.5 py-1.5"
+                                    >
+                                      <code className="font-mono text-teal-800">
+                                        {p.name}
+                                      </code>
+                                      {p.required ? (
+                                        <Badge tone="rose" className="ml-2">
+                                          required
+                                        </Badge>
+                                      ) : (
+                                        <span className="ml-2 text-slate-400">
+                                          optional
+                                        </span>
+                                      )}
+                                      <p className="mt-0.5 text-slate-600">
+                                        {p.desc}
+                                      </p>
+                                    </li>
+                                  ))}
+                                </ul>
+                              </div>
+                            ) : null}
+
+                            <CodeExample
+                              label="Παράδειγμα curl"
+                              code={ep.curl}
+                              onCopy={() => copyText(ep.curl)}
+                            />
+                            <CodeExample
+                              label="Παράδειγμα απάντησης"
+                              code={ep.responseExample}
+                              onCopy={() => copyText(ep.responseExample)}
+                            />
+
+                            {ep.notes?.length ? (
+                              <ul className="list-inside list-disc space-y-0.5 text-xs text-slate-500">
+                                {ep.notes.map((n) => (
+                                  <li key={n}>{n}</li>
+                                ))}
+                              </ul>
+                            ) : null}
+
+                            <div className="flex flex-wrap gap-2">
+                              <button
+                                type="button"
+                                className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs hover:bg-slate-50"
+                                onClick={() => copyText(ep.path)}
+                              >
+                                <Copy className="h-3 w-3" />
+                                Copy path
+                              </button>
+                              <a
+                                href={ep.path}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs hover:bg-slate-50"
+                              >
+                                Άνοιγμα στο browser
+                              </a>
+                            </div>
+                          </div>
+                        ) : null}
+                      </li>
+                    );
+                  })}
                 </ul>
               </section>
             </div>
@@ -1182,6 +1360,48 @@ function StatusTile({
       <div className="mt-1">
         <Badge tone={tone}>{value}</Badge>
       </div>
+    </div>
+  );
+}
+
+function DocBlock({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-xl border border-slate-100 bg-white px-3 py-2">
+      <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+        {label}
+      </p>
+      <p className="mt-1 text-xs text-slate-700">{value}</p>
+    </div>
+  );
+}
+
+function CodeExample({
+  label,
+  code,
+  onCopy,
+}: {
+  label: string;
+  code: string;
+  onCopy: () => void;
+}) {
+  return (
+    <div>
+      <div className="mb-1.5 flex items-center justify-between gap-2">
+        <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+          {label}
+        </p>
+        <button
+          type="button"
+          className="inline-flex items-center gap-1 rounded-md border border-slate-200 bg-white px-2 py-0.5 text-[11px] hover:bg-slate-50"
+          onClick={onCopy}
+        >
+          <Copy className="h-3 w-3" />
+          Copy
+        </button>
+      </div>
+      <pre className="overflow-x-auto rounded-xl border border-slate-200 bg-[#0b1f33] px-3 py-3 font-mono text-[11px] leading-relaxed text-emerald-100">
+        {code}
+      </pre>
     </div>
   );
 }
