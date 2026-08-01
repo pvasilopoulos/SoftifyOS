@@ -23,6 +23,8 @@ import {
 import type { FormViewConfig, ListViewConfig } from "@/modules/entity-views/types";
 import { FormExperienceDesigner } from "@/modules/entity-views/form-designer";
 import { ListExperienceDesigner } from "@/modules/entity-views/list-designer";
+import type { DetailLayoutConfig } from "@/modules/entity-views/detail-tabs";
+import { DetailTabsPanel } from "./detail-tabs-panel";
 
 type FieldItem = {
   id: string;
@@ -64,7 +66,7 @@ type FormViewItem = {
   sortOrder: number;
 };
 
-type Tab = "fields" | "lists" | "forms";
+type Tab = "fields" | "lists" | "forms" | "detail";
 
 const FIELD_TYPES: Array<{ value: CustomFieldType; label: string }> = [
   { value: "TEXT", label: "Κείμενο" },
@@ -93,14 +95,17 @@ function parseOptionsText(raw: string): string[] {
 export function EntityViewsClient({
   initialFields,
   initialViews,
+  initialDetailLayouts,
 }: {
   initialFields: FieldItem[];
   initialViews: Record<string, { lists: ListViewItem[]; forms: FormViewItem[] }>;
+  initialDetailLayouts: Partial<Record<EntityModule, DetailLayoutConfig>>;
 }) {
   const [entity, setEntity] = useState<EntityModule>("CUSTOMERS");
   const [tab, setTab] = useState<Tab>("fields");
   const [fields, setFields] = useState(initialFields);
   const [views, setViews] = useState(initialViews);
+  const [detailLayouts, setDetailLayouts] = useState(initialDetailLayouts);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
@@ -190,12 +195,13 @@ export function EntityViewsClient({
         ))}
       </div>
 
-      <div className="inline-flex rounded-xl border border-slate-200 bg-slate-50 p-1">
+      <div className="inline-flex flex-wrap rounded-xl border border-slate-200 bg-slate-50 p-1">
         {(
           [
             ["fields", "Custom πεδία"],
             ["lists", "List Designer"],
             ["forms", "Form Designer"],
+            ["detail", "Detail tabs"],
           ] as const
         ).map(([id, label]) => (
           <button
@@ -399,6 +405,16 @@ export function EntityViewsClient({
               await refreshEntity();
             });
           }}
+        />
+      ) : null}
+
+      {tab === "detail" ? (
+        <DetailTabsPanel
+          entity={entity}
+          initialConfig={detailLayouts[entity] ?? null}
+          onSaved={(config) =>
+            setDetailLayouts((prev) => ({ ...prev, [entity]: config }))
+          }
         />
       ) : null}
     </div>

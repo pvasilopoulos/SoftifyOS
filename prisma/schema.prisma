@@ -67,6 +67,7 @@ model Tenant {
   customFieldDefinitions       CustomFieldDefinition[]
   entityListViews              EntityListView[]
   entityFormViews              EntityFormView[]
+  entityDetailLayouts          EntityDetailLayout[]
   scriptDefinitions            ScriptDefinition[]
   scriptSecrets                ScriptSecret[]
   scriptHttpAllowlist          ScriptHttpAllowlist[]
@@ -2063,6 +2064,23 @@ model EntityFormView {
   @@unique([tenantId, entity, code])
   @@index([tenantId, entity, isActive, sortOrder])
   @@map("entity_form_views")
+}
+
+/// Detail page layout per entity (tab order / visibility on 360 views)
+model EntityDetailLayout {
+  id         String       @id @default(cuid())
+  tenantId   String
+  entity     EntityModule
+  /// { tabs: [{ key, label?, visible }], defaultTab?: string }
+  configJson Json
+  createdAt  DateTime     @default(now())
+  updatedAt  DateTime     @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, entity])
+  @@index([tenantId, entity])
+  @@map("entity_detail_layouts")
 }
 
 // ─── Script Hooks Engine ────────────────────────────────────────────

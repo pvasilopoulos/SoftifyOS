@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useState, useTransition } from "react";
 import {
   Building2,
   FileText,
@@ -17,15 +17,14 @@ import { CustomerEditPanel } from "./customer-edit-panel";
 import { CustomerHierarchyClient } from "./customer-hierarchy-client";
 import type { CustomFieldDef } from "@/modules/entity-views/dynamic-ui";
 import type { FormViewConfig } from "@/modules/entity-views/types";
+import type {
+  DetailLayoutConfig,
+  DetailTabKey,
+} from "@/modules/entity-views/detail-tabs";
 
-type TabKey =
-  | "invoices"
-  | "orders"
-  | "profile"
-  | "branches"
-  | "activity";
+type TabKey = DetailTabKey;
 
-const TAB_LABEL: Record<TabKey, string> = {
+const FALLBACK_TAB_LABEL: Record<TabKey, string> = {
   invoices: "Παραστατικά",
   orders: "Παραγγελίες",
   profile: "Στοιχεία",
@@ -85,6 +84,7 @@ type Props = {
   formViews: FormViewOpt[];
   customFields: CustomFieldDef[];
   canWrite: boolean;
+  detailLayout: DetailLayoutConfig;
 };
 
 export function Customer360({
@@ -99,11 +99,28 @@ export function Customer360({
   formViews,
   customFields,
   canWrite,
+  detailLayout,
 }: Props) {
-  const [tab, setTab] = useState<TabKey>("invoices");
+  const visibleTabs = useMemo(
+    () => detailLayout.tabs.filter((t) => t.visible),
+    [detailLayout.tabs],
+  );
+  const initialTab =
+    (detailLayout.defaultTab &&
+    visibleTabs.some((t) => t.key === detailLayout.defaultTab)
+      ? detailLayout.defaultTab
+      : visibleTabs[0]?.key) ?? "invoices";
+
+  const [tab, setTab] = useState<TabKey>(initialTab);
   const [activities, setActivities] = useState(initialActivities);
   const [title, setTitle] = useState("");
   const [pending, startTransition] = useTransition();
+
+  useEffect(() => {
+    if (!visibleTabs.some((t) => t.key === tab) && visibleTabs[0]) {
+      setTab(visibleTabs[0].key);
+    }
+  }, [visibleTabs, tab]);
 
   const primaryBranch = useMemo(
     () => branches.find((b) => b.isPrimary) ?? branches[0] ?? null,
@@ -180,23 +197,23 @@ export function Customer360({
             aria-label="Περιοχές πελάτη"
             className="flex flex-wrap gap-1.5 border-b border-slate-200 pb-2"
           >
-            {(Object.keys(TAB_LABEL) as TabKey[]).map((key) => (
+            {visibleTabs.map((t) => (
               <button
-                key={key}
+                key={t.key}
                 type="button"
                 role="tab"
-                aria-selected={tab === key}
-                onClick={() => setTab(key)}
+                aria-selected={tab === t.key}
+                onClick={() => setTab(t.key)}
                 className={`rounded-lg px-3 py-1.5 text-sm font-medium transition ${
-                  tab === key
+                  tab === t.key
                     ? "bg-slate-900 text-white"
                     : "bg-slate-100 text-slate-700 hover:bg-slate-200"
                 }`}
               >
-                {TAB_LABEL[key]}
-                {counts[key] > 0 ? (
+                {t.label || FALLBACK_TAB_LABEL[t.key]}
+                {counts[t.key] > 0 ? (
                   <span className="ml-1.5 text-xs opacity-70">
-                    {counts[key]}
+                    {counts[t.key]}
                   </span>
                 ) : null}
               </button>

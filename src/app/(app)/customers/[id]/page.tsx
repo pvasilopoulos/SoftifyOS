@@ -13,6 +13,7 @@ import {
 import { parseCustomFields } from "@/modules/entity-views/types";
 import { Customer360 } from "./customer-360";
 import { toNumber } from "@/modules/sales/invoice-utils";
+import { getEntityDetailLayout } from "@/modules/entity-views/detail-tabs";
 
 export const dynamic = "force-dynamic";
 
@@ -38,52 +39,60 @@ export default async function CustomerDetailPage({
   if (!session) redirect("/login");
 
   const { id } = await params;
-  const [customer, formViews, customFields, invoices, orders, activities] =
-    await Promise.all([
-      prisma.customer.findFirst({
-        where: { id, tenantId: session.tenantId },
-        include: {
-          branches: {
-            orderBy: [{ isPrimary: "desc" }, { name: "asc" }],
-            include: {
-              spaces: { orderBy: [{ type: "asc" }, { name: "asc" }] },
-            },
+  const [
+    customer,
+    formViews,
+    customFields,
+    invoices,
+    orders,
+    activities,
+    detailLayout,
+  ] = await Promise.all([
+    prisma.customer.findFirst({
+      where: { id, tenantId: session.tenantId },
+      include: {
+        branches: {
+          orderBy: [{ isPrimary: "desc" }, { name: "asc" }],
+          include: {
+            spaces: { orderBy: [{ type: "asc" }, { name: "asc" }] },
           },
         },
-      }),
-      listEntityFormViews(prisma, session.tenantId, "CUSTOMERS", true),
-      listCustomFields(prisma, session.tenantId, "CUSTOMERS", true),
-      prisma.invoice.findMany({
-        where: { tenantId: session.tenantId, customerId: id },
-        orderBy: { createdAt: "desc" },
-        take: 20,
-        select: {
-          id: true,
-          number: true,
-          status: true,
-          total: true,
-          paidAmount: true,
-          issuedAt: true,
-        },
-      }),
-      prisma.order.findMany({
-        where: { tenantId: session.tenantId, customerId: id },
-        orderBy: { createdAt: "desc" },
-        take: 20,
-        select: {
-          id: true,
-          number: true,
-          status: true,
-          kind: true,
-          total: true,
-        },
-      }),
-      prisma.crmActivity.findMany({
-        where: { tenantId: session.tenantId, customerId: id },
-        orderBy: { createdAt: "desc" },
-        take: 30,
-      }),
-    ]);
+      },
+    }),
+    listEntityFormViews(prisma, session.tenantId, "CUSTOMERS", true),
+    listCustomFields(prisma, session.tenantId, "CUSTOMERS", true),
+    prisma.invoice.findMany({
+      where: { tenantId: session.tenantId, customerId: id },
+      orderBy: { createdAt: "desc" },
+      take: 20,
+      select: {
+        id: true,
+        number: true,
+        status: true,
+        total: true,
+        paidAmount: true,
+        issuedAt: true,
+      },
+    }),
+    prisma.order.findMany({
+      where: { tenantId: session.tenantId, customerId: id },
+      orderBy: { createdAt: "desc" },
+      take: 20,
+      select: {
+        id: true,
+        number: true,
+        status: true,
+        kind: true,
+        total: true,
+      },
+    }),
+    prisma.crmActivity.findMany({
+      where: { tenantId: session.tenantId, customerId: id },
+      orderBy: { createdAt: "desc" },
+      take: 30,
+    }),
+    getEntityDetailLayout(prisma, session.tenantId, "CUSTOMERS"),
+  ]);
 
   if (!customer) notFound();
 
@@ -150,6 +159,7 @@ export default async function CustomerDetailPage({
         canWrite={session.role !== "VIEWER"}
         openBalance={openBalance}
         openInvoices={openInvoices.length}
+        detailLayout={detailLayout}
         customer={{
           code: customer.code,
           name: customer.name,
