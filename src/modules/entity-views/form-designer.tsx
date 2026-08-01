@@ -228,16 +228,80 @@ function blockLabel(b: FormBlock): string {
   }
 }
 
+function walkNestedBlocks(blocks: FormBlock[], visit: (b: FormBlock) => void) {
+  for (const b of blocks) {
+    visit(b);
+    switch (b.type) {
+      case "section":
+        walkNestedBlocks(b.children, visit);
+        break;
+      case "tabs":
+        for (const t of b.tabs) walkNestedBlocks(t.children, visit);
+        break;
+      case "columns":
+        for (const c of b.columns) walkNestedBlocks(c.children, visit);
+        break;
+      case "accordion":
+        for (const it of b.items) walkNestedBlocks(it.children, visit);
+        break;
+      default:
+        break;
+    }
+  }
+}
+
+/** Nested blocks + field refs inside a block (excludes the block itself). */
+function countNestedContent(block: FormBlock): number {
+  let n = 0;
+  const tally = (blocks: FormBlock[]) => {
+    walkNestedBlocks(blocks, (b) => {
+      n += 1;
+      if (b.type === "fields") n += b.fields.length;
+    });
+  };
+  switch (block.type) {
+    case "section":
+      tally(block.children);
+      break;
+    case "tabs":
+      for (const t of block.tabs) tally(t.children);
+      break;
+    case "columns":
+      for (const c of block.columns) tally(c.children);
+      break;
+    case "accordion":
+      for (const it of block.items) tally(it.children);
+      break;
+    case "fields":
+      return block.fields.length;
+    default:
+      return 0;
+  }
+  return n;
+}
+
+function confirmRemoveBlock(block: FormBlock): boolean {
+  const nested = countNestedContent(block);
+  if (nested === 0) return true;
+  return window.confirm(
+    `Να αφαιρεθεί «${blockLabel(block)}» και τα ${nested} εσωτερικά στοιχεία;`,
+  );
+}
+
 function StructureTree({
   blocks,
   depth,
   selection,
   onSelect,
+  onRemoveBlock,
+  onRemoveField,
 }: {
   blocks: FormBlock[];
   depth: number;
   selection: Selection;
   onSelect: (s: Selection) => void;
+  onRemoveBlock: (id: string) => void;
+  onRemoveField: (blockId: string, fieldId: string) => void;
 }) {
   return (
     <ul className={cn("space-y-0.5", depth > 0 && "ml-3 border-l border-slate-100 pl-2")}>
@@ -247,36 +311,66 @@ function StructureTree({
           (selection.kind === "field" && selection.blockId === b.id);
         return (
           <li key={b.id}>
-            <button
-              type="button"
-              onClick={() => onSelect({ kind: "block", id: b.id })}
+            <div
               className={cn(
-                "flex w-full items-center gap-1.5 rounded-lg px-2 py-1 text-left text-[11px]",
+                "flex w-full items-center gap-0.5 rounded-lg",
                 active
                   ? "bg-teal-50 font-medium text-teal-900"
                   : "text-slate-600 hover:bg-slate-50",
               )}
             >
-              <span className="truncate text-slate-400">{b.type}</span>
-              <span className="truncate">{blockLabel(b)}</span>
-            </button>
+              <button
+                type="button"
+                onClick={() => onSelect({ kind: "block", id: b.id })}
+                className="flex min-w-0 flex-1 items-center gap-1.5 px-2 py-1 text-left text-[11px]"
+              >
+                <span className="truncate text-slate-400">{b.type}</span>
+                <span className="truncate">{blockLabel(b)}</span>
+              </button>
+              <button
+                type="button"
+                title="Αφαίρεση"
+                aria-label={`Αφαίρεση ${blockLabel(b)}`}
+                className="mr-1 shrink-0 rounded p-1 text-rose-500 opacity-70 hover:bg-rose-50 hover:opacity-100"
+                onClick={() => onRemoveBlock(b.id)}
+              >
+                <Trash2 size={11} />
+              </button>
+            </div>
             {b.type === "fields"
               ? b.fields.map((f) => (
-                  <button
+                  <div
                     key={f.id}
-                    type="button"
-                    onClick={() =>
-                      onSelect({ kind: "field", blockId: b.id, fieldId: f.id })
-                    }
                     className={cn(
-                      "ml-3 flex w-[calc(100%-0.75rem)] truncate rounded-lg px-2 py-0.5 text-left text-[10px]",
+                      "ml-3 flex w-[calc(100%-0.75rem)] items-center gap-0.5 rounded-lg",
                       selection.kind === "field" && selection.fieldId === f.id
                         ? "bg-teal-100 text-teal-900"
                         : "text-slate-500 hover:bg-slate-50",
                     )}
                   >
-                    · {f.label || f.key}
-                  </button>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        onSelect({
+                          kind: "field",
+                          blockId: b.id,
+                          fieldId: f.id,
+                        })
+                      }
+                      className="min-w-0 flex-1 truncate px-2 py-0.5 text-left text-[10px]"
+                    >
+                      · {f.label || f.key}
+                    </button>
+                    <button
+                      type="button"
+                      title="Αφαίρεση πεδίου"
+                      aria-label={`Αφαίρεση ${f.label || f.key}`}
+                      className="mr-1 shrink-0 rounded p-0.5 text-rose-500 opacity-70 hover:bg-rose-50 hover:opacity-100"
+                      onClick={() => onRemoveField(b.id, f.id)}
+                    >
+                      <Trash2 size={10} />
+                    </button>
+                  </div>
                 ))
               : null}
             {b.type === "section" ? (
@@ -285,6 +379,8 @@ function StructureTree({
                 depth={depth + 1}
                 selection={selection}
                 onSelect={onSelect}
+                onRemoveBlock={onRemoveBlock}
+                onRemoveField={onRemoveField}
               />
             ) : null}
             {b.type === "tabs"
@@ -298,6 +394,8 @@ function StructureTree({
                       depth={depth + 1}
                       selection={selection}
                       onSelect={onSelect}
+                      onRemoveBlock={onRemoveBlock}
+                      onRemoveField={onRemoveField}
                     />
                   </div>
                 ))
@@ -313,6 +411,8 @@ function StructureTree({
                       depth={depth + 1}
                       selection={selection}
                       onSelect={onSelect}
+                      onRemoveBlock={onRemoveBlock}
+                      onRemoveField={onRemoveField}
                     />
                   </div>
                 ))
@@ -328,6 +428,8 @@ function StructureTree({
                       depth={depth + 1}
                       selection={selection}
                       onSelect={onSelect}
+                      onRemoveBlock={onRemoveBlock}
+                      onRemoveField={onRemoveField}
                     />
                   </div>
                 ))
@@ -615,6 +717,43 @@ export function FormExperienceDesigner({
     setRoot(mapBlocks(draft.page.root, (b) => (b.id === id ? patcher(b) : b)));
   };
 
+  const selectionStillValid = (
+    nextRoot: FormBlock[],
+    sel: Selection,
+  ): boolean => {
+    if (sel.kind === "page") return true;
+    if (sel.kind === "block") return !!findBlock(nextRoot, sel.id);
+    const block = findBlock(nextRoot, sel.blockId);
+    if (!block || block.type !== "fields") return false;
+    return block.fields.some((f) => f.id === sel.fieldId);
+  };
+
+  const removeBlockById = (id: string) => {
+    const block = findBlock(draft.page.root, id);
+    if (!block) return;
+    if (!confirmRemoveBlock(block)) return;
+    const next = removeBlock(draft.page.root, id);
+    setRoot(next);
+    if (!selectionStillValid(next, selection)) {
+      setSelection({ kind: "page" });
+    }
+  };
+
+  const removeFieldById = (blockId: string, fieldId: string) => {
+    const next = mapBlocks(draft.page.root, (b) => {
+      if (b.type !== "fields" || b.id !== blockId) return b;
+      return { ...b, fields: b.fields.filter((f) => f.id !== fieldId) };
+    });
+    setRoot(next);
+    if (
+      selection.kind === "field" &&
+      selection.blockId === blockId &&
+      selection.fieldId === fieldId
+    ) {
+      setSelection({ kind: "block", id: blockId });
+    }
+  };
+
   const patchField = (
     blockId: string,
     fieldId: string,
@@ -859,30 +998,83 @@ export function FormExperienceDesigner({
               </div>
             </div>
 
-            <div className="rounded-xl border border-slate-100 bg-white p-4 shadow-sm">
-              {selected ? (
-                <FormExperienceRenderer
-                  config={draft}
-                  builtins={builtins}
-                  customDefs={customDefs}
-                  values={previewValues}
-                  customValues={previewCustom}
-                  onSystemChange={(key, value) =>
-                    setPreviewValues((v) => ({ ...v, [key]: value }))
-                  }
-                  onCustomChange={(key, value) =>
-                    setPreviewCustom((v) => ({
-                      ...v,
-                      [key]: Array.isArray(value) ? value.join(",") : value,
-                    }))
-                  }
-                  modeOverride={previewMode}
-                  compact
-                />
-              ) : (
+            <div className="space-y-3 rounded-xl border border-slate-100 bg-white p-4 shadow-sm">
+              {!selected ? (
                 <p className="text-sm text-slate-400">
                   Επιλέξτε ή δημιουργήστε μια προβολή φόρμας.
                 </p>
+              ) : draft.page.root.length === 0 ? (
+                <p className="rounded-lg border border-dashed border-slate-200 px-3 py-8 text-center text-sm text-slate-400">
+                  Κενός καμβάς — προσθέστε περιοχή ή πεδία από τη βιβλιοθήκη.
+                </p>
+              ) : (
+                draft.page.root.map((block) => {
+                  const selectedHere =
+                    (selection.kind === "block" &&
+                      !!findBlock([block], selection.id)) ||
+                    (selection.kind === "field" &&
+                      !!findBlock([block], selection.blockId));
+                  return (
+                    <div
+                      key={block.id}
+                      className={cn(
+                        "rounded-xl border bg-slate-50/40",
+                        selectedHere
+                          ? "border-teal-400 ring-1 ring-teal-200"
+                          : "border-slate-200",
+                      )}
+                    >
+                      <div className="flex items-center gap-2 border-b border-slate-200/80 px-2 py-1.5">
+                        <button
+                          type="button"
+                          className="min-w-0 flex-1 truncate text-left text-[11px] font-medium text-slate-600 hover:text-teal-800"
+                          onClick={() =>
+                            setSelection({ kind: "block", id: block.id })
+                          }
+                        >
+                          <span className="text-slate-400">{block.type}</span>
+                          {" · "}
+                          {blockLabel(block)}
+                        </button>
+                        <button
+                          type="button"
+                          title="Αφαίρεση από τον καμβά"
+                          aria-label={`Αφαίρεση ${blockLabel(block)}`}
+                          className="inline-flex items-center gap-1 rounded-md px-1.5 py-1 text-[11px] font-medium text-rose-600 hover:bg-rose-50"
+                          onClick={() => removeBlockById(block.id)}
+                        >
+                          <Trash2 size={12} />
+                          Αφαίρεση
+                        </button>
+                      </div>
+                      <div className="p-3">
+                        <FormExperienceRenderer
+                          config={{
+                            ...draft,
+                            page: { ...draft.page, root: [block] },
+                          }}
+                          builtins={builtins}
+                          customDefs={customDefs}
+                          values={previewValues}
+                          customValues={previewCustom}
+                          onSystemChange={(key, value) =>
+                            setPreviewValues((v) => ({ ...v, [key]: value }))
+                          }
+                          onCustomChange={(key, value) =>
+                            setPreviewCustom((v) => ({
+                              ...v,
+                              [key]: Array.isArray(value)
+                                ? value.join(",")
+                                : value,
+                            }))
+                          }
+                          modeOverride={previewMode}
+                          compact
+                        />
+                      </div>
+                    </div>
+                  );
+                })
               )}
             </div>
 
@@ -904,6 +1096,8 @@ export function FormExperienceDesigner({
                 depth={0}
                 selection={selection}
                 onSelect={setSelection}
+                onRemoveBlock={removeBlockById}
+                onRemoveField={removeFieldById}
               />
               {draft.page.root.length === 0 ? (
                 <p className="text-[11px] text-slate-400">Κενή δομή</p>
@@ -1044,10 +1238,7 @@ export function FormExperienceDesigner({
                 size="sm"
                 variant="ghost"
                 className="text-rose-600"
-                onClick={() => {
-                  setRoot(removeBlock(draft.page.root, selectedBlock.id));
-                  setSelection({ kind: "page" });
-                }}
+                onClick={() => removeBlockById(selectedBlock.id)}
               >
                 <Trash2 size={12} /> Αφαίρεση
               </Button>
@@ -1134,10 +1325,7 @@ export function FormExperienceDesigner({
                 size="sm"
                 variant="ghost"
                 className="text-rose-600"
-                onClick={() => {
-                  setRoot(removeBlock(draft.page.root, selectedBlock.id));
-                  setSelection({ kind: "page" });
-                }}
+                onClick={() => removeBlockById(selectedBlock.id)}
               >
                 <Trash2 size={12} /> Αφαίρεση
               </Button>
@@ -1171,10 +1359,7 @@ export function FormExperienceDesigner({
                 size="sm"
                 variant="ghost"
                 className="text-rose-600"
-                onClick={() => {
-                  setRoot(removeBlock(draft.page.root, selectedBlock.id));
-                  setSelection({ kind: "page" });
-                }}
+                onClick={() => removeBlockById(selectedBlock.id)}
               >
                 <Trash2 size={12} /> Αφαίρεση
               </Button>
@@ -1239,7 +1424,7 @@ export function FormExperienceDesigner({
                       type="button"
                       className="text-rose-600"
                       onClick={() =>
-                        setRoot(removeBlock(draft.page.root, f.id))
+                        removeFieldById(selectedBlock.id, f.id)
                       }
                     >
                       <Trash2 size={12} />
@@ -1251,10 +1436,7 @@ export function FormExperienceDesigner({
                 size="sm"
                 variant="ghost"
                 className="text-rose-600"
-                onClick={() => {
-                  setRoot(removeBlock(draft.page.root, selectedBlock.id));
-                  setSelection({ kind: "page" });
-                }}
+                onClick={() => removeBlockById(selectedBlock.id)}
               >
                 <Trash2 size={12} /> Αφαίρεση block
               </Button>
@@ -1400,10 +1582,9 @@ export function FormExperienceDesigner({
                 size="sm"
                 variant="ghost"
                 className="text-rose-600"
-                onClick={() => {
-                  setRoot(removeBlock(draft.page.root, selectedField.id));
-                  setSelection({ kind: "block", id: selection.blockId });
-                }}
+                onClick={() =>
+                  removeFieldById(selection.blockId, selectedField.id)
+                }
               >
                 <Trash2 size={12} /> Αφαίρεση πεδίου
               </Button>
@@ -1446,10 +1627,7 @@ export function FormExperienceDesigner({
                 size="sm"
                 variant="ghost"
                 className="text-rose-600"
-                onClick={() => {
-                  setRoot(removeBlock(draft.page.root, selectedBlock.id));
-                  setSelection({ kind: "page" });
-                }}
+                onClick={() => removeBlockById(selectedBlock.id)}
               >
                 <Trash2 size={12} /> Αφαίρεση
               </Button>
@@ -1473,10 +1651,7 @@ export function FormExperienceDesigner({
                 size="sm"
                 variant="ghost"
                 className="text-rose-600"
-                onClick={() => {
-                  setRoot(removeBlock(draft.page.root, selectedBlock.id));
-                  setSelection({ kind: "page" });
-                }}
+                onClick={() => removeBlockById(selectedBlock.id)}
               >
                 <Trash2 size={12} /> Αφαίρεση
               </Button>
@@ -1528,10 +1703,7 @@ export function FormExperienceDesigner({
                 size="sm"
                 variant="ghost"
                 className="text-rose-600"
-                onClick={() => {
-                  setRoot(removeBlock(draft.page.root, selectedBlock.id));
-                  setSelection({ kind: "page" });
-                }}
+                onClick={() => removeBlockById(selectedBlock.id)}
               >
                 <Trash2 size={12} /> Αφαίρεση
               </Button>
@@ -1589,10 +1761,7 @@ export function FormExperienceDesigner({
                 size="sm"
                 variant="ghost"
                 className="text-rose-600"
-                onClick={() => {
-                  setRoot(removeBlock(draft.page.root, selectedBlock.id));
-                  setSelection({ kind: "page" });
-                }}
+                onClick={() => removeBlockById(selectedBlock.id)}
               >
                 <Trash2 size={12} /> Αφαίρεση
               </Button>
