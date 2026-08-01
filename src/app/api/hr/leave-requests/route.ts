@@ -4,12 +4,11 @@ import { prisma } from "@/server/db";
 import { getSession } from "@/platform/auth/session";
 import { writeAuditEvent } from "@/platform/tenancy/audit";
 import { getErrorMessage } from "@/shared/lib/safe";
-import { employeeUpsertSchema } from "@/modules/hr/schemas";
+import { leaveRequestCreateSchema } from "@/modules/hr/schemas";
 import {
-  createEmployee,
+  createLeaveRequest,
   HrError,
-  listEmployees,
-  serializeEmployee,
+  listLeaveRequests,
 } from "@/modules/hr/service";
 
 export const dynamic = "force-dynamic";
@@ -20,10 +19,19 @@ export async function GET(request: NextRequest) {
     if (!session) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
-    const q = request.nextUrl.searchParams.get("q")?.trim() || undefined;
     const status = request.nextUrl.searchParams.get("status") || undefined;
-    const items = await listEmployees(prisma, session.tenantId, { q, status });
-    return NextResponse.json({ items: items.map(serializeEmployee) });
+    const items = await listLeaveRequests(prisma, session.tenantId, { status });
+    return NextResponse.json({
+      items: items.map((r) => ({
+        ...r,
+        days: Number(r.days),
+        fromDate: r.fromDate.toISOString(),
+        toDate: r.toDate.toISOString(),
+        decidedAt: r.decidedAt?.toISOString() ?? null,
+        createdAt: r.createdAt.toISOString(),
+        updatedAt: r.updatedAt.toISOString(),
+      })),
+    });
   } catch (error) {
     return NextResponse.json(
       { error: getErrorMessage(error, "Load failed") },
@@ -41,21 +49,31 @@ export async function POST(request: Request) {
     if (session.role === "VIEWER") {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
-    const body = employeeUpsertSchema.parse(await request.json());
-    const item = await createEmployee(prisma, {
+    const body = leaveRequestCreateSchema.parse(await request.json());
+    const item = await createLeaveRequest(prisma, {
       tenantId: session.tenantId,
       data: body,
     });
     await writeAuditEvent({
       tenantId: session.tenantId,
       userId: session.sub,
-      action: "employee.create",
-      entity: "employee",
+      action: "leave_request.create",
+      entity: "leave_request",
       entityId: item.id,
-      meta: { code: item.code },
+      meta: { employeeId: item.employeeId, leaveTypeId: item.leaveTypeId },
     });
     return NextResponse.json(
-      { item: serializeEmployee({ ...item, site: null }) },
+      {
+        item: {
+          ...item,
+          days: Number(item.days),
+          fromDate: item.fromDate.toISOString(),
+          toDate: item.toDate.toISOString(),
+          decidedAt: item.decidedAt?.toISOString() ?? null,
+          createdAt: item.createdAt.toISOString(),
+          updatedAt: item.updatedAt.toISOString(),
+        },
+      },
       { status: 201 },
     );
   } catch (error) {

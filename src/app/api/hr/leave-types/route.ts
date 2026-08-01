@@ -1,29 +1,26 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/server/db";
 import { getSession } from "@/platform/auth/session";
 import { writeAuditEvent } from "@/platform/tenancy/audit";
 import { getErrorMessage } from "@/shared/lib/safe";
-import { employeeUpsertSchema } from "@/modules/hr/schemas";
+import { leaveTypeUpsertSchema } from "@/modules/hr/schemas";
 import {
-  createEmployee,
+  createLeaveType,
   HrError,
-  listEmployees,
-  serializeEmployee,
+  listLeaveTypes,
 } from "@/modules/hr/service";
 
 export const dynamic = "force-dynamic";
 
-export async function GET(request: NextRequest) {
+export async function GET() {
   try {
     const session = await getSession();
     if (!session) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
-    const q = request.nextUrl.searchParams.get("q")?.trim() || undefined;
-    const status = request.nextUrl.searchParams.get("status") || undefined;
-    const items = await listEmployees(prisma, session.tenantId, { q, status });
-    return NextResponse.json({ items: items.map(serializeEmployee) });
+    const items = await listLeaveTypes(prisma, session.tenantId);
+    return NextResponse.json({ items });
   } catch (error) {
     return NextResponse.json(
       { error: getErrorMessage(error, "Load failed") },
@@ -41,23 +38,20 @@ export async function POST(request: Request) {
     if (session.role === "VIEWER") {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
-    const body = employeeUpsertSchema.parse(await request.json());
-    const item = await createEmployee(prisma, {
+    const body = leaveTypeUpsertSchema.parse(await request.json());
+    const item = await createLeaveType(prisma, {
       tenantId: session.tenantId,
       data: body,
     });
     await writeAuditEvent({
       tenantId: session.tenantId,
       userId: session.sub,
-      action: "employee.create",
-      entity: "employee",
+      action: "leave_type.create",
+      entity: "leave_type",
       entityId: item.id,
       meta: { code: item.code },
     });
-    return NextResponse.json(
-      { item: serializeEmployee({ ...item, site: null }) },
-      { status: 201 },
-    );
+    return NextResponse.json({ item }, { status: 201 });
   } catch (error) {
     if (error instanceof z.ZodError) {
       return NextResponse.json({ error: "Μη έγκυρα δεδομένα" }, { status: 400 });

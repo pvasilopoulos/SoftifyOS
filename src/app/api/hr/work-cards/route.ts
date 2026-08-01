@@ -1,29 +1,29 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/server/db";
 import { getSession } from "@/platform/auth/session";
 import { writeAuditEvent } from "@/platform/tenancy/audit";
 import { getErrorMessage } from "@/shared/lib/safe";
-import { employeeUpsertSchema } from "@/modules/hr/schemas";
-import {
-  createEmployee,
-  HrError,
-  listEmployees,
-  serializeEmployee,
-} from "@/modules/hr/service";
+import { workCardCreateSchema } from "@/modules/hr/schemas";
+import { createWorkCard, HrError, listWorkCards } from "@/modules/hr/service";
 
 export const dynamic = "force-dynamic";
 
-export async function GET(request: NextRequest) {
+export async function GET() {
   try {
     const session = await getSession();
     if (!session) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
-    const q = request.nextUrl.searchParams.get("q")?.trim() || undefined;
-    const status = request.nextUrl.searchParams.get("status") || undefined;
-    const items = await listEmployees(prisma, session.tenantId, { q, status });
-    return NextResponse.json({ items: items.map(serializeEmployee) });
+    const items = await listWorkCards(prisma, session.tenantId);
+    return NextResponse.json({
+      items: items.map((c) => ({
+        ...c,
+        issuedAt: c.issuedAt.toISOString(),
+        createdAt: c.createdAt.toISOString(),
+        updatedAt: c.updatedAt.toISOString(),
+      })),
+    });
   } catch (error) {
     return NextResponse.json(
       { error: getErrorMessage(error, "Load failed") },
@@ -41,21 +41,28 @@ export async function POST(request: Request) {
     if (session.role === "VIEWER") {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
-    const body = employeeUpsertSchema.parse(await request.json());
-    const item = await createEmployee(prisma, {
+    const body = workCardCreateSchema.parse(await request.json());
+    const item = await createWorkCard(prisma, {
       tenantId: session.tenantId,
       data: body,
     });
     await writeAuditEvent({
       tenantId: session.tenantId,
       userId: session.sub,
-      action: "employee.create",
-      entity: "employee",
+      action: "work_card.create",
+      entity: "work_card",
       entityId: item.id,
-      meta: { code: item.code },
+      meta: { cardNumber: item.cardNumber, employeeId: item.employeeId },
     });
     return NextResponse.json(
-      { item: serializeEmployee({ ...item, site: null }) },
+      {
+        item: {
+          ...item,
+          issuedAt: item.issuedAt.toISOString(),
+          createdAt: item.createdAt.toISOString(),
+          updatedAt: item.updatedAt.toISOString(),
+        },
+      },
       { status: 201 },
     );
   } catch (error) {

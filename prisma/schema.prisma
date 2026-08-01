@@ -79,6 +79,13 @@ model Tenant {
   deliveryNotes                DeliveryNote[]
   myDataSubmissions            MyDataSubmission[]
   employees                    Employee[]
+  leaveTypes                   LeaveType[]
+  leaveRequests                LeaveRequest[]
+  workCards                    WorkCard[]
+  workCardEvents               WorkCardEvent[]
+  erganiSubmissions            ErganiSubmission[]
+  payrollPeriods               PayrollPeriod[]
+  payrollLines                 PayrollLine[]
   crmLeads                     CrmLead[]
   crmActivities               CrmActivity[]
   savedFilters                 SavedFilter[]
@@ -524,30 +531,256 @@ model MyDataSubmission {
 enum EmployeeStatus {
   ACTIVE
   INACTIVE
+  TERMINATED
 }
 
-model Employee {
-  id         String         @id @default(cuid())
-  tenantId   String
-  code       String
-  firstName  String
-  lastName   String
-  email      String?
-  phone      String?
-  title      String?
-  department String?
-  hireDate   DateTime?
-  status     EmployeeStatus @default(ACTIVE)
-  notes      String?
-  createdAt  DateTime       @default(now())
-  updatedAt  DateTime       @updatedAt
+enum LeaveRequestStatus {
+  DRAFT
+  PENDING
+  APPROVED
+  REJECTED
+  CANCELLED
+}
 
-  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+enum WorkCardStatus {
+  ACTIVE
+  INACTIVE
+  LOST
+}
+
+enum WorkCardEventType {
+  CLOCK_IN
+  CLOCK_OUT
+  BREAK_START
+  BREAK_END
+}
+
+enum WorkCardEventSource {
+  MANUAL
+  CARD
+  APP
+}
+
+enum ErganiSubmissionStatus {
+  PENDING
+  SENT
+  ACCEPTED
+  REJECTED
+  CANCELLED
+}
+
+enum PayrollPeriodStatus {
+  DRAFT
+  CLOSED
+}
+
+/// Εργαζόμενος — ελληνικό HR master (ΑΦΜ/ΑΜΚΑ/ΕΦΚΑ, σύμβαση)
+model Employee {
+  id               String         @id @default(cuid())
+  tenantId         String
+  code             String
+  firstName        String
+  lastName         String
+  email            String?
+  phone            String?
+  title            String?
+  department       String?
+  /// ΑΦΜ
+  vatNumber        String?
+  /// ΑΜΚΑ
+  amka             String?
+  /// ΑΜΑ ΕΦΚΑ
+  ama              String?
+  iban             String?
+  birthDate        DateTime?
+  address          String?
+  city             String?
+  postalCode       String?
+  nationality      String         @default("GR")
+  /// INDEFINITE | FIXED | PART_TIME | SEASONAL | INTERNSHIP
+  contractType     String         @default("INDEFINITE")
+  specialty        String?
+  weeklyHours      Decimal?       @db.Decimal(5, 2)
+  siteId           String?
+  hireDate         DateTime?
+  terminationDate  DateTime?
+  erganiEmployeeId String?
+  status           EmployeeStatus @default(ACTIVE)
+  notes            String?
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+
+  tenant          Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  site            Site?              @relation(fields: [siteId], references: [id], onDelete: SetNull)
+  leaveRequests   LeaveRequest[]
+  workCards       WorkCard[]
+  workCardEvents  WorkCardEvent[]
+  payrollLines    PayrollLine[]
 
   @@unique([tenantId, code])
   @@index([tenantId, lastName, firstName])
   @@index([tenantId, status, createdAt(sort: Desc)])
+  @@index([tenantId, vatNumber])
+  @@index([tenantId, siteId])
   @@map("employees")
+}
+
+model LeaveType {
+  id              String   @id @default(cuid())
+  tenantId        String
+  code            String
+  name            String
+  daysPerYear     Int      @default(20)
+  isPaid          Boolean  @default(true)
+  isSystem        Boolean  @default(false)
+  isActive        Boolean  @default(true)
+  sortOrder       Int      @default(0)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  tenant   Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  requests LeaveRequest[]
+
+  @@unique([tenantId, code])
+  @@index([tenantId, isActive, sortOrder])
+  @@map("leave_types")
+}
+
+model LeaveRequest {
+  id          String             @id @default(cuid())
+  tenantId    String
+  employeeId  String
+  leaveTypeId String
+  fromDate    DateTime
+  toDate      DateTime
+  days        Decimal            @db.Decimal(6, 2)
+  status      LeaveRequestStatus @default(PENDING)
+  notes       String?
+  decidedAt   DateTime?
+  createdAt   DateTime           @default(now())
+  updatedAt   DateTime           @updatedAt
+
+  tenant    Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  employee  Employee  @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  leaveType LeaveType @relation(fields: [leaveTypeId], references: [id], onDelete: Restrict)
+
+  @@index([tenantId, status, fromDate(sort: Desc)])
+  @@index([tenantId, employeeId, fromDate(sort: Desc)])
+  @@map("leave_requests")
+}
+
+/// Ψηφιακή κάρτα εργασίας (φυσική/εικονική κάρτα εργαζομένου)
+model WorkCard {
+  id         String         @id @default(cuid())
+  tenantId   String
+  employeeId String
+  cardNumber String
+  status     WorkCardStatus @default(ACTIVE)
+  issuedAt   DateTime       @default(now())
+  notes      String?
+  createdAt  DateTime       @default(now())
+  updatedAt  DateTime       @updatedAt
+
+  tenant   Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  employee Employee        @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  events   WorkCardEvent[]
+
+  @@unique([tenantId, cardNumber])
+  @@index([tenantId, employeeId, status])
+  @@map("work_cards")
+}
+
+/// Χτύπημα κάρτας / παρουσία
+model WorkCardEvent {
+  id           String              @id @default(cuid())
+  tenantId     String
+  employeeId   String
+  workCardId   String?
+  type         WorkCardEventType
+  source       WorkCardEventSource @default(MANUAL)
+  occurredAt   DateTime            @default(now())
+  siteId       String?
+  note         String?
+  erganiStatus ErganiSubmissionStatus @default(PENDING)
+  createdAt    DateTime            @default(now())
+
+  tenant   Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  employee Employee  @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  workCard WorkCard? @relation(fields: [workCardId], references: [id], onDelete: SetNull)
+  site     Site?     @relation(fields: [siteId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, occurredAt(sort: Desc)])
+  @@index([tenantId, employeeId, occurredAt(sort: Desc)])
+  @@index([tenantId, erganiStatus, occurredAt(sort: Desc)])
+  @@map("work_card_events")
+}
+
+/// Ουρά δηλώσεων Εργάνη / Ψηφιακή Κάρτα (simulator έως live credentials)
+model ErganiSubmission {
+  id           String                 @id @default(cuid())
+  tenantId     String
+  entityType   String
+  entityId     String
+  eventKind    String
+  status       ErganiSubmissionStatus @default(PENDING)
+  externalRef  String?
+  payload      Json?
+  attempts     Int                    @default(0)
+  lastError    String?
+  processedAt  DateTime?
+  createdAt    DateTime               @default(now())
+  updatedAt    DateTime               @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, status, createdAt(sort: Desc)])
+  @@index([tenantId, entityType, entityId])
+  @@map("ergani_submissions")
+}
+
+model PayrollPeriod {
+  id        String              @id @default(cuid())
+  tenantId  String
+  code      String
+  year      Int
+  month     Int
+  status    PayrollPeriodStatus @default(DRAFT)
+  fromDate  DateTime
+  toDate    DateTime
+  notes     String?
+  createdAt DateTime            @default(now())
+  updatedAt DateTime            @updatedAt
+
+  tenant Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  lines  PayrollLine[]
+
+  @@unique([tenantId, year, month])
+  @@unique([tenantId, code])
+  @@index([tenantId, status, year, month])
+  @@map("payroll_periods")
+}
+
+model PayrollLine {
+  id           String   @id @default(cuid())
+  tenantId     String
+  periodId     String
+  employeeId   String
+  gross        Decimal  @db.Decimal(14, 2)
+  employeeEfka Decimal  @default(0) @db.Decimal(14, 2)
+  employerEfka Decimal  @default(0) @db.Decimal(14, 2)
+  tax          Decimal  @default(0) @db.Decimal(14, 2)
+  net          Decimal  @db.Decimal(14, 2)
+  notes        String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  tenant   Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  period   PayrollPeriod @relation(fields: [periodId], references: [id], onDelete: Cascade)
+  employee Employee      @relation(fields: [employeeId], references: [id], onDelete: Restrict)
+
+  @@unique([periodId, employeeId])
+  @@index([tenantId, periodId])
+  @@map("payroll_lines")
 }
 
 enum CrmLeadStatus {
@@ -1018,6 +1251,8 @@ model Site {
   stockLots      StockLot[]
   purchaseOrders PurchaseOrder[]
   deliveryNotes  DeliveryNote[]
+  employees      Employee[]
+  workCardEvents WorkCardEvent[]
 
   @@unique([tenantId, code])
   @@index([tenantId, kind, isActive])
