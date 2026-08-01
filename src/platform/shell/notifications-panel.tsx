@@ -73,22 +73,10 @@ export function NotificationsButton() {
         title="Ειδοποιήσεις"
         subtitle={
           count > 0
-            ? `${count} ενεργ${count === 1 ? "ή" : "ές"} · ανανέωση κάθε λεπτό`
-            : "Καμία εκκρεμότητα αυτή τη στιγμή"
+            ? `${count} ενεργ${count === 1 ? "ή" : "ές"}`
+            : "Καμία εκκρεμότητα"
         }
         widthClass="max-w-md"
-        headerExtra={
-          count > 0 ? (
-            <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-rose-500 px-1.5 text-[11px] font-semibold text-white">
-              {count > 99 ? "99+" : count}
-            </span>
-          ) : (
-            <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-medium text-emerald-800">
-              <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
-              Ήρεμα
-            </span>
-          )
-        }
       >
         {loading && items.length === 0 ? (
           <div className="flex items-center justify-center gap-2 py-16 text-sm text-slate-500">

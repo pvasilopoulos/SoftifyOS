@@ -25,7 +25,7 @@ export function Drawer({
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex justify-end bg-ink-950/30 backdrop-blur-[2px]">
+    <div className="fixed inset-0 z-50 flex justify-end bg-ink-950/25 backdrop-blur-[1px]">
       <button
         type="button"
         className="absolute inset-0 cursor-default"
@@ -34,34 +34,40 @@ export function Drawer({
       />
       <aside
         className={cn(
-          "relative flex h-full w-full flex-col border-l border-slate-200 bg-white shadow-2xl animate-fade-in",
+          "relative flex h-full w-full flex-col border-l border-slate-200/80 bg-white shadow-xl animate-fade-in",
           widthClass,
         )}
       >
-        <div className="flex items-center justify-between gap-3 border-b border-slate-200/80 px-5 py-4">
-          <div className="min-w-0">
-            <div className="flex flex-wrap items-center gap-2">
-              <h2 className="truncate text-base font-semibold tracking-tight text-ink-950 sm:text-lg">
+        <div className="flex items-start gap-3 border-b border-slate-100 px-4 py-3.5 sm:px-5">
+          <div className="min-w-0 flex-1 pt-0.5">
+            <div className="flex items-center gap-2.5">
+              <h2 className="truncate text-[15px] font-semibold leading-none tracking-tight text-ink-950">
                 {title}
               </h2>
-              {headerExtra}
+              {headerExtra ? (
+                <div className="shrink-0 leading-none">{headerExtra}</div>
+              ) : null}
             </div>
             {subtitle ? (
-              <p className="mt-0.5 truncate text-sm text-slate-500">{subtitle}</p>
+              <p className="mt-1.5 text-xs leading-snug text-slate-500">
+                {subtitle}
+              </p>
             ) : null}
           </div>
           <button
             type="button"
             onClick={onClose}
-            className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-500 transition hover:bg-slate-50 hover:text-ink-900"
+            className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-slate-400 transition hover:bg-slate-100 hover:text-slate-700"
             aria-label="Κλείσιμο"
           >
-            <X size={16} />
+            <X size={16} strokeWidth={1.75} />
           </button>
         </div>
-        <div className="flex-1 overflow-y-auto px-5 py-4">{children}</div>
+        <div className="flex-1 overflow-y-auto px-4 py-3 sm:px-5">{children}</div>
         {footer ? (
-          <div className="border-t border-slate-100 px-5 py-3">{footer}</div>
+          <div className="border-t border-slate-100 px-4 py-3 sm:px-5">
+            {footer}
+          </div>
         ) : null}
       </aside>
     </div>
