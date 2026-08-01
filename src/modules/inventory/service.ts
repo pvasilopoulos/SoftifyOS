@@ -74,6 +74,10 @@ export async function applyStockDelta(
       | "COUNT"
       | "RESERVE";
     lotCode?: string | null;
+    serial?: string | null;
+    unitCost?: number | null;
+    uomId?: string | null;
+    qtyInUom?: number | null;
     note?: string | null;
     refType?: string | null;
     refId?: string | null;
@@ -83,11 +87,23 @@ export async function applyStockDelta(
 ) {
   const product = await db.product.findFirst({
     where: { id: input.productId, tenantId: input.tenantId },
-    select: { id: true, trackInventory: true, sku: true, name: true },
+    select: {
+      id: true,
+      trackInventory: true,
+      trackSerials: true,
+      sku: true,
+      name: true,
+      averageCost: true,
+    },
   });
   if (!product) throw new InventoryError("Το προϊόν δεν βρέθηκε");
   if (!product.trackInventory) {
     return { skipped: true as const, productId: product.id };
+  }
+  if (product.trackSerials && !input.serial?.trim()) {
+    throw new InventoryError(
+      `Το προϊόν ${product.sku} απαιτεί serial number`,
+    );
   }
 
   const existing = await db.stockBalance.findUnique({
@@ -155,6 +171,13 @@ export async function applyStockDelta(
     });
   }
 
+  const unitCost =
+    input.unitCost != null
+      ? input.unitCost
+      : product.averageCost != null
+        ? Number(product.averageCost)
+        : null;
+
   const movement = await db.stockMovement.create({
     data: {
       tenantId: input.tenantId,
@@ -165,8 +188,16 @@ export async function applyStockDelta(
       qty: new Prisma.Decimal(qty),
       qtyBefore: new Prisma.Decimal(before),
       qtyAfter: new Prisma.Decimal(after),
+      unitCost:
+        unitCost == null ? null : new Prisma.Decimal(Math.round(unitCost * 10000) / 10000),
       note: input.note ?? null,
       lotCode: input.lotCode ?? null,
+      serial: input.serial?.trim() || null,
+      uomId: input.uomId ?? null,
+      qtyInUom:
+        input.qtyInUom == null
+          ? null
+          : new Prisma.Decimal(Math.round(input.qtyInUom * 1000) / 1000),
       refType: input.refType ?? null,
       refId: input.refId ?? null,
       userId: input.userId ?? null,

@@ -20,6 +20,22 @@ import {
   submitCountLines,
   upsertBin,
 } from "@/modules/inventory/warehouse";
+import {
+  applyPutaway,
+  createPickWave,
+  listPickWaves,
+  listPutawayRules,
+  listSerials,
+  pickWaveLine,
+  registerSerial,
+  releasePickWave,
+  resolveScanCode,
+  shipSerial,
+  suggestPutaway,
+  toBaseQty,
+  upsertProductDualUom,
+  upsertPutawayRule,
+} from "@/modules/inventory/wms-advanced";
 import { toNumber } from "@/modules/sales/invoice-utils";
 
 export const dynamic = "force-dynamic";
@@ -45,6 +61,58 @@ export async function GET(request: NextRequest) {
     if (kind === "valuation") {
       return NextResponse.json(
         await loadValuation(prisma, session.tenantId, siteId),
+      );
+    }
+    if (kind === "waves") {
+      const items = await listPickWaves(prisma, session.tenantId);
+      return NextResponse.json({
+        items: items.map((w) => ({
+          ...w,
+          lines: w.lines.map((l) => ({
+            ...l,
+            qty: toNumber(l.qty),
+            qtyPicked: toNumber(l.qtyPicked),
+          })),
+        })),
+      });
+    }
+    if (kind === "serials") {
+      const status = request.nextUrl.searchParams.get("status") ?? undefined;
+      const q = request.nextUrl.searchParams.get("q") ?? undefined;
+      const items = await listSerials(prisma, session.tenantId, {
+        siteId,
+        status,
+        q,
+      });
+      return NextResponse.json({ items });
+    }
+    if (kind === "putaway-rules") {
+      const items = await listPutawayRules(prisma, session.tenantId, siteId);
+      return NextResponse.json({ items });
+    }
+    if (kind === "suggest-putaway") {
+      const productId = request.nextUrl.searchParams.get("productId");
+      if (!productId || !siteId) {
+        return NextResponse.json(
+          { error: "productId & siteId required" },
+          { status: 400 },
+        );
+      }
+      return NextResponse.json(
+        await suggestPutaway(prisma, {
+          tenantId: session.tenantId,
+          siteId,
+          productId,
+        }),
+      );
+    }
+    if (kind === "scan") {
+      const code = request.nextUrl.searchParams.get("code");
+      if (!code) {
+        return NextResponse.json({ error: "code required" }, { status: 400 });
+      }
+      return NextResponse.json(
+        await resolveScanCode(prisma, session.tenantId, code),
       );
     }
     if (kind === "transfers") {
@@ -129,6 +197,9 @@ export async function GET(request: NextRequest) {
     }
     return NextResponse.json({ error: "Unknown kind" }, { status: 400 });
   } catch (error) {
+    if (error instanceof InventoryError) {
+      return NextResponse.json({ error: error.message }, { status: 400 });
+    }
     return NextResponse.json(
       { error: getErrorMessage(error, "Load failed") },
       { status: 500 },
@@ -281,6 +352,177 @@ export async function POST(request: Request) {
         reservationId: String(raw.reservationId || ""),
       });
       return NextResponse.json({ item });
+    }
+
+    if (action === "create-wave") {
+      const body = z
+        .object({
+          siteId: z.string().min(1),
+          note: z.string().max(300).nullable().optional(),
+          autoReserve: z.boolean().optional(),
+          useFefo: z.boolean().optional(),
+          lines: z
+            .array(
+              z.object({
+                productId: z.string().min(1),
+                qty: z.coerce.number().positive(),
+              }),
+            )
+            .min(1)
+            .max(200),
+        })
+        .parse(raw);
+      const item = await createPickWave(prisma, {
+        tenantId: session.tenantId,
+        userId: session.sub,
+        ...body,
+      });
+      await writeAuditEvent({
+        tenantId: session.tenantId,
+        userId: session.sub,
+        action: "inventory.wave.create",
+        entity: "pick_wave",
+        entityId: item.id,
+      });
+      return NextResponse.json({ item }, { status: 201 });
+    }
+
+    if (action === "release-wave") {
+      const item = await releasePickWave(prisma, {
+        tenantId: session.tenantId,
+        waveId: String(raw.waveId || ""),
+      });
+      return NextResponse.json({ item });
+    }
+
+    if (action === "pick-wave-line") {
+      const body = z
+        .object({
+          waveId: z.string().min(1),
+          lineId: z.string().min(1),
+          qty: z.coerce.number().positive().optional(),
+          serial: z.string().trim().max(80).nullable().optional(),
+        })
+        .parse(raw);
+      const item = await pickWaveLine(prisma, {
+        tenantId: session.tenantId,
+        userId: session.sub,
+        ...body,
+      });
+      return NextResponse.json({ item });
+    }
+
+    if (action === "register-serial") {
+      const body = z
+        .object({
+          siteId: z.string().min(1),
+          productId: z.string().min(1),
+          serial: z.string().trim().min(1).max(80),
+          binId: z.string().nullable().optional(),
+          lotCode: z.string().nullable().optional(),
+          note: z.string().max(300).nullable().optional(),
+          receiveStock: z.boolean().optional(),
+        })
+        .parse(raw);
+      const item = await registerSerial(prisma, {
+        tenantId: session.tenantId,
+        userId: session.sub,
+        ...body,
+      });
+      return NextResponse.json({ item }, { status: 201 });
+    }
+
+    if (action === "ship-serial") {
+      const item = await shipSerial(prisma, {
+        tenantId: session.tenantId,
+        serialId: String(raw.serialId || ""),
+        userId: session.sub,
+      });
+      return NextResponse.json({ item });
+    }
+
+    if (action === "upsert-putaway-rule") {
+      const body = z
+        .object({
+          siteId: z.string().min(1),
+          code: z.string().trim().min(1).max(40),
+          name: z.string().trim().min(1).max(120),
+          targetBinId: z.string().min(1),
+          priority: z.coerce.number().int().min(1).max(9999).optional(),
+          strategy: z.enum(["FIXED", "ZONE", "EMPTY_BIN"]).optional(),
+          productId: z.string().nullable().optional(),
+          zone: z.string().trim().max(40).nullable().optional(),
+        })
+        .parse(raw);
+      const item = await upsertPutawayRule(prisma, {
+        tenantId: session.tenantId,
+        ...body,
+      });
+      return NextResponse.json({ item }, { status: 201 });
+    }
+
+    if (action === "apply-putaway") {
+      const body = z
+        .object({
+          siteId: z.string().min(1),
+          productId: z.string().min(1),
+          binId: z.string().nullable().optional(),
+        })
+        .parse(raw);
+      const item = await applyPutaway(prisma, {
+        tenantId: session.tenantId,
+        ...body,
+      });
+      return NextResponse.json({ item });
+    }
+
+    if (action === "set-dual-uom") {
+      const body = z
+        .object({
+          productId: z.string().min(1),
+          altUnitId: z.string().nullable(),
+          altToBaseFactor: z.coerce.number().positive().nullable(),
+        })
+        .parse(raw);
+      const item = await upsertProductDualUom(prisma, {
+        tenantId: session.tenantId,
+        ...body,
+      });
+      return NextResponse.json({ item });
+    }
+
+    if (action === "adjust-dual-uom") {
+      const body = z
+        .object({
+          siteId: z.string().min(1),
+          productId: z.string().min(1),
+          qty: z.coerce.number().positive(),
+          useAltUnit: z.boolean().optional(),
+          mode: z.enum(["IN", "OUT"]).default("IN"),
+          note: z.string().max(300).nullable().optional(),
+        })
+        .parse(raw);
+      const conv = await toBaseQty(prisma, {
+        tenantId: session.tenantId,
+        productId: body.productId,
+        qty: body.qty,
+        useAltUnit: body.useAltUnit,
+      });
+      const { applyStockDelta } = await import("@/modules/inventory/service");
+      const result = await applyStockDelta(prisma, {
+        tenantId: session.tenantId,
+        siteId: body.siteId,
+        productId: body.productId,
+        delta: body.mode === "OUT" ? -conv.baseQty : conv.baseQty,
+        type: body.mode,
+        source: "MANUAL",
+        uomId: conv.uomId,
+        qtyInUom: conv.qtyInUom,
+        note: body.note || `Dual UoM ×${conv.factor}`,
+        userId: session.sub,
+        allowNegative: body.mode === "OUT" ? false : true,
+      });
+      return NextResponse.json({ result, conversion: conv });
     }
 
     return NextResponse.json({ error: "Unknown action" }, { status: 400 });

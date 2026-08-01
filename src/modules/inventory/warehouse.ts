@@ -46,6 +46,9 @@ export async function loadWarehouseDashboard(db: Db, tenantId: string) {
     activeReservations,
     movementToday,
     sites,
+    openWaves,
+    availableSerials,
+    inTransitTransfers,
   ] = await Promise.all([
     db.stockBalance.findMany({
       where: { tenantId },
@@ -106,6 +109,25 @@ export async function loadWarehouseDashboard(db: Db, tenantId: string) {
     db.site.count({
       where: { tenantId, isActive: true, kind: "BRANCH" },
     }),
+    db.pickWave.count({
+      where: {
+        tenantId,
+        status: { in: ["DRAFT", "RELEASED", "PICKING"] },
+      },
+    }),
+    db.stockSerial.count({
+      where: { tenantId, status: "AVAILABLE" },
+    }),
+    db.stockTransfer.findMany({
+      where: { tenantId, status: "IN_TRANSIT" },
+      include: {
+        lines: {
+          include: {
+            product: { select: { averageCost: true } },
+          },
+        },
+      },
+    }),
   ]);
 
   let stockValue = 0;
@@ -118,6 +140,16 @@ export async function loadWarehouseDashboard(db: Db, tenantId: string) {
     reservedTotal += reserved;
     const cost = Number(b.product.averageCost ?? 0);
     stockValue += qty * cost;
+  }
+
+  let inTransitValue = 0;
+  let inTransitQty = 0;
+  for (const t of inTransitTransfers) {
+    for (const l of t.lines) {
+      const qty = Number(l.qty);
+      inTransitQty += qty;
+      inTransitValue += qty * Number(l.product.averageCost ?? 0);
+    }
   }
 
   const low = lowStock
@@ -149,6 +181,10 @@ export async function loadWarehouseDashboard(db: Db, tenantId: string) {
       openCounts,
       activeReservations,
       movementsToday: movementToday,
+      openWaves,
+      availableSerials,
+      inTransitValue: round2(inTransitValue),
+      inTransitQty: round3(inTransitQty),
     },
     lowStock: low,
     expiringLots: expiringLots.map((l) => ({
@@ -686,6 +722,7 @@ export async function allocateLotsFefo(
 }
 
 export async function loadValuation(db: Db, tenantId: string, siteId?: string) {
+  const { loadInTransitValuation } = await import("./wms-advanced");
   const rows = await db.stockBalance.findMany({
     where: {
       tenantId,
@@ -700,6 +737,9 @@ export async function loadValuation(db: Db, tenantId: string, siteId?: string) {
           unit: true,
           averageCost: true,
           price: true,
+          altUnitId: true,
+          altToBaseFactor: true,
+          altUnit: { select: { code: true, symbol: true } },
         },
       },
       site: { select: { code: true, name: true } },
@@ -711,11 +751,15 @@ export async function loadValuation(db: Db, tenantId: string, siteId?: string) {
     const qty = Number(r.qtyOnHand);
     const cost = Number(r.product.averageCost ?? 0);
     const value = round2(qty * cost);
+    const factor = Number(r.product.altToBaseFactor ?? 0);
     return {
       productId: r.productId,
       sku: r.product.sku,
       name: r.product.name,
       unit: r.product.unit,
+      altUnit: r.product.altUnit?.symbol ?? null,
+      qtyAlt:
+        factor > 0 ? round3(qty / factor) : null,
       siteCode: r.site.code,
       siteName: r.site.name,
       qtyOnHand: qty,
@@ -725,8 +769,15 @@ export async function loadValuation(db: Db, tenantId: string, siteId?: string) {
       stockValue: value,
     };
   });
+  const onHandValue = round2(items.reduce((s, i) => s + i.stockValue, 0));
+  const inTransit = await loadInTransitValuation(db, tenantId);
   return {
     items,
-    totalValue: round2(items.reduce((s, i) => s + i.stockValue, 0)),
+    totalValue: onHandValue,
+    onHandValue,
+    inTransitValue: inTransit.totalValue,
+    inTransitQty: inTransit.totalQty,
+    inTransitItems: inTransit.items,
+    combinedValue: round2(onHandValue + inTransit.totalValue),
   };
 }

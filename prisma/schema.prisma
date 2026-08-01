@@ -139,6 +139,10 @@ model Tenant {
   stockTransfers               StockTransfer[]
   stockCounts                  StockCount[]
   stockReservations            StockReservation[]
+  stockSerials                 StockSerial[]
+  pickWaves                    PickWave[]
+  putawayRules                 PutawayRule[]
+  unitConversions              UnitConversion[]
   orderStatusOptions           OrderStatusOption[]
   invoiceStatusOptions         InvoiceStatusOption[]
   documentTransformRules       DocumentTransformRule[]
@@ -399,17 +403,24 @@ model Product {
   trackInventory Boolean  @default(true)
   /// When true, IN/OUT can carry lot codes
   trackLots      Boolean  @default(false)
+  /// When true, movements require serial numbers
+  trackSerials   Boolean  @default(false)
   /// Soft reorder hint (units)
   reorderPoint   Decimal? @db.Decimal(14, 3)
   /// Moving average unit cost for inventory valuation
   averageCost    Decimal? @db.Decimal(14, 4)
+  /// Secondary / pack UoM (dual UoM) — stock always in base unitId
+  altUnitId      String?
+  /// How many base units equal 1 alt unit (e.g. BOX→PCS = 12)
+  altToBaseFactor Decimal? @db.Decimal(14, 6)
   notes     String?
   customFields Json?
   createdAt DateTime      @default(now())
   updatedAt DateTime      @updatedAt
 
   tenant        Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  unitOfMeasure UnitOfMeasure? @relation(fields: [unitId], references: [id], onDelete: SetNull)
+  unitOfMeasure UnitOfMeasure? @relation("ProductBaseUnit", fields: [unitId], references: [id], onDelete: SetNull)
+  altUnit       UnitOfMeasure? @relation("ProductAltUnit", fields: [altUnitId], references: [id], onDelete: SetNull)
   lines         OrderLine[]
   invoiceLines  InvoiceLine[]
   stockBalances StockBalance[]
@@ -418,6 +429,10 @@ model Product {
   stockReservations StockReservation[]
   stockCountLines   StockCountLine[]
   stockTransferLines StockTransferLine[]
+  stockSerials      StockSerial[]
+  pickWaveLines     PickWaveLine[]
+  putawayRules      PutawayRule[]
+  unitConversions   UnitConversion[]
   purchaseOrderLines PurchaseOrderLine[]
   deliveryNoteLines DeliveryNoteLine[]
 
@@ -503,12 +518,18 @@ model StockMovement {
   productId String
   type      StockMovementType
   source    StockMovementSource @default(MANUAL)
-  /// Absolute quantity of the movement (always ≥ 0)
+  /// Absolute quantity of the movement (always ≥ 0) in base UoM
   qty       Decimal             @db.Decimal(14, 3)
   qtyBefore Decimal             @db.Decimal(14, 3)
   qtyAfter  Decimal             @db.Decimal(14, 3)
+  /// Optional snapshot unit cost for valuation / in-transit
+  unitCost  Decimal?            @db.Decimal(14, 4)
   note      String?
   lotCode   String?
+  serial    String?
+  uomId     String?
+  /// Qty as entered in selected UoM (before conversion to base)
+  qtyInUom  Decimal?            @db.Decimal(14, 3)
   refType   String?
   refId     String?
   userId    String?
@@ -522,6 +543,7 @@ model StockMovement {
   @@index([tenantId, productId, createdAt(sort: Desc)])
   @@index([tenantId, siteId, createdAt(sort: Desc)])
   @@index([tenantId, refType, refId])
+  @@index([tenantId, serial])
   @@map("stock_movements")
 }
 
@@ -1200,10 +1222,160 @@ model StockBin {
   tenant   Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   site     Site           @relation(fields: [siteId], references: [id], onDelete: Cascade)
   balances StockBalance[]
+  serials  StockSerial[]
+  putawayRules PutawayRule[]
+  pickWaveLines PickWaveLine[]
 
   @@unique([tenantId, siteId, code])
   @@index([tenantId, siteId, isActive])
   @@map("stock_bins")
+}
+
+enum StockSerialStatus {
+  AVAILABLE
+  RESERVED
+  IN_TRANSIT
+  SHIPPED
+  SCRAPPED
+}
+
+model StockSerial {
+  id        String            @id @default(cuid())
+  tenantId  String
+  siteId    String
+  productId String
+  serial    String
+  status    StockSerialStatus @default(AVAILABLE)
+  binId     String?
+  lotCode   String?
+  note      String?
+  createdAt DateTime          @default(now())
+  updatedAt DateTime          @updatedAt
+
+  tenant  Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  site    Site      @relation(fields: [siteId], references: [id], onDelete: Restrict)
+  product Product   @relation(fields: [productId], references: [id], onDelete: Restrict)
+  bin     StockBin? @relation(fields: [binId], references: [id], onDelete: SetNull)
+
+  @@unique([tenantId, productId, serial])
+  @@index([tenantId, siteId, status])
+  @@index([tenantId, status, updatedAt(sort: Desc)])
+  @@map("stock_serials")
+}
+
+enum PickWaveStatus {
+  DRAFT
+  RELEASED
+  PICKING
+  DONE
+  CANCELLED
+}
+
+enum PickWaveLineStatus {
+  OPEN
+  PICKED
+  SHORT
+  CANCELLED
+}
+
+model PickWave {
+  id              String         @id @default(cuid())
+  tenantId        String
+  number          String
+  siteId          String
+  status          PickWaveStatus @default(DRAFT)
+  note            String?
+  releasedAt      DateTime?
+  completedAt     DateTime?
+  createdByUserId String?
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+
+  tenant Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  site   Site           @relation(fields: [siteId], references: [id], onDelete: Restrict)
+  lines  PickWaveLine[]
+
+  @@unique([tenantId, number])
+  @@index([tenantId, status, createdAt(sort: Desc)])
+  @@map("pick_waves")
+}
+
+model PickWaveLine {
+  id            String              @id @default(cuid())
+  tenantId      String
+  waveId        String
+  productId     String
+  qty           Decimal             @db.Decimal(14, 3)
+  qtyPicked     Decimal             @default(0) @db.Decimal(14, 3)
+  status        PickWaveLineStatus  @default(OPEN)
+  lotCode       String?
+  fromBinId     String?
+  serial        String?
+  reservationId String?
+  refType       String?
+  refId         String?
+  lineNo        Int                 @default(0)
+
+  wave    PickWave  @relation(fields: [waveId], references: [id], onDelete: Cascade)
+  product Product   @relation(fields: [productId], references: [id], onDelete: Restrict)
+  fromBin StockBin? @relation(fields: [fromBinId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, waveId])
+  @@index([tenantId, productId, status])
+  @@map("pick_wave_lines")
+}
+
+enum PutawayStrategy {
+  FIXED
+  ZONE
+  EMPTY_BIN
+}
+
+model PutawayRule {
+  id          String          @id @default(cuid())
+  tenantId    String
+  siteId      String
+  code        String
+  name        String
+  priority    Int             @default(100)
+  strategy    PutawayStrategy @default(FIXED)
+  productId   String?
+  zone        String?
+  targetBinId String
+  isActive    Boolean         @default(true)
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+
+  tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  site      Site     @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  product   Product? @relation(fields: [productId], references: [id], onDelete: SetNull)
+  targetBin StockBin @relation(fields: [targetBinId], references: [id], onDelete: Restrict)
+
+  @@unique([tenantId, siteId, code])
+  @@index([tenantId, siteId, priority])
+  @@map("putaway_rules")
+}
+
+/// Optional explicit conversion (product-scoped or global when productId null)
+model UnitConversion {
+  id         String  @id @default(cuid())
+  tenantId   String
+  productId  String?
+  fromUnitId String
+  toUnitId   String
+  /// Multiply qty in fromUnit by factor → toUnit
+  factor     Decimal @db.Decimal(14, 6)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  tenant   Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  product  Product?      @relation(fields: [productId], references: [id], onDelete: Cascade)
+  fromUnit UnitOfMeasure @relation("ConversionFrom", fields: [fromUnitId], references: [id], onDelete: Restrict)
+  toUnit   UnitOfMeasure @relation("ConversionTo", fields: [toUnitId], references: [id], onDelete: Restrict)
+
+  @@index([tenantId, productId])
+  @@index([tenantId, fromUnitId, toUnitId])
+  @@map("unit_conversions")
 }
 
 model StockTransfer {
@@ -1341,7 +1513,10 @@ model UnitOfMeasure {
   updatedAt   DateTime          @updatedAt
 
   tenant   Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  products Product[]
+  products Product[] @relation("ProductBaseUnit")
+  altProducts Product[] @relation("ProductAltUnit")
+  conversionsFrom UnitConversion[] @relation("ConversionFrom")
+  conversionsTo   UnitConversion[] @relation("ConversionTo")
 
   @@unique([tenantId, code])
   @@unique([tenantId, symbol])
@@ -1648,6 +1823,9 @@ model Site {
   transfersTo       StockTransfer[] @relation("TransferToSite")
   stockCounts       StockCount[]
   stockReservations StockReservation[]
+  stockSerials      StockSerial[]
+  pickWaves         PickWave[]
+  putawayRules      PutawayRule[]
   purchaseOrders    PurchaseOrder[]
   deliveryNotes     DeliveryNote[]
   employees         Employee[]
