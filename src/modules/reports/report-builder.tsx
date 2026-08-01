@@ -1,10 +1,12 @@
 "use client";
 
-import { useEffect, useMemo, useState, useTransition } from "react";
-import { BookmarkPlus, Loader2, Save, Trash2 } from "lucide-react";
+import { useEffect, useState, useTransition } from "react";
+import { BookmarkPlus, Loader2, Play, Save, Trash2 } from "lucide-react";
 import { toast } from "@/shared/ui/toaster";
 import { Button } from "@/shared/ui/button";
 import { cn } from "@/shared/lib/cn";
+import type { ReportResult } from "./engine";
+import { ReportResultPanel } from "./report-result-panel";
 
 type Saved = {
   id: string;
@@ -13,6 +15,7 @@ type Saved = {
     metrics?: string[];
     groupBy?: string;
     period?: string;
+    chartType?: string;
   };
   updatedAt: string;
 };
@@ -22,6 +25,7 @@ const METRICS = [
   { id: "invoices", label: "Τιμολόγια" },
   { id: "orders", label: "Παραγγελίες" },
   { id: "cash", label: "Ταμείο" },
+  { id: "vat", label: "ΦΠΑ" },
   { id: "stock", label: "Αποθέματα" },
 ];
 
@@ -32,6 +36,13 @@ const GROUPS = [
   { id: "site", label: "Ανά αποθήκη" },
 ];
 
+const CHARTS = [
+  { id: "area", label: "Area" },
+  { id: "line", label: "Line" },
+  { id: "bar", label: "Bar" },
+  { id: "donut", label: "Donut" },
+];
+
 export function ReportBuilder() {
   const [saved, setSaved] = useState<Saved[]>([]);
   const [loading, setLoading] = useState(true);
@@ -39,9 +50,11 @@ export function ReportBuilder() {
   const [metrics, setMetrics] = useState<string[]>(["revenue", "invoices"]);
   const [groupBy, setGroupBy] = useState("month");
   const [period, setPeriod] = useState("ytd");
+  const [chartType, setChartType] = useState("area");
+  const [result, setResult] = useState<ReportResult | null>(null);
   const [pending, startTransition] = useTransition();
 
-  async function load() {
+  async function loadSaved() {
     setLoading(true);
     try {
       const res = await fetch("/api/saved-filters?module=reports", {
@@ -58,20 +71,8 @@ export function ReportBuilder() {
   }
 
   useEffect(() => {
-    void load();
+    void loadSaved();
   }, []);
-
-  const preview = useMemo(
-    () =>
-      `Μετρήσεις: ${
-        metrics
-          .map((m) => METRICS.find((x) => x.id === m)?.label || m)
-          .join(", ") || "—"
-      } · Ομαδοποίηση: ${
-        GROUPS.find((g) => g.id === groupBy)?.label || groupBy
-      } · Περίοδος: ${period}`,
-    [metrics, groupBy, period],
-  );
 
   function toggleMetric(id: string) {
     setMetrics((prev) =>
@@ -84,7 +85,32 @@ export function ReportBuilder() {
     setMetrics(item.payload.metrics || ["revenue"]);
     setGroupBy(item.payload.groupBy || "month");
     setPeriod(item.payload.period || "ytd");
+    setChartType(item.payload.chartType || "area");
     toast.message(`Φορτώθηκε: ${item.name}`);
+  }
+
+  function run(override?: Saved["payload"]) {
+    const body = {
+      metrics: override?.metrics || metrics,
+      groupBy: override?.groupBy || groupBy,
+      period: override?.period || period,
+      chartType: override?.chartType || chartType,
+    };
+    startTransition(async () => {
+      try {
+        const res = await fetch("/api/reports/run", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || "Αποτυχία εκτέλεσης");
+        setResult(data.result as ReportResult);
+        toast.success("Η αναφορά εκτελέστηκε");
+      } catch (e) {
+        toast.error(e instanceof Error ? e.message : "Σφάλμα");
+      }
+    });
   }
 
   function save() {
@@ -96,13 +122,13 @@ export function ReportBuilder() {
           body: JSON.stringify({
             module: "reports",
             name,
-            payload: { metrics, groupBy, period },
+            payload: { metrics, groupBy, period, chartType },
           }),
         });
         const data = await res.json().catch(() => ({}));
         if (!res.ok) throw new Error(data.error || "Αποτυχία αποθήκευσης");
         toast.success("Αναφορά αποθηκεύτηκε");
-        await load();
+        await loadSaved();
       } catch (e) {
         toast.error(e instanceof Error ? e.message : "Σφάλμα");
       }
@@ -119,7 +145,7 @@ export function ReportBuilder() {
         const data = await res.json().catch(() => ({}));
         if (!res.ok) throw new Error(data.error || "Αποτυχία διαγραφής");
         toast.success("Διαγράφηκε");
-        await load();
+        await loadSaved();
       } catch (e) {
         toast.error(e instanceof Error ? e.message : "Σφάλμα");
       }
@@ -127,34 +153,20 @@ export function ReportBuilder() {
   }
 
   return (
-    <section className="soft-panel space-y-4 p-4 sm:p-5">
-      <div className="flex flex-wrap items-start justify-between gap-3">
+    <div className="grid gap-4 xl:grid-cols-[340px_1fr]">
+      <section className="soft-panel space-y-4 p-4 sm:p-5">
         <div>
           <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-400">
             Report builder
           </p>
           <h2 className="mt-1 text-base font-semibold text-ink-950">
-            Προσαρμοσμένες αναφορές
+            Προσαρμοσμένο BI
           </h2>
           <p className="mt-1 text-sm text-slate-500">
-            Αποθήκευση ορισμών για επανάληψη και μελλοντικό schedule.
+            Μετρήσεις × διάσταση × περίοδος → live ApexCharts.
           </p>
         </div>
-        <Button
-          size="sm"
-          disabled={pending || !metrics.length || !name.trim()}
-          onClick={() => save()}
-        >
-          {pending ? (
-            <Loader2 size={14} className="animate-spin" />
-          ) : (
-            <Save size={14} />
-          )}
-          Αποθήκευση
-        </Button>
-      </div>
 
-      <div className="grid gap-3 md:grid-cols-3">
         <label className="block text-sm">
           <span className="mb-1 block font-medium text-slate-600">Όνομα</span>
           <input
@@ -163,6 +175,7 @@ export function ReportBuilder() {
             onChange={(e) => setName(e.target.value)}
           />
         </label>
+
         <label className="block text-sm">
           <span className="mb-1 block font-medium text-slate-600">
             Ομαδοποίηση
@@ -179,6 +192,7 @@ export function ReportBuilder() {
             ))}
           </select>
         </label>
+
         <label className="block text-sm">
           <span className="mb-1 block font-medium text-slate-600">Περίοδος</span>
           <select
@@ -192,90 +206,156 @@ export function ReportBuilder() {
             <option value="12m">12 μήνες</option>
           </select>
         </label>
-      </div>
 
-      <div>
-        <p className="mb-2 text-xs font-semibold uppercase tracking-[0.14em] text-slate-400">
-          Μετρήσεις
-        </p>
-        <div className="flex flex-wrap gap-2">
-          {METRICS.map((m) => {
-            const on = metrics.includes(m.id);
-            return (
-              <button
-                key={m.id}
-                type="button"
-                onClick={() => toggleMetric(m.id)}
-                className={cn(
-                  "rounded-xl border px-3 py-1.5 text-sm font-medium",
-                  on
-                    ? "border-teal-300 bg-teal-50 text-teal-900"
-                    : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50",
-                )}
-              >
-                {m.label}
-              </button>
-            );
-          })}
-        </div>
-      </div>
-
-      <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50/80 px-4 py-3 text-sm text-ink-900">
-        <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-400">
-          Προεπισκόπηση ορισμού
-        </p>
-        <p className="mt-2">{preview}</p>
-        <p className="mt-2 text-xs text-slate-500">
-          Schedule shell: οι αποθηκευμένες αναφορές μπορούν αργότερα να τρέχουν
-          αυτόματα (email/PDF). Προς το παρόν αποθηκεύονται ως ορισμοί.
-        </p>
-      </div>
-
-      <div>
-        <div className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.14em] text-slate-400">
-          <BookmarkPlus size={14} />
-          Αποθηκευμένες
-        </div>
-        {loading ? (
-          <p className="text-sm text-slate-500">Φόρτωση…</p>
-        ) : saved.length === 0 ? (
-          <p className="text-sm text-slate-500">
-            Δεν υπάρχουν ακόμα αποθηκευμένες αναφορές.
-          </p>
-        ) : (
-          <ul className="space-y-2">
-            {saved.map((item) => (
-              <li
-                key={item.id}
-                className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-200 px-3 py-2"
-              >
-                <button
-                  type="button"
-                  className="text-left text-sm font-medium text-ink-900 hover:underline"
-                  onClick={() => applySaved(item)}
-                >
-                  {item.name}
-                  <span className="mt-0.5 block text-xs font-normal text-slate-500">
-                    {(item.payload.metrics || []).join(", ") || "—"} ·{" "}
-                    {item.payload.groupBy || "month"} ·{" "}
-                    {item.payload.period || "ytd"}
-                  </span>
-                </button>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon"
-                  disabled={pending}
-                  onClick={() => remove(item.id)}
-                  aria-label="Διαγραφή"
-                >
-                  <Trash2 size={16} className="text-rose-600" />
-                </Button>
-              </li>
+        <label className="block text-sm">
+          <span className="mb-1 block font-medium text-slate-600">
+            Τύπος γραφήματος
+          </span>
+          <select
+            className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3"
+            value={chartType}
+            onChange={(e) => setChartType(e.target.value)}
+          >
+            {CHARTS.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.label}
+              </option>
             ))}
-          </ul>
+          </select>
+        </label>
+
+        <div>
+          <p className="mb-2 text-xs font-semibold uppercase tracking-[0.14em] text-slate-400">
+            Μετρήσεις
+          </p>
+          <div className="flex flex-wrap gap-2">
+            {METRICS.map((m) => {
+              const on = metrics.includes(m.id);
+              return (
+                <button
+                  key={m.id}
+                  type="button"
+                  onClick={() => toggleMetric(m.id)}
+                  className={cn(
+                    "rounded-xl border px-3 py-1.5 text-sm font-medium",
+                    on
+                      ? "border-teal-300 bg-teal-50 text-teal-900"
+                      : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50",
+                  )}
+                >
+                  {m.label}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        <div className="flex flex-wrap gap-2">
+          <Button
+            size="sm"
+            disabled={pending || !metrics.length}
+            onClick={() => run()}
+          >
+            {pending ? (
+              <Loader2 size={14} className="animate-spin" />
+            ) : (
+              <Play size={14} />
+            )}
+            Εκτέλεση
+          </Button>
+          <Button
+            size="sm"
+            variant="secondary"
+            disabled={pending || !metrics.length || !name.trim()}
+            onClick={() => save()}
+          >
+            <Save size={14} />
+            Αποθήκευση
+          </Button>
+        </div>
+
+        <div>
+          <div className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.14em] text-slate-400">
+            <BookmarkPlus size={14} />
+            Αποθηκευμένες
+          </div>
+          {loading ? (
+            <p className="text-sm text-slate-500">Φόρτωση…</p>
+          ) : saved.length === 0 ? (
+            <p className="text-sm text-slate-500">
+              Δεν υπάρχουν ακόμα αποθηκευμένες αναφορές.
+            </p>
+          ) : (
+            <ul className="space-y-2">
+              {saved.map((item) => (
+                <li
+                  key={item.id}
+                  className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-200 px-3 py-2"
+                >
+                  <button
+                    type="button"
+                    className="text-left text-sm font-medium text-ink-900 hover:underline"
+                    onClick={() => applySaved(item)}
+                  >
+                    {item.name}
+                    <span className="mt-0.5 block text-xs font-normal text-slate-500">
+                      {(item.payload.metrics || []).join(", ") || "—"} ·{" "}
+                      {item.payload.groupBy || "month"} ·{" "}
+                      {item.payload.period || "ytd"}
+                    </span>
+                  </button>
+                  <div className="flex gap-1">
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      disabled={pending}
+                      onClick={() => {
+                        applySaved(item);
+                        run(item.payload);
+                      }}
+                      aria-label="Εκτέλεση"
+                    >
+                      <Play size={16} className="text-teal-700" />
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      disabled={pending}
+                      onClick={() => remove(item.id)}
+                      aria-label="Διαγραφή"
+                    >
+                      <Trash2 size={16} className="text-rose-600" />
+                    </Button>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      </section>
+
+      <section className="soft-panel min-h-[480px] p-4 sm:p-5">
+        {pending && !result ? (
+          <div className="flex h-[400px] items-center justify-center gap-2 text-sm text-slate-500">
+            <Loader2 size={16} className="animate-spin" />
+            Υπολογισμός BI…
+          </div>
+        ) : result ? (
+          <ReportResultPanel result={result} />
+        ) : (
+          <div className="flex h-[400px] flex-col items-center justify-center text-center text-sm text-slate-500">
+            <p className="font-medium text-slate-700">
+              Δεν υπάρχει ακόμη αποτέλεσμα
+            </p>
+            <p className="mt-1 max-w-sm text-xs">
+              Επιλέξτε μετρήσεις και πατήστε «Εκτέλεση» για live γράφημα,
+              KPIs και πίνακα δεδομένων.
+            </p>
+          </div>
         )}
-      </div>
-    </section>
+      </section>
+    </div>
   );
 }

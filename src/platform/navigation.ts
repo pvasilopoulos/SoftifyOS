@@ -284,7 +284,7 @@ export const defaultMenuTree: MenuNodeConfig[] = [
       {
         id: "reports",
         type: "link",
-        label: "Αναφορές",
+        label: "Αναφορές & BI",
         href: "/reports",
         icon: "BarChart3",
       },
