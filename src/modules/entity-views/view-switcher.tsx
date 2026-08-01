@@ -10,7 +10,7 @@ export type ViewOption = {
 };
 
 export function ViewSwitcher({
-  label = "Προβολή",
+  label = "Λίστα",
   views,
   value,
   onChange,
@@ -22,17 +22,20 @@ export function ViewSwitcher({
 }) {
   if (views.length <= 1) return null;
   return (
-    <label className="inline-flex items-center gap-2 text-sm text-slate-600">
-      <span className="whitespace-nowrap font-medium text-slate-500">{label}</span>
+    <label className="inline-flex min-w-0 items-center gap-2 text-sm text-slate-600">
+      <span className="whitespace-nowrap text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">
+        {label}
+      </span>
       <select
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        className="h-10 min-w-[180px] rounded-xl border border-slate-200 bg-white px-3 text-sm text-ink-900"
+        aria-label={label}
+        className="h-10 min-w-[220px] max-w-full rounded-xl border border-slate-200 bg-white px-3 text-sm font-medium text-ink-900 shadow-sm outline-none transition hover:border-slate-300 focus:border-teal-400"
       >
         {views.map((v) => (
           <option key={v.id} value={v.id}>
             {v.name}
-            {v.isDefault ? " · default" : ""}
+            {v.isDefault ? " · προεπιλογή" : ""}
           </option>
         ))}
       </select>

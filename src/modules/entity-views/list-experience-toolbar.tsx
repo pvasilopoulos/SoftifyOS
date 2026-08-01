@@ -12,7 +12,7 @@ import {
 import { cn } from "@/shared/lib/cn";
 import { Button } from "@/shared/ui/button";
 import { Badge } from "@/shared/ui/badge";
-import { ViewTabs } from "@/modules/entity-views/view-switcher";
+import { ViewSwitcher } from "@/modules/entity-views/view-switcher";
 import type {
   ListColumn,
   ListDensity,
@@ -171,7 +171,12 @@ export function ListExperienceToolbar({
     <div className="space-y-3">
       {views.length > 1 ? (
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <ViewTabs views={views} value={viewId} onChange={onViewChange} />
+          <ViewSwitcher
+            label="Λίστα"
+            views={views}
+            value={viewId}
+            onChange={onViewChange}
+          />
           <div className="flex items-center gap-2 text-xs text-slate-500">
             <span className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2 py-1">
               <ModeIcon size={12} />
