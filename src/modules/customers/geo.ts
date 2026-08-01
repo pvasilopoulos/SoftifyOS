@@ -113,12 +113,13 @@ function hashStr(s: string) {
 
 /** Grid cell size in degrees for server-side clustering */
 export function cellSizeForZoom(zoom: number) {
-  if (zoom >= 14) return 0;
-  if (zoom >= 12) return 0.01;
-  if (zoom >= 10) return 0.03;
-  if (zoom >= 8) return 0.08;
-  if (zoom >= 6) return 0.2;
-  if (zoom >= 4) return 0.5;
+  // Show individual named pins earlier so brand labels are usable
+  if (zoom >= 11) return 0;
+  if (zoom >= 9.5) return 0.015;
+  if (zoom >= 8) return 0.04;
+  if (zoom >= 6.5) return 0.1;
+  if (zoom >= 5) return 0.25;
+  if (zoom >= 3.5) return 0.6;
   return 1.2;
 }
 

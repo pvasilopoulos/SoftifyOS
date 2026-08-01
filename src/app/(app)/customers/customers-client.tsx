@@ -85,6 +85,8 @@ export function CustomersClient({
   listViews,
   customFields,
   formViews = [],
+  mapsApiKey = "",
+  mapsMapId = "DEMO_MAP_ID",
 }: {
   initialItems: CustomerListItem[];
   initialNextCursor: string | null;
@@ -92,6 +94,8 @@ export function CustomersClient({
   listViews: ListViewOpt[];
   customFields: CustomFieldDef[];
   formViews?: FormViewOpt[];
+  mapsApiKey?: string;
+  mapsMapId?: string;
 }) {
   const router = useRouter();
   const defaultView =
@@ -439,7 +443,12 @@ export function CustomersClient({
       ) : null}
 
       {showMap ? (
-        <CustomerMapView q={q} status={status} />
+        <CustomerMapView
+          q={q}
+          status={status}
+          mapsApiKey={mapsApiKey}
+          mapId={mapsMapId}
+        />
       ) : (
         <>
           <ListExperienceRenderer

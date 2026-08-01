@@ -97,14 +97,22 @@ export async function GET(req: NextRequest) {
           lat: number;
           lng: number;
           name: string;
+          tradeName: string | null;
           code: string;
           address: string | null;
           city: string | null;
+          postalCode: string | null;
           status: string;
+          phone: string | null;
         }>
       >(Prisma.sql`
         SELECT b.id, b."customerId", b.lat, b.lng,
-               c.name, c.code, b.address, b.city, c.status::text as status
+               c.name, c."tradeName", c.code,
+               COALESCE(b.address, c.address) AS address,
+               COALESCE(b.city, c.city) AS city,
+               COALESCE(b."postalCode", c."postalCode") AS "postalCode",
+               c.status::text as status,
+               COALESCE(b.phone, c.phone) AS phone
         FROM branches b
         INNER JOIN customers c ON c.id = b."customerId"
         WHERE b."tenantId" = ${tenantId}
@@ -116,9 +124,10 @@ export async function GET(req: NextRequest) {
             q
               ? Prisma.sql`AND (
                   c.name ILIKE ${"%" + q + "%"}
+                  OR c."tradeName" ILIKE ${"%" + q + "%"}
                   OR c.code ILIKE ${"%" + q + "%"}
-                  OR COALESCE(b.city, '') ILIKE ${"%" + q + "%"}
-                  OR COALESCE(b.address, '') ILIKE ${"%" + q + "%"}
+                  OR COALESCE(b.city, c.city, '') ILIKE ${"%" + q + "%"}
+                  OR COALESCE(b.address, c.address, '') ILIKE ${"%" + q + "%"}
                 )`
               : Prisma.empty
           }
@@ -126,19 +135,26 @@ export async function GET(req: NextRequest) {
         LIMIT 1200
       `);
 
-      let points = rows.map((r) => ({
-        type: "point" as const,
-        id: r.id,
-        customerId: r.customerId,
-        lat: r.lat,
-        lng: r.lng,
-        name: r.name,
-        code: r.code,
-        address: r.address,
-        city: r.city,
-        status: r.status,
-        count: 1,
-      }));
+      let points = rows.map((r) => {
+        const brand = (r.tradeName || r.name || "").trim();
+        return {
+          type: "point" as const,
+          id: r.id,
+          customerId: r.customerId,
+          lat: r.lat,
+          lng: r.lng,
+          name: r.name,
+          tradeName: r.tradeName,
+          brand,
+          code: r.code,
+          address: r.address,
+          city: r.city,
+          postalCode: r.postalCode,
+          status: r.status,
+          phone: r.phone,
+          count: 1,
+        };
+      });
 
       if (input.nearLat != null && input.nearLng != null && input.radiusKm) {
         points = points
@@ -172,15 +188,26 @@ export async function GET(req: NextRequest) {
       });
     }
 
-    clusters = await prisma.$queryRaw<ClusterRow[]>(Prisma.sql`
+    type RichClusterRow = ClusterRow & {
+      sampleTradeName: string | null;
+      sampleAddress: string | null;
+      sampleCity: string | null;
+      sampleStatus: string | null;
+    };
+
+    const richClusters = await prisma.$queryRaw<RichClusterRow[]>(Prisma.sql`
       SELECT
         AVG(b.lat)::float8 AS lat,
         AVG(b.lng)::float8 AS lng,
         COUNT(*)::int AS count,
-        MIN(b.id) AS "sampleBranchId",
-        MIN(b."customerId") AS "sampleCustomerId",
-        MIN(c.name) AS "sampleName",
-        MIN(c.code) AS "sampleCode"
+        (ARRAY_AGG(b.id ORDER BY b."isPrimary" DESC, c.name ASC))[1] AS "sampleBranchId",
+        (ARRAY_AGG(b."customerId" ORDER BY b."isPrimary" DESC, c.name ASC))[1] AS "sampleCustomerId",
+        (ARRAY_AGG(c.name ORDER BY b."isPrimary" DESC, c.name ASC))[1] AS "sampleName",
+        (ARRAY_AGG(c."tradeName" ORDER BY b."isPrimary" DESC, c.name ASC))[1] AS "sampleTradeName",
+        (ARRAY_AGG(c.code ORDER BY b."isPrimary" DESC, c.name ASC))[1] AS "sampleCode",
+        (ARRAY_AGG(COALESCE(b.address, c.address) ORDER BY b."isPrimary" DESC, c.name ASC))[1] AS "sampleAddress",
+        (ARRAY_AGG(COALESCE(b.city, c.city) ORDER BY b."isPrimary" DESC, c.name ASC))[1] AS "sampleCity",
+        (ARRAY_AGG(c.status::text ORDER BY b."isPrimary" DESC, c.name ASC))[1] AS "sampleStatus"
       FROM branches b
       INNER JOIN customers c ON c.id = b."customerId"
       WHERE b."tenantId" = ${tenantId}
@@ -192,8 +219,9 @@ export async function GET(req: NextRequest) {
           q
             ? Prisma.sql`AND (
                 c.name ILIKE ${"%" + q + "%"}
+                OR c."tradeName" ILIKE ${"%" + q + "%"}
                 OR c.code ILIKE ${"%" + q + "%"}
-                OR COALESCE(b.city, '') ILIKE ${"%" + q + "%"}
+                OR COALESCE(b.city, c.city, '') ILIKE ${"%" + q + "%"}
               )`
             : Prisma.empty
         }
@@ -201,9 +229,11 @@ export async function GET(req: NextRequest) {
       ORDER BY COUNT(*) DESC
       LIMIT 500
     `);
+    clusters = richClusters;
 
-    const items = clusters.map((c) =>
-      c.count === 1
+    const items = richClusters.map((c) => {
+      const brand = (c.sampleTradeName || c.sampleName || "").trim();
+      return c.count === 1
         ? {
             type: "point" as const,
             id: c.sampleBranchId,
@@ -211,7 +241,12 @@ export async function GET(req: NextRequest) {
             lat: c.lat,
             lng: c.lng,
             name: c.sampleName,
+            tradeName: c.sampleTradeName,
+            brand,
             code: c.sampleCode,
+            address: c.sampleAddress,
+            city: c.sampleCity,
+            status: c.sampleStatus ?? undefined,
             count: 1,
           }
         : {
@@ -220,9 +255,9 @@ export async function GET(req: NextRequest) {
             lat: c.lat,
             lng: c.lng,
             count: c.count,
-            sampleName: c.sampleName,
-          },
-    );
+            sampleName: brand || c.sampleName,
+          };
+    });
 
     const [totalGeocoded, bounds] = await Promise.all([
       countGeocoded(tenantId),
