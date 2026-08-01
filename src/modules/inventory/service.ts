@@ -69,7 +69,11 @@ export async function applyStockDelta(
       | "OPENING"
       | "PURCHASE"
       | "RECEIPT"
-      | "DELIVERY";
+      | "DELIVERY"
+      | "TRANSFER"
+      | "COUNT"
+      | "RESERVE";
+    lotCode?: string | null;
     note?: string | null;
     refType?: string | null;
     refId?: string | null;
@@ -162,6 +166,7 @@ export async function applyStockDelta(
       qtyBefore: new Prisma.Decimal(before),
       qtyAfter: new Prisma.Decimal(after),
       note: input.note ?? null,
+      lotCode: input.lotCode ?? null,
       refType: input.refType ?? null,
       refId: input.refId ?? null,
       userId: input.userId ?? null,

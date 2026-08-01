@@ -132,6 +132,10 @@ model Tenant {
   bankAccounts                 BankAccount[]
   bankStatementLines           BankStatementLine[]
   stockLots                    StockLot[]
+  stockBins                    StockBin[]
+  stockTransfers               StockTransfer[]
+  stockCounts                  StockCount[]
+  stockReservations            StockReservation[]
   orderStatusOptions           OrderStatusOption[]
   invoiceStatusOptions         InvoiceStatusOption[]
   documentTransformRules       DocumentTransformRule[]
@@ -394,6 +398,8 @@ model Product {
   trackLots      Boolean  @default(false)
   /// Soft reorder hint (units)
   reorderPoint   Decimal? @db.Decimal(14, 3)
+  /// Moving average unit cost for inventory valuation
+  averageCost    Decimal? @db.Decimal(14, 4)
   notes     String?
   customFields Json?
   createdAt DateTime      @default(now())
@@ -406,6 +412,9 @@ model Product {
   stockBalances StockBalance[]
   stockMovements StockMovement[]
   stockLots     StockLot[]
+  stockReservations StockReservation[]
+  stockCountLines   StockCountLine[]
+  stockTransferLines StockTransferLine[]
   purchaseOrderLines PurchaseOrderLine[]
   deliveryNoteLines DeliveryNoteLine[]
 
@@ -433,24 +442,53 @@ enum StockMovementSource {
   PURCHASE
   RECEIPT
   DELIVERY
+  TRANSFER
+  COUNT
+  RESERVE
+}
+
+enum StockTransferStatus {
+  DRAFT
+  IN_TRANSIT
+  COMPLETED
+  CANCELLED
+}
+
+enum StockCountStatus {
+  DRAFT
+  IN_PROGRESS
+  COUNTED
+  POSTED
+  CANCELLED
+}
+
+enum StockReservationStatus {
+  ACTIVE
+  RELEASED
+  CONSUMED
+  EXPIRED
 }
 
 /// Υπόλοιπο αποθέματος ανά προϊόν × υποκατάστημα (Site)
 model StockBalance {
-  id        String   @id @default(cuid())
-  tenantId  String
-  siteId    String
-  productId String
-  qtyOnHand Decimal  @default(0) @db.Decimal(14, 3)
-  updatedAt DateTime @updatedAt
+  id          String   @id @default(cuid())
+  tenantId    String
+  siteId      String
+  productId   String
+  qtyOnHand   Decimal  @default(0) @db.Decimal(14, 3)
+  qtyReserved Decimal  @default(0) @db.Decimal(14, 3)
+  binId       String?
+  updatedAt   DateTime @updatedAt
 
-  tenant  Tenant  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  site    Site    @relation(fields: [siteId], references: [id], onDelete: Cascade)
-  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+  tenant  Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  site    Site     @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  product Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  bin     StockBin? @relation(fields: [binId], references: [id], onDelete: SetNull)
 
   @@unique([tenantId, siteId, productId])
   @@index([tenantId, productId])
   @@index([tenantId, siteId])
+  @@index([tenantId, binId])
   @@map("stock_balances")
 }
 
@@ -1144,6 +1182,131 @@ model StockLot {
   @@map("stock_lots")
 }
 
+/// Τοποθεσία / bin μέσα σε αποθήκη (Site)
+model StockBin {
+  id        String   @id @default(cuid())
+  tenantId  String
+  siteId    String
+  code      String
+  name      String
+  zone      String?
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant   Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  site     Site           @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  balances StockBalance[]
+
+  @@unique([tenantId, siteId, code])
+  @@index([tenantId, siteId, isActive])
+  @@map("stock_bins")
+}
+
+model StockTransfer {
+  id           String              @id @default(cuid())
+  tenantId     String
+  number       String
+  status       StockTransferStatus @default(DRAFT)
+  fromSiteId   String
+  toSiteId     String
+  note         String?
+  shippedAt    DateTime?
+  receivedAt   DateTime?
+  createdByUserId String?
+  createdAt    DateTime            @default(now())
+  updatedAt    DateTime            @updatedAt
+
+  tenant   Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  fromSite Site                @relation("TransferFromSite", fields: [fromSiteId], references: [id], onDelete: Restrict)
+  toSite   Site                @relation("TransferToSite", fields: [toSiteId], references: [id], onDelete: Restrict)
+  lines    StockTransferLine[]
+
+  @@unique([tenantId, number])
+  @@index([tenantId, status, createdAt(sort: Desc)])
+  @@map("stock_transfers")
+}
+
+model StockTransferLine {
+  id         String  @id @default(cuid())
+  tenantId   String
+  transferId String
+  productId  String
+  qty        Decimal @db.Decimal(14, 3)
+  lotCode    String?
+  lineNo     Int     @default(0)
+
+  transfer StockTransfer @relation(fields: [transferId], references: [id], onDelete: Cascade)
+  product  Product       @relation(fields: [productId], references: [id], onDelete: Restrict)
+
+  @@index([tenantId, transferId])
+  @@map("stock_transfer_lines")
+}
+
+model StockCount {
+  id        String           @id @default(cuid())
+  tenantId  String
+  number    String
+  siteId    String
+  status    StockCountStatus @default(DRAFT)
+  note      String?
+  countedAt DateTime?
+  postedAt  DateTime?
+  createdByUserId String?
+  createdAt DateTime         @default(now())
+  updatedAt DateTime         @updatedAt
+
+  tenant Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  site   Site            @relation(fields: [siteId], references: [id], onDelete: Restrict)
+  lines  StockCountLine[]
+
+  @@unique([tenantId, number])
+  @@index([tenantId, status, createdAt(sort: Desc)])
+  @@map("stock_counts")
+}
+
+model StockCountLine {
+  id           String  @id @default(cuid())
+  tenantId     String
+  countId      String
+  productId    String
+  systemQty    Decimal @db.Decimal(14, 3)
+  countedQty   Decimal? @db.Decimal(14, 3)
+  varianceQty  Decimal? @db.Decimal(14, 3)
+  lineNo       Int     @default(0)
+
+  count   StockCount @relation(fields: [countId], references: [id], onDelete: Cascade)
+  product Product    @relation(fields: [productId], references: [id], onDelete: Restrict)
+
+  @@index([tenantId, countId])
+  @@map("stock_count_lines")
+}
+
+model StockReservation {
+  id         String                 @id @default(cuid())
+  tenantId   String
+  siteId     String
+  productId  String
+  qty        Decimal                @db.Decimal(14, 3)
+  status     StockReservationStatus @default(ACTIVE)
+  refType    String?
+  refId      String?
+  note       String?
+  expiresAt  DateTime?
+  createdByUserId String?
+  createdAt  DateTime               @default(now())
+  updatedAt  DateTime               @updatedAt
+
+  tenant  Tenant  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  site    Site    @relation(fields: [siteId], references: [id], onDelete: Restrict)
+  product Product @relation(fields: [productId], references: [id], onDelete: Restrict)
+
+  @@index([tenantId, status, siteId])
+  @@index([tenantId, productId, status])
+  @@index([tenantId, refType, refId])
+  @@map("stock_reservations")
+}
+
 enum UnitOfMeasureKind {
   COUNT
   WEIGHT
@@ -1474,13 +1637,18 @@ model Site {
   orders   Order[]
   posSessions PosSession[]
   posTerminals PosTerminal[]
-  stockBalances  StockBalance[]
-  stockMovements StockMovement[]
-  stockLots      StockLot[]
-  purchaseOrders PurchaseOrder[]
-  deliveryNotes  DeliveryNote[]
-  employees      Employee[]
-  workCardEvents WorkCardEvent[]
+  stockBalances     StockBalance[]
+  stockMovements    StockMovement[]
+  stockLots         StockLot[]
+  stockBins         StockBin[]
+  transfersFrom     StockTransfer[] @relation("TransferFromSite")
+  transfersTo       StockTransfer[] @relation("TransferToSite")
+  stockCounts       StockCount[]
+  stockReservations StockReservation[]
+  purchaseOrders    PurchaseOrder[]
+  deliveryNotes     DeliveryNote[]
+  employees         Employee[]
+  workCardEvents    WorkCardEvent[]
 
   @@unique([tenantId, code])
   @@index([tenantId, kind, isActive])
