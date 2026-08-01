@@ -5,6 +5,7 @@ export const glAccountUpsertSchema = z.object({
   name: z.string().trim().min(1).max(200),
   type: z.enum(["ASSET", "LIABILITY", "EQUITY", "REVENUE", "EXPENSE"]),
   parentId: z.string().min(1).nullable().optional(),
+  reportGroup: z.string().trim().max(40).nullable().optional(),
   isPostable: z.boolean().optional().default(true),
   isActive: z.boolean().optional().default(true),
 });
@@ -16,10 +17,68 @@ export const journalLineSchema = z.object({
   debit: z.coerce.number().min(0).max(100_000_000).optional().default(0),
   credit: z.coerce.number().min(0).max(100_000_000).optional().default(0),
   memo: z.string().trim().max(300).nullable().optional(),
+  costCenterId: z.string().min(1).nullable().optional(),
+  legalEntityId: z.string().min(1).nullable().optional(),
 });
 
 export const journalCreateSchema = z.object({
   description: z.string().trim().max(300).nullable().optional(),
+  entryDate: z.coerce.date().optional(),
+  isOpening: z.boolean().optional().default(false),
   lines: z.array(journalLineSchema).min(2).max(100),
   post: z.boolean().optional().default(true),
+});
+
+export const periodActionSchema = z.object({
+  periodId: z.string().min(1),
+  action: z.enum(["close", "reopen"]),
+});
+
+export const legalEntitySchema = z.object({
+  code: z.string().trim().min(1).max(20),
+  name: z.string().trim().min(1).max(200),
+  vatNumber: z.string().trim().max(32).nullable().optional(),
+  isDefault: z.boolean().optional(),
+});
+
+export const costCenterSchema = z.object({
+  code: z.string().trim().min(1).max(20),
+  name: z.string().trim().min(1).max(200),
+  parentId: z.string().min(1).nullable().optional(),
+});
+
+export const fixedAssetCreateSchema = z.object({
+  code: z.string().trim().min(1).max(40),
+  name: z.string().trim().min(1).max(200),
+  acquisitionDate: z.coerce.date(),
+  acquisitionCost: z.coerce.number().positive().max(100_000_000),
+  residualValue: z.coerce.number().min(0).max(100_000_000).optional(),
+  usefulLifeMonths: z.coerce.number().int().min(1).max(600).optional(),
+  costCenterId: z.string().min(1).nullable().optional(),
+  legalEntityId: z.string().min(1).nullable().optional(),
+  notes: z.string().trim().max(500).nullable().optional(),
+  postAcquisition: z.boolean().optional().default(true),
+});
+
+export const purchaseInvoiceCreateSchema = z.object({
+  number: z.string().trim().min(1).max(40),
+  supplierId: z.string().min(1),
+  issueDate: z.coerce.date().optional(),
+  dueDate: z.coerce.date().nullable().optional(),
+  notes: z.string().trim().max(500).nullable().optional(),
+  legalEntityId: z.string().min(1).nullable().optional(),
+  post: z.boolean().optional().default(true),
+  lines: z
+    .array(
+      z.object({
+        description: z.string().trim().min(1).max(300),
+        qty: z.coerce.number().positive().max(1_000_000),
+        unitPrice: z.coerce.number().min(0).max(100_000_000),
+        vatRate: z.coerce.number().min(0).max(100).optional().default(24),
+        glAccountId: z.string().min(1).nullable().optional(),
+        costCenterId: z.string().min(1).nullable().optional(),
+      }),
+    )
+    .min(1)
+    .max(200),
 });

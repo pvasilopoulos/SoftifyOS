@@ -8,6 +8,8 @@ import {
   ensureChartOfAccounts,
   ensureCurrentFiscalYear,
 } from "@/modules/ledger/service";
+import { listFiscalPeriods } from "@/modules/ledger/periods";
+import { ensureDefaultLegalEntity } from "@/modules/ledger/controlling";
 import { toNumber } from "@/modules/sales/invoice-utils";
 import {
   loadApRows,
@@ -16,6 +18,7 @@ import {
 } from "@/modules/finance/analytics";
 import { FinanceJournalClient } from "./finance-journal-client";
 import { FinanceOpsClient } from "./finance-ops-client";
+import { AccountingHubClient } from "./accounting-hub-client";
 
 export const metadata = { title: "Οικονομικά" };
 export const dynamic = "force-dynamic";
@@ -26,16 +29,21 @@ export default async function FinancePage() {
 
   await ensureChartOfAccounts(prisma, session.tenantId);
   const period = await ensureCurrentFiscalYear(prisma, session.tenantId);
+  await ensureDefaultLegalEntity(
+    prisma,
+    session.tenantId,
+    session.tenantName,
+  );
 
   const year = new Date().getFullYear();
   const vatFrom = new Date(`${year}-01-01T00:00:00.000Z`);
   const vatTo = new Date();
 
-  const [journals, accountCount, arRows, apRows, vat, myData] =
+  const [journals, accountCount, arRows, apRows, vat, myData, periods] =
     await Promise.all([
       prisma.journalEntry.findMany({
         where: { tenantId: session.tenantId },
-        orderBy: [{ postedAt: "desc" }, { createdAt: "desc" }],
+        orderBy: [{ entryDate: "desc" }, { createdAt: "desc" }],
         take: 50,
         include: {
           lines: {
@@ -55,13 +63,14 @@ export default async function FinancePage() {
         orderBy: { createdAt: "desc" },
         take: 50,
       }),
+      listFiscalPeriods(prisma, session.tenantId, { year }),
     ]);
 
   return (
     <div className="space-y-5">
       <PageHeader
         title="Οικονομικά"
-        description="AR/AP · ΦΠΑ · myDATA · γενική λογιστική."
+        description="FI γενική λογιστική · AR/AP · ΦΠΑ · myDATA · πάγια · αναλυτική."
         actions={
           <div className="flex flex-wrap gap-2">
             <Link
@@ -78,6 +87,9 @@ export default async function FinancePage() {
         <Badge tone="teal">Χρήση {period.code}</Badge>
         <Badge tone={period.status === "OPEN" ? "emerald" : "rose"}>
           {period.status === "OPEN" ? "Ανοιχτή" : "Κλειστή"}
+        </Badge>
+        <Badge tone="slate">
+          {periods.filter((p) => p.kind === "MONTH").length} μήνες
         </Badge>
       </div>
 
@@ -127,6 +139,19 @@ export default async function FinancePage() {
           </section>
         );
       })()}
+
+      <AccountingHubClient
+        canWrite={session.role !== "VIEWER"}
+        initialPeriods={periods.map((p) => ({
+          id: p.id,
+          code: p.code,
+          name: p.name,
+          kind: p.kind,
+          year: p.year,
+          month: p.month,
+          status: p.status,
+        }))}
+      />
 
       <FinanceOpsClient
         arRows={arRows}

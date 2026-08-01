@@ -93,6 +93,11 @@ model Tenant {
   glAccounts                   GlAccount[]
   fiscalPeriods                FiscalPeriod[]
   journalEntries               JournalEntry[]
+  legalEntities                LegalEntity[]
+  costCenters                  CostCenter[]
+  fixedAssets                  FixedAsset[]
+  fixedAssetMovements          FixedAssetMovement[]
+  purchaseInvoices             PurchaseInvoice[]
   unitsOfMeasure               UnitOfMeasure[]
   tenantSettings               TenantSettings?
   appRoles                     AppRole[]
@@ -219,6 +224,12 @@ model Customer {
   postalCode String?
   region     String?
   country    String  @default("GR")
+  /// WGS84 — geocoded from customer HQ address (map pin)
+  lat          Float?
+  lng          Float?
+  geocodedAt   DateTime?
+  /// Last address string used for geocoding (skip re-geocode if unchanged)
+  geocodeQuery String?
 
   shippingAddress    String?
   shippingAddress2   String?
@@ -266,6 +277,7 @@ model Customer {
   @@index([tenantId, vatNumber])
   @@index([tenantId, city])
   @@index([tenantId, category])
+  @@index([tenantId, lat, lng])
   @@index([tenantId, createdAt(sort: Desc), id(sort: Desc)])
   @@index([tenantId, status, createdAt(sort: Desc)])
   @@map("customers")
@@ -502,6 +514,7 @@ model Supplier {
   tenant           Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   purchaseOrders   PurchaseOrder[]
   purchasePayments PurchasePayment[]
+  purchaseInvoices PurchaseInvoice[]
 
   @@unique([tenantId, code])
   @@index([tenantId, name])
@@ -1987,7 +2000,7 @@ model DocumentSeriesPrintForm {
   @@map("document_series_print_forms")
 }
 
-// ─── General Ledger ─────────────────────────────────────────────────
+// ─── General Ledger / Accounting Suite ──────────────────────────────
 
 enum GlAccountType {
   ASSET
@@ -2002,29 +2015,64 @@ enum FiscalPeriodStatus {
   CLOSED
 }
 
+enum FiscalPeriodKind {
+  YEAR
+  MONTH
+}
+
 enum JournalStatus {
   DRAFT
   POSTED
   VOID
 }
 
+enum FixedAssetStatus {
+  ACTIVE
+  DISPOSED
+}
+
+enum FixedAssetDepreciationMethod {
+  STRAIGHT_LINE
+}
+
+enum FixedAssetMovementKind {
+  ACQUIRE
+  DEPRECIATE
+  DISPOSE
+  ADJUST
+}
+
+enum PurchaseInvoiceStatus {
+  DRAFT
+  POSTED
+  PARTIAL
+  PAID
+  CANCELLED
+}
+
 model GlAccount {
-  id         String        @id @default(cuid())
-  tenantId   String
-  code       String
-  name       String
-  type       GlAccountType
-  parentId   String?
-  isPostable Boolean       @default(true)
-  isSystem   Boolean       @default(false)
-  isActive   Boolean       @default(true)
-  createdAt  DateTime      @default(now())
-  updatedAt  DateTime      @updatedAt
+  id          String        @id @default(cuid())
+  tenantId    String
+  code        String
+  name        String
+  type        GlAccountType
+  parentId    String?
+  /// BS_ASSET | BS_LIABILITY | BS_EQUITY | PL_REVENUE | PL_EXPENSE | PL_COGS
+  reportGroup String?
+  isPostable  Boolean       @default(true)
+  isSystem    Boolean       @default(false)
+  isActive    Boolean       @default(true)
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
 
   tenant   Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   parent   GlAccount?     @relation("GlAccountTree", fields: [parentId], references: [id], onDelete: SetNull)
   children GlAccount[]    @relation("GlAccountTree")
   lines    JournalLine[]
+  assetsAsAsset      FixedAsset[] @relation("FixedAssetGross")
+  assetsAsAccumDepr  FixedAsset[] @relation("FixedAssetAccum")
+  assetsAsDeprExp    FixedAsset[] @relation("FixedAssetDeprExp")
+  purchaseInvoiceLines PurchaseInvoiceLine[]
 
   @@unique([tenantId, code])
   @@index([tenantId, type, isActive])
@@ -2033,46 +2081,102 @@ model GlAccount {
 }
 
 model FiscalPeriod {
-  id        String             @id @default(cuid())
-  tenantId  String
-  code      String
-  name      String
-  year      Int
-  startsAt  DateTime
-  endsAt    DateTime
-  status    FiscalPeriodStatus @default(OPEN)
-  createdAt DateTime           @default(now())
-  updatedAt DateTime           @updatedAt
+  id             String             @id @default(cuid())
+  tenantId       String
+  code           String
+  name           String
+  year           Int
+  month          Int?
+  kind           FiscalPeriodKind   @default(YEAR)
+  startsAt       DateTime
+  endsAt         DateTime
+  status         FiscalPeriodStatus @default(OPEN)
+  closedAt       DateTime?
+  closedByUserId String?
+  createdAt      DateTime           @default(now())
+  updatedAt      DateTime           @updatedAt
 
-  tenant  Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tenant   Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   journals JournalEntry[]
 
   @@unique([tenantId, code])
   @@index([tenantId, year, status])
+  @@index([tenantId, kind, year, month])
   @@map("fiscal_periods")
 }
 
+model LegalEntity {
+  id         String   @id @default(cuid())
+  tenantId   String
+  code       String
+  name       String
+  vatNumber  String?
+  isDefault  Boolean  @default(false)
+  isActive   Boolean  @default(true)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  tenant  Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  lines   JournalLine[]
+  assets  FixedAsset[]
+  purchaseInvoices PurchaseInvoice[]
+
+  @@unique([tenantId, code])
+  @@index([tenantId, isActive])
+  @@map("legal_entities")
+}
+
+model CostCenter {
+  id        String   @id @default(cuid())
+  tenantId  String
+  code      String
+  name      String
+  parentId  String?
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant   Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  parent   CostCenter?  @relation("CostCenterTree", fields: [parentId], references: [id], onDelete: SetNull)
+  children CostCenter[] @relation("CostCenterTree")
+  lines    JournalLine[]
+  assets   FixedAsset[]
+  purchaseInvoiceLines PurchaseInvoiceLine[]
+
+  @@unique([tenantId, code])
+  @@index([tenantId, isActive])
+  @@map("cost_centers")
+}
+
 model JournalEntry {
-  id             String        @id @default(cuid())
-  tenantId       String
-  number         String
-  status         JournalStatus @default(DRAFT)
-  description    String?
-  sourceType     String?
-  sourceId       String?
-  fiscalPeriodId String?
-  postedAt       DateTime?
+  id              String        @id @default(cuid())
+  tenantId        String
+  number          String
+  status          JournalStatus @default(DRAFT)
+  description     String?
+  sourceType      String?
+  sourceId        String?
+  fiscalPeriodId  String?
+  entryDate       DateTime      @default(now())
+  isOpening       Boolean       @default(false)
+  reversesId      String?       @unique
+  postedAt        DateTime?
+  voidedAt        DateTime?
   createdByUserId String?
-  createdAt      DateTime      @default(now())
-  updatedAt      DateTime      @updatedAt
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
 
   tenant       Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   fiscalPeriod FiscalPeriod?  @relation(fields: [fiscalPeriodId], references: [id], onDelete: SetNull)
+  reverses     JournalEntry?  @relation("JournalReversal", fields: [reversesId], references: [id], onDelete: SetNull)
+  reversedBy   JournalEntry?  @relation("JournalReversal")
   lines        JournalLine[]
+  assetMovements FixedAssetMovement[]
 
   @@unique([tenantId, number])
   @@index([tenantId, status, postedAt])
   @@index([tenantId, sourceType, sourceId])
+  @@index([tenantId, entryDate])
   @@map("journal_entries")
 }
 
@@ -2081,6 +2185,8 @@ model JournalLine {
   tenantId       String
   journalEntryId String
   glAccountId    String
+  costCenterId   String?
+  legalEntityId  String?
   lineNo         Int     @default(0)
   memo           String?
   debit          Decimal @default(0) @db.Decimal(14, 2)
@@ -2088,10 +2194,118 @@ model JournalLine {
 
   journalEntry JournalEntry @relation(fields: [journalEntryId], references: [id], onDelete: Cascade)
   glAccount    GlAccount    @relation(fields: [glAccountId], references: [id], onDelete: Restrict)
+  costCenter   CostCenter?  @relation(fields: [costCenterId], references: [id], onDelete: SetNull)
+  legalEntity  LegalEntity? @relation(fields: [legalEntityId], references: [id], onDelete: SetNull)
 
   @@index([tenantId, journalEntryId])
   @@index([tenantId, glAccountId])
+  @@index([tenantId, costCenterId])
+  @@index([tenantId, legalEntityId])
   @@map("journal_lines")
+}
+
+model FixedAsset {
+  id                   String                        @id @default(cuid())
+  tenantId             String
+  code                 String
+  name                 String
+  acquisitionDate      DateTime
+  acquisitionCost      Decimal                       @db.Decimal(14, 2)
+  residualValue        Decimal                       @default(0) @db.Decimal(14, 2)
+  usefulLifeMonths     Int                           @default(60)
+  depreciationMethod   FixedAssetDepreciationMethod  @default(STRAIGHT_LINE)
+  status               FixedAssetStatus              @default(ACTIVE)
+  glAssetAccountId     String
+  glAccumDeprAccountId String
+  glDeprExpenseAccountId String
+  costCenterId         String?
+  legalEntityId        String?
+  notes                String?
+  createdAt            DateTime                      @default(now())
+  updatedAt            DateTime                      @updatedAt
+
+  tenant           Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  glAssetAccount   GlAccount    @relation("FixedAssetGross", fields: [glAssetAccountId], references: [id], onDelete: Restrict)
+  glAccumDeprAccount GlAccount  @relation("FixedAssetAccum", fields: [glAccumDeprAccountId], references: [id], onDelete: Restrict)
+  glDeprExpenseAccount GlAccount @relation("FixedAssetDeprExp", fields: [glDeprExpenseAccountId], references: [id], onDelete: Restrict)
+  costCenter       CostCenter?  @relation(fields: [costCenterId], references: [id], onDelete: SetNull)
+  legalEntity      LegalEntity? @relation(fields: [legalEntityId], references: [id], onDelete: SetNull)
+  movements        FixedAssetMovement[]
+
+  @@unique([tenantId, code])
+  @@index([tenantId, status])
+  @@map("fixed_assets")
+}
+
+model FixedAssetMovement {
+  id             String                 @id @default(cuid())
+  tenantId       String
+  fixedAssetId   String
+  kind           FixedAssetMovementKind
+  amount         Decimal                @db.Decimal(14, 2)
+  movedAt        DateTime               @default(now())
+  memo           String?
+  journalEntryId String?
+  createdAt      DateTime               @default(now())
+
+  tenant       Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  fixedAsset   FixedAsset    @relation(fields: [fixedAssetId], references: [id], onDelete: Cascade)
+  journalEntry JournalEntry? @relation(fields: [journalEntryId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, fixedAssetId, movedAt])
+  @@map("fixed_asset_movements")
+}
+
+model PurchaseInvoice {
+  id          String                @id @default(cuid())
+  tenantId    String
+  number      String
+  supplierId  String
+  status      PurchaseInvoiceStatus @default(DRAFT)
+  issueDate   DateTime              @default(now())
+  dueDate     DateTime?
+  netAmount   Decimal               @default(0) @db.Decimal(14, 2)
+  vatAmount   Decimal               @default(0) @db.Decimal(14, 2)
+  total       Decimal               @default(0) @db.Decimal(14, 2)
+  paidAmount  Decimal               @default(0) @db.Decimal(14, 2)
+  notes       String?
+  seriesId    String?
+  legalEntityId String?
+  journalEntryId String?
+  createdAt   DateTime              @default(now())
+  updatedAt   DateTime              @updatedAt
+
+  tenant      Tenant               @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  supplier    Supplier             @relation(fields: [supplierId], references: [id], onDelete: Restrict)
+  legalEntity LegalEntity?         @relation(fields: [legalEntityId], references: [id], onDelete: SetNull)
+  lines       PurchaseInvoiceLine[]
+
+  @@unique([tenantId, number])
+  @@index([tenantId, status, issueDate])
+  @@index([tenantId, supplierId])
+  @@map("purchase_invoices")
+}
+
+model PurchaseInvoiceLine {
+  id                String  @id @default(cuid())
+  tenantId          String
+  purchaseInvoiceId String
+  lineNo            Int     @default(0)
+  description       String
+  qty               Decimal @default(1) @db.Decimal(14, 3)
+  unitPrice         Decimal @default(0) @db.Decimal(14, 4)
+  vatRate           Decimal @default(24) @db.Decimal(5, 2)
+  netAmount         Decimal @default(0) @db.Decimal(14, 2)
+  vatAmount         Decimal @default(0) @db.Decimal(14, 2)
+  glAccountId       String?
+  costCenterId      String?
+
+  purchaseInvoice PurchaseInvoice @relation(fields: [purchaseInvoiceId], references: [id], onDelete: Cascade)
+  glAccount       GlAccount?      @relation(fields: [glAccountId], references: [id], onDelete: SetNull)
+  costCenter      CostCenter?     @relation(fields: [costCenterId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, purchaseInvoiceId])
+  @@map("purchase_invoice_lines")
 }
 
 // ─── Custom Fields & Entity Views ───────────────────────────────────
