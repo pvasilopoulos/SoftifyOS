@@ -9,6 +9,8 @@ import {
   bboxFromCenter,
   cellSizeForZoom,
   haversineKm,
+  isPlausibleGreeceCoord,
+  lookupCityCoords,
 } from "@/modules/customers/geo";
 
 export const dynamic = "force-dynamic";
@@ -150,7 +152,10 @@ export async function GET(req: NextRequest) {
           .sort((a, b) => (a.distanceKm ?? 0) - (b.distanceKm ?? 0));
       }
 
-      const totalGeocoded = await countGeocoded(tenantId);
+      const [totalGeocoded, bounds] = await Promise.all([
+        countGeocoded(tenantId),
+        geocodedBounds(tenantId),
+      ]);
 
       return NextResponse.json({
         mode: "points",
@@ -162,6 +167,7 @@ export async function GET(req: NextRequest) {
           totalGeocoded,
           backfilled,
           cellSize: 0,
+          bounds,
         },
       });
     }
@@ -218,7 +224,10 @@ export async function GET(req: NextRequest) {
           },
     );
 
-    const totalGeocoded = await countGeocoded(tenantId);
+    const [totalGeocoded, bounds] = await Promise.all([
+      countGeocoded(tenantId),
+      geocodedBounds(tenantId),
+    ]);
 
     return NextResponse.json({
       mode: "clusters",
@@ -230,6 +239,7 @@ export async function GET(req: NextRequest) {
         totalGeocoded,
         backfilled,
         cellSize: cell,
+        bounds,
       },
     });
   } catch (error) {
@@ -246,29 +256,79 @@ async function countGeocoded(tenantId: string) {
   });
 }
 
+async function geocodedBounds(tenantId: string) {
+  const row = await prisma.$queryRaw<
+    Array<{
+      minLat: number | null;
+      maxLat: number | null;
+      minLng: number | null;
+      maxLng: number | null;
+    }>
+  >(Prisma.sql`
+    SELECT MIN(lat)::float8 AS "minLat", MAX(lat)::float8 AS "maxLat",
+           MIN(lng)::float8 AS "minLng", MAX(lng)::float8 AS "maxLng"
+    FROM branches
+    WHERE "tenantId" = ${tenantId}
+      AND lat IS NOT NULL AND lng IS NOT NULL
+  `);
+  const b = row[0];
+  if (
+    !b ||
+    b.minLat == null ||
+    b.maxLat == null ||
+    b.minLng == null ||
+    b.maxLng == null
+  ) {
+    return null;
+  }
+  return b;
+}
+
 async function backfillMissingCoords(tenantId: string, limit: number) {
-  const missing = await prisma.branch.findMany({
+  // Missing coords OR known city with coords outside Greece (bad prior fallback)
+  const candidates = await prisma.branch.findMany({
     where: {
       tenantId,
-      OR: [{ lat: null }, { lng: null }],
-      AND: [
-        {
-          OR: [
-            { city: { not: null } },
-            { address: { not: null } },
-          ],
-        },
+      OR: [
+        { lat: null },
+        { lng: null },
+        { city: { not: null } },
+        { address: { not: null } },
+        { customer: { city: { not: null } } },
       ],
     },
-    select: { id: true, city: true, address: true },
-    take: limit,
+    select: {
+      id: true,
+      city: true,
+      address: true,
+      lat: true,
+      lng: true,
+      customer: { select: { city: true, address: true } },
+    },
+    take: Math.max(limit, 800),
   });
-  if (missing.length === 0) return 0;
+  if (candidates.length === 0) return 0;
 
   const now = new Date();
   let n = 0;
-  for (const b of missing) {
-    const coords = approxCoordsFromCity(b.city || b.address);
+  for (const b of candidates) {
+    if (n >= limit) break;
+    const place =
+      b.city ||
+      b.customer.city ||
+      b.address ||
+      b.customer.address ||
+      null;
+    const known = lookupCityCoords(place);
+    const missing = b.lat == null || b.lng == null;
+    const bad =
+      b.lat != null &&
+      b.lng != null &&
+      !isPlausibleGreeceCoord(b.lat, b.lng) &&
+      Boolean(known);
+    if (!missing && !bad) continue;
+
+    const coords = approxCoordsFromCity(place);
     if (!coords) continue;
     await prisma.branch.update({
       where: { id: b.id },

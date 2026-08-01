@@ -9,6 +9,7 @@ import {
   Loader2,
   LocateFixed,
   MapPin,
+  Maximize2,
   RefreshCw,
 } from "lucide-react";
 import { Button } from "@/shared/ui/button";
@@ -40,6 +41,13 @@ type MapItem =
 
 type SelectedPoint = Extract<MapItem, { type: "point" }>;
 
+type MapBounds = {
+  minLat: number;
+  maxLat: number;
+  minLng: number;
+  maxLng: number;
+};
+
 export function CustomerMapView({
   q,
   status,
@@ -50,6 +58,7 @@ export function CustomerMapView({
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<Map | null>(null);
   const userMarkerRef = useRef<maplibregl.Marker | null>(null);
+  const didFitRef = useRef(false);
   const [ready, setReady] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -57,6 +66,7 @@ export function CustomerMapView({
     ms: number;
     returned: number;
     totalGeocoded: number;
+    bounds: MapBounds | null;
   } | null>(null);
   const [nearMe, setNearMe] = useState(false);
   const [radiusKm, setRadiusKm] = useState(25);
@@ -67,6 +77,25 @@ export function CustomerMapView({
   const fetchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const queryRef = useRef({ q, status, nearMe, radiusKm, userPos });
   queryRef.current = { q, status, nearMe, radiusKm, userPos };
+
+  const fitToBounds = useCallback((bounds: MapBounds | null | undefined) => {
+    const map = mapRef.current;
+    if (!map || !bounds) return;
+    const { minLat, maxLat, minLng, maxLng } = bounds;
+    if (
+      ![minLat, maxLat, minLng, maxLng].every((n) => Number.isFinite(n))
+    ) {
+      return;
+    }
+    const pad = 0.02;
+    map.fitBounds(
+      [
+        [minLng - pad, minLat - pad],
+        [maxLng + pad, maxLat + pad],
+      ],
+      { padding: 56, maxZoom: 12, duration: 600 },
+    );
+  }, []);
 
   const fetchFeatures = useCallback(async () => {
     const map = mapRef.current;
@@ -103,6 +132,7 @@ export function CustomerMapView({
       if (!res.ok) throw new Error(data.error || "Αποτυχία χάρτη");
 
       const items = (data.items || []) as MapItem[];
+      const bounds = (data.meta?.bounds ?? null) as MapBounds | null;
       const geojson: GeoJSON.FeatureCollection = {
         type: "FeatureCollection",
         features: items.map((it) => ({
@@ -132,13 +162,20 @@ export function CustomerMapView({
         ms: data.meta?.ms ?? 0,
         returned: data.meta?.returned ?? items.length,
         totalGeocoded: data.meta?.totalGeocoded ?? 0,
+        bounds,
       });
+
+      // First load → frame all geocoded customers so pins are visible
+      if (!didFitRef.current && bounds && (data.meta?.totalGeocoded ?? 0) > 0) {
+        didFitRef.current = true;
+        fitToBounds(bounds);
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : "Σφάλμα χάρτη");
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [fitToBounds]);
 
   const scheduleFetch = useCallback(() => {
     if (fetchTimer.current) clearTimeout(fetchTimer.current);
@@ -175,7 +212,10 @@ export function CustomerMapView({
       attributionControl: { compact: true },
     });
 
-    map.addControl(new maplibregl.NavigationControl({ showCompass: false }), "top-right");
+    map.addControl(
+      new maplibregl.NavigationControl({ showCompass: false }),
+      "top-right",
+    );
     mapRef.current = map;
 
     map.on("load", () => {
@@ -204,16 +244,16 @@ export function CustomerMapView({
           "circle-radius": [
             "step",
             ["get", "count"],
-            18,
+            20,
             25,
-            22,
+            26,
             100,
-            28,
+            32,
             500,
-            34,
+            38,
           ],
-          "circle-opacity": 0.88,
-          "circle-stroke-width": 2,
+          "circle-opacity": 0.9,
+          "circle-stroke-width": 3,
           "circle-stroke-color": "#ffffff",
         },
       });
@@ -227,8 +267,22 @@ export function CustomerMapView({
           "text-field": ["to-string", ["get", "count"]],
           "text-size": 12,
           "text-font": ["Open Sans Bold", "Arial Unicode MS Bold"],
+          "text-allow-overlap": true,
         },
         paint: { "text-color": "#ffffff" },
+      });
+
+      // Unclustered pins — larger + halo so they are obvious
+      map.addLayer({
+        id: "points-halo",
+        type: "circle",
+        source: "customers",
+        filter: ["==", ["get", "type"], "point"],
+        paint: {
+          "circle-color": "#0f766e",
+          "circle-radius": 14,
+          "circle-opacity": 0.25,
+        },
       });
 
       map.addLayer({
@@ -238,8 +292,8 @@ export function CustomerMapView({
         filter: ["==", ["get", "type"], "point"],
         paint: {
           "circle-color": "#0f766e",
-          "circle-radius": 7,
-          "circle-stroke-width": 2,
+          "circle-radius": 9,
+          "circle-stroke-width": 3,
           "circle-stroke-color": "#ffffff",
         },
       });
@@ -250,7 +304,10 @@ export function CustomerMapView({
         const lng = Number(f.geometry.coordinates[0]);
         const lat = Number(f.geometry.coordinates[1]);
         if (!Number.isFinite(lng) || !Number.isFinite(lat)) return;
-        map.easeTo({ center: [lng, lat], zoom: Math.min(map.getZoom() + 2.2, 16) });
+        map.easeTo({
+          center: [lng, lat],
+          zoom: Math.min(map.getZoom() + 2.2, 16),
+        });
       });
 
       map.on("click", "points", (e) => {
@@ -281,18 +338,14 @@ export function CustomerMapView({
         });
       });
 
-      map.on("mouseenter", "clusters", () => {
-        map.getCanvas().style.cursor = "pointer";
-      });
-      map.on("mouseleave", "clusters", () => {
-        map.getCanvas().style.cursor = "";
-      });
-      map.on("mouseenter", "points", () => {
-        map.getCanvas().style.cursor = "pointer";
-      });
-      map.on("mouseleave", "points", () => {
-        map.getCanvas().style.cursor = "";
-      });
+      for (const layer of ["clusters", "points"] as const) {
+        map.on("mouseenter", layer, () => {
+          map.getCanvas().style.cursor = "pointer";
+        });
+        map.on("mouseleave", layer, () => {
+          map.getCanvas().style.cursor = "";
+        });
+      }
 
       map.on("moveend", () => {
         if (fetchTimer.current) clearTimeout(fetchTimer.current);
@@ -309,6 +362,7 @@ export function CustomerMapView({
       map.remove();
       mapRef.current = null;
       setReady(false);
+      didFitRef.current = false;
     };
   }, [fetchFeatures]);
 
@@ -345,6 +399,9 @@ export function CustomerMapView({
       { enableHighAccuracy: true, timeout: 10000 },
     );
   }
+
+  const emptyViewport =
+    meta != null && meta.returned === 0 && meta.totalGeocoded > 0;
 
   return (
     <div className="soft-panel overflow-hidden">
@@ -387,6 +444,19 @@ export function CustomerMapView({
           <Button
             size="sm"
             variant="secondary"
+            onClick={() => {
+              didFitRef.current = true;
+              fitToBounds(meta?.bounds);
+              scheduleFetch();
+            }}
+            disabled={!meta?.bounds}
+          >
+            <Maximize2 size={14} />
+            Όλοι
+          </Button>
+          <Button
+            size="sm"
+            variant="secondary"
             onClick={() => void fetchFeatures()}
             disabled={loading}
           >
@@ -408,6 +478,21 @@ export function CustomerMapView({
         {loading ? (
           <div className="pointer-events-none absolute left-3 top-3 inline-flex items-center gap-1.5 rounded-lg bg-white/95 px-2.5 py-1.5 text-xs font-medium text-slate-600 shadow">
             <Loader2 size={12} className="animate-spin" /> Φόρτωση…
+          </div>
+        ) : null}
+        {emptyViewport ? (
+          <div className="absolute left-1/2 top-3 z-10 w-[min(100%-1.5rem,360px)] -translate-x-1/2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-center text-xs text-amber-900 shadow">
+            Δεν υπάρχουν πελάτες σε αυτή την περιοχή ·{" "}
+            <button
+              type="button"
+              className="font-semibold underline"
+              onClick={() => {
+                didFitRef.current = true;
+                fitToBounds(meta?.bounds);
+              }}
+            >
+              Εμφάνιση όλων ({meta?.totalGeocoded})
+            </button>
           </div>
         ) : null}
         {meta ? (
@@ -475,9 +560,8 @@ export function CustomerMapView({
       ) : null}
 
       <p className="border-t border-slate-100 px-3 py-2 text-[11px] text-slate-500">
-        Zoom out → clusters · Zoom in → pins. Οι συντεταγμένες αποθηκεύονται στο
-        Branch· για 450k χρησιμοποίησε batch geocoding· το map API δεν φορτώνει
-        ποτέ όλο το dataset.
+        Zoom out → clusters · Zoom in → pins. Πάτα «Όλοι» για να δεις όλους τους
+        πελάτες με συντεταγμένες. Οι συντεταγμένες αποθηκεύονται στο Branch.
       </p>
     </div>
   );
