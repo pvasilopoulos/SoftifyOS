@@ -15,6 +15,10 @@ import {
   type CustomFieldsMap,
   type FormViewConfig,
 } from "@/modules/entity-views/types";
+import {
+  customerBodyFromValues,
+  customerFormValuesFromItem,
+} from "@/modules/customers/payload";
 
 type FormViewOpt = {
   id: string;
@@ -33,16 +37,7 @@ export function CustomerEditPanel({
   role,
 }: {
   customerId: string;
-  initial: {
-    code: string;
-    name: string;
-    vatNumber: string | null;
-    email: string | null;
-    phone: string | null;
-    notes: string | null;
-    status: string;
-    customFields: unknown;
-  };
+  initial: Record<string, unknown>;
   formViews: FormViewOpt[];
   customFields: CustomFieldDef[];
   canEdit: boolean;
@@ -56,15 +51,9 @@ export function CustomerEditPanel({
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
-  const [values, setValues] = useState<Record<string, unknown>>({
-    code: initial.code,
-    name: initial.name,
-    vatNumber: initial.vatNumber ?? "",
-    email: initial.email ?? "",
-    phone: initial.phone ?? "",
-    notes: initial.notes ?? "",
-    status: initial.status,
-  });
+  const [values, setValues] = useState<Record<string, unknown>>(() =>
+    customerFormValuesFromItem(initial),
+  );
   const [customValues, setCustomValues] = useState<CustomFieldsMap>(() =>
     parseCustomFields(initial.customFields),
   );
@@ -94,16 +83,7 @@ export function CustomerEditPanel({
     const res = await fetch(`/api/customers/${customerId}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        code: String(values.code ?? ""),
-        name: String(values.name ?? ""),
-        vatNumber: values.vatNumber ? String(values.vatNumber) : null,
-        email: values.email ? String(values.email) : null,
-        phone: values.phone ? String(values.phone) : null,
-        notes: values.notes ? String(values.notes) : null,
-        status: values.status,
-        customFields: customValues,
-      }),
+      body: JSON.stringify(customerBodyFromValues(values, customValues)),
     });
     const data = await res.json();
     setPending(false);
@@ -124,7 +104,7 @@ export function CustomerEditPanel({
         <div>
           <h2 className="text-base font-semibold text-ink-950">Στοιχεία πελάτη</h2>
           <p className="text-xs text-slate-500">
-            Φόρμα από Entity Form Views
+            Πλήρη ERP master data · φόρμα από Entity Form Views
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -143,15 +123,7 @@ export function CustomerEditPanel({
                   disabled={pending}
                   onClick={() => {
                     setEditing(false);
-                    setValues({
-                      code: initial.code,
-                      name: initial.name,
-                      vatNumber: initial.vatNumber ?? "",
-                      email: initial.email ?? "",
-                      phone: initial.phone ?? "",
-                      notes: initial.notes ?? "",
-                      status: initial.status,
-                    });
+                    setValues(customerFormValuesFromItem(initial));
                     setCustomValues(parseCustomFields(initial.customFields));
                   }}
                 >

@@ -19,6 +19,38 @@ enum CustomerStatus {
   INACTIVE
 }
 
+/// Νομική μορφή πελάτη (Ελλάδα / ΕΕ)
+enum CustomerLegalForm {
+  AE
+  OE
+  EE
+  IKE
+  EPE
+  INDIVIDUAL
+  PUBLIC
+  NGO
+  OTHER
+}
+
+/// Καθεστώς ΦΠΑ
+enum CustomerVatStatus {
+  NORMAL
+  EXEMPT
+  INTRA_EU
+  EXPORT
+  OSS
+}
+
+/// Κατηγορία πελάτη
+enum CustomerCategory {
+  RETAIL
+  WHOLESALE
+  DISTRIBUTOR
+  PUBLIC
+  INTERNAL
+  OTHER
+}
+
 enum SpaceType {
   OFFICE
   WAREHOUSE
@@ -38,6 +70,7 @@ model Tenant {
   memberships      Membership[]
   auditEvents      AuditEvent[]
   customers        Customer[]
+  customerContacts CustomerContact[]
   branches         Branch[]
   spaces           Space[]
   invoices         Invoice[]
@@ -154,23 +187,73 @@ model AuditEvent {
   @@map("audit_events")
 }
 
-/// Πελάτης — έχει πολλά υποκαταστήματα
+/// Πελάτης — πλήρη master data ERP (ταυτότητα, φορολογικά, διεύθυνση, εμπορικά, τραπεζικά)
 model Customer {
   id        String         @id @default(cuid())
   tenantId  String
   code      String
+  /// Επωνυμία / νομική επωνυμία
   name      String
-  vatNumber String?
-  email     String?
-  phone     String?
-  status    CustomerStatus @default(ACTIVE)
-  notes     String?
+  /// Διακριτικός τίτλος
+  tradeName String?
+  legalForm CustomerLegalForm?
+  /// Φυσικό πρόσωπο
+  isPerson  Boolean        @default(false)
+
+  vatNumber   String?
+  taxOffice   String?
+  gemhNumber  String?
+  eoriNumber  String?
+  vatStatus   CustomerVatStatus @default(NORMAL)
+  profession  String?
+
+  email   String?
+  phone   String?
+  mobile  String?
+  fax     String?
+  website String?
+
+  address    String?
+  address2   String?
+  city       String?
+  postalCode String?
+  region     String?
+  country    String  @default("GR")
+
+  shippingAddress    String?
+  shippingAddress2   String?
+  shippingCity       String?
+  shippingPostalCode String?
+  shippingRegion     String?
+  shippingCountry    String?
+
+  category           CustomerCategory?
+  salesperson        String?
+  paymentTermsDays   Int?
+  paymentTermsLabel  String?
+  creditLimit        Decimal? @db.Decimal(14, 2)
+  currency           String   @default("EUR")
+  locale             String   @default("el-GR")
+  discountPercent    Decimal? @db.Decimal(5, 2)
+  priceListCode      String?
+  shippingMethod     String?
+
+  iban              String?
+  bic               String?
+  bankName          String?
+  bankAccountHolder String?
+
+  isBlocked    Boolean        @default(false)
+  sendEinvoice Boolean        @default(false)
+  status       CustomerStatus @default(ACTIVE)
+  notes        String?
   /// Hybrid custom fields: { [fieldCode]: value }
   customFields Json?
-  createdAt DateTime       @default(now())
-  updatedAt DateTime       @updatedAt
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
 
-  tenant   Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tenant   Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  contacts CustomerContact[]
   branches Branch[]
   invoices Invoice[]
   orders   Order[]
@@ -180,9 +263,35 @@ model Customer {
 
   @@unique([tenantId, code])
   @@index([tenantId, name])
+  @@index([tenantId, vatNumber])
+  @@index([tenantId, city])
+  @@index([tenantId, category])
   @@index([tenantId, createdAt(sort: Desc), id(sort: Desc)])
   @@index([tenantId, status, createdAt(sort: Desc)])
   @@map("customers")
+}
+
+/// Επαφή / contact person πελάτη
+model CustomerContact {
+  id         String   @id @default(cuid())
+  tenantId   String
+  customerId String
+  name       String
+  title      String?
+  email      String?
+  phone      String?
+  mobile     String?
+  isPrimary  Boolean  @default(false)
+  notes      String?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  tenant   Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  customer Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, customerId, isPrimary])
+  @@index([tenantId, customerId, createdAt(sort: Desc)])
+  @@map("customer_contacts")
 }
 
 /// Υποκατάστημα πελάτη — έχει πολλούς χώρους
@@ -193,9 +302,14 @@ model Branch {
   code       String
   name       String
   address    String?
+  address2   String?
   city       String?
   postalCode String?
+  region     String?
+  country    String?  @default("GR")
+  email      String?
   phone      String?
+  fax        String?
   /// WGS84 latitude for map / near-me queries
   lat        Float?
   /// WGS84 longitude for map / near-me queries

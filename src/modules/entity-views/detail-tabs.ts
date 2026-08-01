@@ -5,6 +5,7 @@ export type DetailTabKey =
   | "invoices"
   | "orders"
   | "profile"
+  | "contacts"
   | "branches"
   | "activity";
 
@@ -23,6 +24,7 @@ export const CUSTOMER_DETAIL_TABS: DetailTabDef[] = [
   { key: "invoices", label: "Παραστατικά", visible: true },
   { key: "orders", label: "Παραγγελίες", visible: true },
   { key: "profile", label: "Στοιχεία", visible: true },
+  { key: "contacts", label: "Επαφές", visible: true },
   { key: "branches", label: "Υποκαταστήματα", visible: true },
   { key: "activity", label: "Δραστηριότητα", visible: true },
 ];
@@ -46,6 +48,7 @@ const detailTabSchema = z.object({
     "invoices",
     "orders",
     "profile",
+    "contacts",
     "branches",
     "activity",
   ]),
@@ -56,7 +59,14 @@ const detailTabSchema = z.object({
 export const detailLayoutConfigSchema = z.object({
   tabs: z.array(detailTabSchema).min(1).max(20),
   defaultTab: z
-    .enum(["invoices", "orders", "profile", "branches", "activity"])
+    .enum([
+      "invoices",
+      "orders",
+      "profile",
+      "contacts",
+      "branches",
+      "activity",
+    ])
     .optional(),
 });
 

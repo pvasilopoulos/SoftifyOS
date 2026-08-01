@@ -79,19 +79,13 @@ export function CustomerQuickDrawer({
     }
     setPending(true);
     setError(null);
+    const { customerBodyFromValues } = await import(
+      "@/modules/customers/payload"
+    );
     const res = await fetch("/api/customers", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        code: String(values.code ?? ""),
-        name: String(values.name ?? ""),
-        vatNumber: values.vatNumber ? String(values.vatNumber) : null,
-        email: values.email ? String(values.email) : null,
-        phone: values.phone ? String(values.phone) : null,
-        notes: values.notes ? String(values.notes) : null,
-        status: (values.status as "ACTIVE" | "INACTIVE") ?? "ACTIVE",
-        customFields: customValues,
-      }),
+      body: JSON.stringify(customerBodyFromValues(values, customValues)),
     });
     const data = await res.json();
     setPending(false);

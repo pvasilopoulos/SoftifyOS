@@ -41,6 +41,61 @@ const statusActiveInactive = [
   { value: "INACTIVE", label: "Ανενεργό" },
 ];
 
+const customerLegalFormOptions = [
+  { value: "AE", label: "Α.Ε." },
+  { value: "OE", label: "Ο.Ε." },
+  { value: "EE", label: "Ε.Ε." },
+  { value: "IKE", label: "Ι.Κ.Ε." },
+  { value: "EPE", label: "Ε.Π.Ε." },
+  { value: "INDIVIDUAL", label: "Φυσικό πρόσωπο" },
+  { value: "PUBLIC", label: "Δημόσιο / ΝΠΔΔ" },
+  { value: "NGO", label: "ΜΚΟ / Σωματείο" },
+  { value: "OTHER", label: "Άλλο" },
+];
+
+const customerVatStatusOptions = [
+  { value: "NORMAL", label: "Κανονικό ΦΠΑ" },
+  { value: "EXEMPT", label: "Απαλλαγή" },
+  { value: "INTRA_EU", label: "Ενδοκοινοτικό" },
+  { value: "EXPORT", label: "Εξαγωγή" },
+  { value: "OSS", label: "OSS" },
+];
+
+const customerCategoryOptions = [
+  { value: "RETAIL", label: "Λιανική" },
+  { value: "WHOLESALE", label: "Χονδρική" },
+  { value: "DISTRIBUTOR", label: "Διανομέας" },
+  { value: "PUBLIC", label: "Δημόσιο" },
+  { value: "INTERNAL", label: "Εσωτερικός" },
+  { value: "OTHER", label: "Άλλο" },
+];
+
+const countryOptions = [
+  { value: "GR", label: "Ελλάδα" },
+  { value: "CY", label: "Κύπρος" },
+  { value: "BG", label: "Βουλγαρία" },
+  { value: "RO", label: "Ρουμανία" },
+  { value: "DE", label: "Γερμανία" },
+  { value: "IT", label: "Ιταλία" },
+  { value: "FR", label: "Γαλλία" },
+  { value: "GB", label: "Ην. Βασίλειο" },
+  { value: "US", label: "ΗΠΑ" },
+  { value: "OTHER", label: "Άλλη" },
+];
+
+const currencyOptions = [
+  { value: "EUR", label: "EUR" },
+  { value: "USD", label: "USD" },
+  { value: "GBP", label: "GBP" },
+  { value: "CHF", label: "CHF" },
+];
+
+const localeOptions = [
+  { value: "el-GR", label: "Ελληνικά" },
+  { value: "en-GB", label: "English" },
+  { value: "de-DE", label: "Deutsch" },
+];
+
 export const ENTITY_MODULES: EntityModule[] = [
   "CUSTOMERS",
   "PRODUCTS",
@@ -59,9 +114,48 @@ export const ENTITY_REGISTRY: Record<EntityModule, EntityMeta> = {
     builtins: [
       { key: "code", label: "Κωδικός", type: "text", required: true, listable: true, formable: true, filterable: true },
       { key: "name", label: "Επωνυμία", type: "text", required: true, listable: true, formable: true, filterable: true },
+      { key: "tradeName", label: "Διακριτικός τίτλος", type: "text", listable: true, formable: true, filterable: true },
+      { key: "legalForm", label: "Νομική μορφή", type: "select", listable: true, formable: true, filterable: true, options: customerLegalFormOptions },
+      { key: "isPerson", label: "Φυσικό πρόσωπο", type: "boolean", formable: true, filterable: true },
       { key: "vatNumber", label: "ΑΦΜ", type: "text", listable: true, formable: true, filterable: true },
-      { key: "email", label: "Email", type: "email", listable: true, formable: true },
+      { key: "taxOffice", label: "ΔΟΥ", type: "text", listable: true, formable: true, filterable: true },
+      { key: "gemhNumber", label: "ΓΕΜΗ", type: "text", formable: true, filterable: true },
+      { key: "eoriNumber", label: "EORI", type: "text", formable: true },
+      { key: "vatStatus", label: "Καθεστώς ΦΠΑ", type: "select", listable: true, formable: true, filterable: true, options: customerVatStatusOptions },
+      { key: "profession", label: "Επάγγελμα", type: "text", formable: true },
+      { key: "email", label: "Email", type: "email", listable: true, formable: true, filterable: true },
       { key: "phone", label: "Τηλέφωνο", type: "phone", listable: true, formable: true },
+      { key: "mobile", label: "Κινητό", type: "phone", listable: true, formable: true },
+      { key: "fax", label: "Fax", type: "phone", formable: true },
+      { key: "website", label: "Ιστότοπος", type: "text", formable: true },
+      { key: "address", label: "Διεύθυνση", type: "text", listable: true, formable: true },
+      { key: "address2", label: "Διεύθυνση 2", type: "text", formable: true },
+      { key: "city", label: "Πόλη", type: "text", listable: true, formable: true, filterable: true },
+      { key: "postalCode", label: "Τ.Κ.", type: "text", listable: true, formable: true },
+      { key: "region", label: "Νομός / Περιοχή", type: "text", formable: true, filterable: true },
+      { key: "country", label: "Χώρα", type: "select", listable: true, formable: true, filterable: true, options: countryOptions },
+      { key: "shippingAddress", label: "Διεύθυνση αποστολής", type: "text", formable: true },
+      { key: "shippingAddress2", label: "Διεύθυνση αποστολής 2", type: "text", formable: true },
+      { key: "shippingCity", label: "Πόλη αποστολής", type: "text", formable: true },
+      { key: "shippingPostalCode", label: "Τ.Κ. αποστολής", type: "text", formable: true },
+      { key: "shippingRegion", label: "Νομός αποστολής", type: "text", formable: true },
+      { key: "shippingCountry", label: "Χώρα αποστολής", type: "select", formable: true, options: countryOptions },
+      { key: "category", label: "Κατηγορία", type: "select", listable: true, formable: true, filterable: true, options: customerCategoryOptions },
+      { key: "salesperson", label: "Πωλητής", type: "text", listable: true, formable: true, filterable: true },
+      { key: "paymentTermsDays", label: "Όροι πληρωμής (ημέρες)", type: "number", listable: true, formable: true },
+      { key: "paymentTermsLabel", label: "Όροι πληρωμής", type: "text", formable: true },
+      { key: "creditLimit", label: "Πιστωτικό όριο", type: "money", listable: true, formable: true },
+      { key: "currency", label: "Νόμισμα", type: "select", listable: true, formable: true, options: currencyOptions },
+      { key: "locale", label: "Γλώσσα", type: "select", formable: true, options: localeOptions },
+      { key: "discountPercent", label: "Έκπτωση %", type: "number", formable: true },
+      { key: "priceListCode", label: "Τιμοκατάλογος", type: "text", formable: true },
+      { key: "shippingMethod", label: "Τρόπος αποστολής", type: "text", formable: true },
+      { key: "iban", label: "IBAN", type: "text", formable: true },
+      { key: "bic", label: "BIC/SWIFT", type: "text", formable: true },
+      { key: "bankName", label: "Τράπεζα", type: "text", formable: true },
+      { key: "bankAccountHolder", label: "Δικαιούχος λογαριασμού", type: "text", formable: true },
+      { key: "isBlocked", label: "Μπλοκαρισμένος", type: "boolean", listable: true, formable: true, filterable: true },
+      { key: "sendEinvoice", label: "Ηλ. τιμολόγηση", type: "boolean", formable: true },
       { key: "status", label: "Κατάσταση", type: "select", listable: true, formable: true, filterable: true, options: statusActiveInactive },
       { key: "notes", label: "Σημειώσεις", type: "textarea", formable: true },
       { key: "branchCount", label: "Υποκαταστήματα", type: "number", listable: true },

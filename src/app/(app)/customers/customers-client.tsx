@@ -35,13 +35,24 @@ export type CustomerListItem = {
   id: string;
   code: string;
   name: string;
+  tradeName?: string | null;
   vatNumber: string | null;
+  taxOffice?: string | null;
   email: string | null;
   phone: string | null;
+  mobile?: string | null;
+  city?: string | null;
+  postalCode?: string | null;
+  category?: string | null;
+  salesperson?: string | null;
+  creditLimit?: number | null;
+  currency?: string | null;
+  isBlocked?: boolean;
   status: string;
   branchCount: number;
   createdAt: string;
   customFields?: Record<string, unknown>;
+  [key: string]: unknown;
 };
 
 type ListViewOpt = {
@@ -255,16 +266,7 @@ export function CustomersClient({
   function openPeek(row: Record<string, unknown> & { id: string }) {
     const found = items.find((c) => c.id === row.id);
     if (!found) return;
-    setPeekCustomer({
-      id: found.id,
-      code: found.code,
-      name: found.name,
-      vatNumber: found.vatNumber,
-      email: found.email,
-      phone: found.phone,
-      status: found.status,
-      customFields: found.customFields,
-    });
+    setPeekCustomer({ ...found });
   }
 
   async function moveKanban(
@@ -496,12 +498,7 @@ export function CustomersClient({
               c.id === patch.id
                 ? {
                     ...c,
-                    code: patch.code,
-                    name: patch.name,
-                    vatNumber: patch.vatNumber,
-                    email: patch.email,
-                    phone: patch.phone,
-                    status: patch.status,
+                    ...patch,
                     customFields: parseCustomFieldsSafe(patch.customFields),
                   }
                 : c,

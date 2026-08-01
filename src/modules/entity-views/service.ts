@@ -17,6 +17,8 @@ type Db = PrismaClient | Prisma.TransactionClient;
 export async function ensureEntityViewDefaults(db: Db, tenantId: string) {
   for (const entity of ENTITY_MODULES) {
     const seed = defaultViewsSeed(entity);
+    // Refresh system CUSTOMERS views so ERP field expansions land in existing tenants
+    const refreshSystem = entity === "CUSTOMERS";
     for (const row of seed.list) {
       await db.entityListView.upsert({
         where: {
@@ -33,7 +35,14 @@ export async function ensureEntityViewDefaults(db: Db, tenantId: string) {
           isSystem: row.isSystem,
           isActive: true,
         },
-        update: {},
+        update:
+          refreshSystem && row.isSystem
+            ? {
+                name: row.name,
+                description: row.description,
+                configJson: row.config,
+              }
+            : {},
       });
     }
     for (const row of seed.form) {
@@ -52,7 +61,14 @@ export async function ensureEntityViewDefaults(db: Db, tenantId: string) {
           isSystem: row.isSystem,
           isActive: true,
         },
-        update: {},
+        update:
+          refreshSystem && row.isSystem
+            ? {
+                name: row.name,
+                description: row.description,
+                configJson: row.config,
+              }
+            : {},
       });
     }
   }

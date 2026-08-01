@@ -7,9 +7,12 @@ import { writeAuditEvent } from "@/platform/tenancy/audit";
 import { buildChangeMeta } from "@/platform/tenancy/audit-diff";
 import { getErrorMessage } from "@/shared/lib/safe";
 import { customerUpdateSchema } from "@/modules/master-data/schemas";
+import { mergeCustomFields } from "@/modules/entity-views/service";
 import {
-  mergeCustomFields,
-} from "@/modules/entity-views/service";
+  CUSTOMER_PATCHABLE_KEYS,
+  prismaCustomerDataFromPatched,
+  serializeCustomer,
+} from "@/modules/customers/payload";
 
 export const dynamic = "force-dynamic";
 
@@ -27,6 +30,9 @@ export async function GET(
     const customer = await prisma.customer.findFirst({
       where: { id, tenantId: session.tenantId },
       include: {
+        contacts: {
+          orderBy: [{ isPrimary: "desc" }, { name: "asc" }],
+        },
         branches: {
           orderBy: [{ isPrimary: "desc" }, { name: "asc" }],
           include: {
@@ -41,14 +47,17 @@ export async function GET(
       return NextResponse.json({ error: "Δεν βρέθηκε" }, { status: 404 });
     }
 
+    const { contacts, branches, ...rest } = customer;
+
     return NextResponse.json({
       item: {
-        ...customer,
+        ...serializeCustomer({ ...rest } as Record<string, unknown>),
         customFields:
           customer.customFields && typeof customer.customFields === "object"
             ? customer.customFields
             : {},
-        branches: customer.branches.map((b) => ({
+        contacts,
+        branches: branches.map((b) => ({
           ...b,
           spaces: b.spaces.map((s) => ({
             ...s,
@@ -104,29 +113,17 @@ export async function PATCH(
       );
     }
 
-    const previous: Record<string, unknown> = {
+    const previous = {
       id: existing.id,
-      code: existing.code,
-      name: existing.name,
-      vatNumber: existing.vatNumber,
-      email: existing.email,
-      phone: existing.phone,
-      notes: existing.notes,
-      status: existing.status,
+      ...serializeCustomer({ ...existing } as Record<string, unknown>),
       customFields: existing.customFields,
     };
 
     const draftRecord: Record<string, unknown> = {
       ...previous,
-      ...(body.code !== undefined ? { code: body.code } : {}),
-      ...(body.name !== undefined ? { name: body.name } : {}),
-      ...(body.vatNumber !== undefined
-        ? { vatNumber: body.vatNumber || null }
-        : {}),
-      ...(body.email !== undefined ? { email: body.email || null } : {}),
-      ...(body.phone !== undefined ? { phone: body.phone || null } : {}),
-      ...(body.notes !== undefined ? { notes: body.notes || null } : {}),
-      ...(body.status !== undefined ? { status: body.status } : {}),
+      ...Object.fromEntries(
+        Object.entries(body).filter(([, v]) => v !== undefined),
+      ),
       ...(customFields !== undefined ? { customFields } : {}),
     };
 
@@ -135,7 +132,7 @@ export async function PATCH(
       module: "CUSTOMERS",
       eventKey: "before.update",
       record: draftRecord,
-      previous,
+      previous: previous as Record<string, unknown>,
       user: {
         id: session.sub,
         role: session.role,
@@ -150,16 +147,11 @@ export async function PATCH(
       );
     }
 
-    const patched = applyRecordPatch(draftRecord, before.record, [
-      "code",
-      "name",
-      "vatNumber",
-      "email",
-      "phone",
-      "notes",
-      "status",
-      "customFields",
-    ]);
+    const patched = applyRecordPatch(
+      draftRecord,
+      before.record,
+      [...CUSTOMER_PATCHABLE_KEYS],
+    );
 
     if (
       body.customFields !== undefined ||
@@ -174,29 +166,18 @@ export async function PATCH(
       );
     }
 
+    const data = prismaCustomerDataFromPatched(patched);
     const customer = await prisma.customer.update({
       where: { id },
       data: {
-        code: String(patched.code),
-        name: String(patched.name),
-        vatNumber: (patched.vatNumber as string | null) || null,
-        email: (patched.email as string | null) || null,
-        phone: (patched.phone as string | null) || null,
-        notes: (patched.notes as string | null) || null,
-        status: (patched.status as "ACTIVE" | "INACTIVE") ?? existing.status,
+        ...data,
         ...(customFields !== undefined ? { customFields } : {}),
-      },
+      } as Parameters<typeof prisma.customer.update>[0]["data"],
     });
 
-    const afterRecord: Record<string, unknown> = {
+    const afterRecord = {
       id: customer.id,
-      code: customer.code,
-      name: customer.name,
-      vatNumber: customer.vatNumber,
-      email: customer.email,
-      phone: customer.phone,
-      notes: customer.notes,
-      status: customer.status,
+      ...serializeCustomer({ ...customer } as Record<string, unknown>),
       customFields: customer.customFields,
     };
 
@@ -207,8 +188,8 @@ export async function PATCH(
       entity: "customer",
       entityId: customer.id,
       meta: buildChangeMeta({
-        before: previous,
-        after: afterRecord,
+        before: previous as Record<string, unknown>,
+        after: afterRecord as Record<string, unknown>,
         extra: { code: customer.code },
       }),
     });
@@ -217,8 +198,8 @@ export async function PATCH(
       tenantId: session.tenantId,
       module: "CUSTOMERS",
       eventKey: "after.update",
-      record: afterRecord,
-      previous,
+      record: afterRecord as Record<string, unknown>,
+      previous: previous as Record<string, unknown>,
       user: {
         id: session.sub,
         role: session.role,
@@ -228,13 +209,15 @@ export async function PATCH(
     });
     if (after.failed) {
       return NextResponse.json({
-        item: customer,
+        item: serializeCustomer({ ...customer } as Record<string, unknown>),
         warning: after.failed.message,
         script: after.failed.scriptCode,
       });
     }
 
-    return NextResponse.json({ item: customer });
+    return NextResponse.json({
+      item: serializeCustomer({ ...customer } as Record<string, unknown>),
+    });
   } catch (error) {
     if (error instanceof z.ZodError) {
       return NextResponse.json({ error: "Μη έγκυρα δεδομένα" }, { status: 400 });

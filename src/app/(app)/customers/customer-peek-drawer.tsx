@@ -16,6 +16,10 @@ import {
   type CustomFieldsMap,
   type FormViewConfig,
 } from "@/modules/entity-views/types";
+import {
+  customerBodyFromValues,
+  customerFormValuesFromItem,
+} from "@/modules/customers/payload";
 
 type FormViewOpt = {
   id: string;
@@ -35,6 +39,7 @@ export type CustomerPeekData = {
   status: string;
   notes?: string | null;
   customFields?: unknown;
+  [key: string]: unknown;
 };
 
 export function CustomerPeekDrawer({
@@ -76,15 +81,7 @@ export function CustomerPeekDrawer({
 
   useEffect(() => {
     if (!customer || !open) return;
-    setValues({
-      code: customer.code,
-      name: customer.name,
-      vatNumber: customer.vatNumber ?? "",
-      email: customer.email ?? "",
-      phone: customer.phone ?? "",
-      notes: customer.notes ?? "",
-      status: customer.status,
-    });
+    setValues(customerFormValuesFromItem(customer));
     setCustomValues(parseCustomFields(customer.customFields));
     setError(null);
     setMessage(null);
@@ -108,19 +105,11 @@ export function CustomerPeekDrawer({
     setPending(true);
     setError(null);
     setMessage(null);
+    const body = customerBodyFromValues(values, customValues);
     const res = await fetch(`/api/customers/${customer!.id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        code: String(values.code ?? ""),
-        name: String(values.name ?? ""),
-        vatNumber: values.vatNumber ? String(values.vatNumber) : null,
-        email: values.email ? String(values.email) : null,
-        phone: values.phone ? String(values.phone) : null,
-        notes: values.notes ? String(values.notes) : null,
-        status: values.status,
-        customFields: customValues,
-      }),
+      body: JSON.stringify(body),
     });
     const data = await res.json();
     setPending(false);
@@ -129,14 +118,16 @@ export function CustomerPeekDrawer({
       return;
     }
     const patch: CustomerPeekData = {
+      ...customer!,
+      ...body,
       id: customer!.id,
-      code: String(values.code ?? ""),
-      name: String(values.name ?? ""),
-      vatNumber: values.vatNumber ? String(values.vatNumber) : null,
-      email: values.email ? String(values.email) : null,
-      phone: values.phone ? String(values.phone) : null,
-      status: String(values.status ?? customer!.status),
-      notes: values.notes ? String(values.notes) : null,
+      code: String(body.code ?? ""),
+      name: String(body.name ?? ""),
+      vatNumber: (body.vatNumber as string | null) ?? null,
+      email: (body.email as string | null) ?? null,
+      phone: (body.phone as string | null) ?? null,
+      status: String(body.status ?? customer!.status),
+      notes: (body.notes as string | null) ?? null,
       customFields: customValues,
     };
     setMessage("Αποθηκεύτηκε.");

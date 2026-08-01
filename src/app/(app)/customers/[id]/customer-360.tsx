@@ -15,6 +15,10 @@ import { Button } from "@/shared/ui/button";
 import { toast } from "@/shared/ui/toaster";
 import { CustomerEditPanel } from "./customer-edit-panel";
 import { CustomerHierarchyClient } from "./customer-hierarchy-client";
+import {
+  CustomerContactsPanel,
+  type CustomerContactItem,
+} from "../customer-contacts-panel";
 import type { CustomFieldDef } from "@/modules/entity-views/dynamic-ui";
 import type { FormViewConfig } from "@/modules/entity-views/types";
 import type {
@@ -28,6 +32,7 @@ const FALLBACK_TAB_LABEL: Record<TabKey, string> = {
   invoices: "Παραστατικά",
   orders: "Παραγγελίες",
   profile: "Στοιχεία",
+  contacts: "Επαφές",
   branches: "Υποκαταστήματα",
   activity: "Δραστηριότητα",
 };
@@ -46,7 +51,7 @@ type Branch = Parameters<
 
 type Props = {
   customerId: string;
-  customer: {
+  customer: Record<string, unknown> & {
     code: string;
     name: string;
     vatNumber: string | null;
@@ -56,6 +61,7 @@ type Props = {
     status: string;
     customFields: unknown;
   };
+  contacts: CustomerContactItem[];
   openBalance: number;
   openInvoices: number;
   invoices: Array<{
@@ -91,6 +97,7 @@ type Props = {
 export function Customer360({
   customerId,
   customer,
+  contacts,
   openBalance,
   openInvoices,
   invoices,
@@ -133,6 +140,7 @@ export function Customer360({
     invoices: invoices.length,
     orders: orders.length,
     profile: 0,
+    contacts: contacts.length,
     branches: branches.length,
     activity: activities.length,
   };
@@ -297,16 +305,15 @@ export function Customer360({
               formViews={formViews}
               customFields={customFields}
               role={role}
-              initial={{
-                code: customer.code,
-                name: customer.name,
-                vatNumber: customer.vatNumber,
-                email: customer.email,
-                phone: customer.phone,
-                notes: customer.notes,
-                status: customer.status,
-                customFields: customer.customFields,
-              }}
+              initial={customer}
+            />
+          ) : null}
+
+          {tab === "contacts" ? (
+            <CustomerContactsPanel
+              customerId={customerId}
+              initial={contacts}
+              canEdit={canWrite}
             />
           ) : null}
 
@@ -375,9 +382,31 @@ export function Customer360({
                 <dt className="text-slate-500">Κωδικός</dt>
                 <dd className="font-mono font-medium">{customer.code}</dd>
               </div>
+              {customer.tradeName ? (
+                <div className="flex justify-between gap-2">
+                  <dt className="text-slate-500">Διακριτικός</dt>
+                  <dd className="text-right font-medium">
+                    {String(customer.tradeName)}
+                  </dd>
+                </div>
+              ) : null}
               <div className="flex justify-between gap-2">
                 <dt className="text-slate-500">ΑΦΜ</dt>
                 <dd className="font-medium">{customer.vatNumber || "—"}</dd>
+              </div>
+              <div className="flex justify-between gap-2">
+                <dt className="text-slate-500">ΔΟΥ</dt>
+                <dd className="font-medium">
+                  {customer.taxOffice ? String(customer.taxOffice) : "—"}
+                </dd>
+              </div>
+              <div className="flex justify-between gap-2">
+                <dt className="text-slate-500">Πόλη</dt>
+                <dd className="font-medium">
+                  {customer.city
+                    ? String(customer.city)
+                    : primaryBranch?.city || "—"}
+                </dd>
               </div>
               <div className="flex items-start justify-between gap-2">
                 <dt className="text-slate-500">Email</dt>

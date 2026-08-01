@@ -9,6 +9,11 @@ import {
   listQuerySchema,
 } from "@/shared/lib/cursor";
 import { customerCreateSchema } from "@/modules/master-data/schemas";
+import {
+  CUSTOMER_PATCHABLE_KEYS,
+  prismaCustomerDataFromPatched,
+  serializeCustomer,
+} from "@/modules/customers/payload";
 import { writeAuditEvent } from "@/platform/tenancy/audit";
 import { getErrorMessage } from "@/shared/lib/safe";
 
@@ -45,9 +50,25 @@ export async function GET(request: NextRequest) {
         id: string;
         code: string;
         name: string;
+        tradeName: string | null;
+        legalForm: string | null;
         vatNumber: string | null;
+        taxOffice: string | null;
+        vatStatus: string;
         email: string | null;
         phone: string | null;
+        mobile: string | null;
+        address: string | null;
+        city: string | null;
+        postalCode: string | null;
+        region: string | null;
+        country: string;
+        category: string | null;
+        salesperson: string | null;
+        paymentTermsDays: number | null;
+        creditLimit: unknown;
+        currency: string;
+        isBlocked: boolean;
         status: string;
         createdAt: Date;
         branchCount: bigint;
@@ -55,8 +76,12 @@ export async function GET(request: NextRequest) {
       }>
     >`
       SELECT
-        c.id, c.code, c.name, c."vatNumber", c.email, c.phone, c.status, c."createdAt",
-        c."customFields",
+        c.id, c.code, c.name, c."tradeName", c."legalForm"::text AS "legalForm",
+        c."vatNumber", c."taxOffice", c."vatStatus"::text AS "vatStatus",
+        c.email, c.phone, c.mobile, c.address, c.city, c."postalCode", c.region, c.country,
+        c.category::text AS category, c.salesperson, c."paymentTermsDays",
+        c."creditLimit", c.currency, c."isBlocked", c.status::text AS status,
+        c."createdAt", c."customFields",
         (SELECT COUNT(*) FROM branches b WHERE b."customerId" = c.id AND b."tenantId" = c."tenantId") AS "branchCount"
       FROM customers c
       WHERE c."tenantId" = ${session.tenantId}
@@ -66,7 +91,12 @@ export async function GET(request: NextRequest) {
             ? Prisma.sql`AND (
                 c.name ILIKE ${"%" + q + "%"}
                 OR c.code ILIKE ${"%" + q + "%"}
+                OR COALESCE(c."tradeName", '') ILIKE ${"%" + q + "%"}
                 OR COALESCE(c."vatNumber", '') ILIKE ${"%" + q + "%"}
+                OR COALESCE(c."taxOffice", '') ILIKE ${"%" + q + "%"}
+                OR COALESCE(c.city, '') ILIKE ${"%" + q + "%"}
+                OR COALESCE(c.email, '') ILIKE ${"%" + q + "%"}
+                OR COALESCE(c.phone, '') ILIKE ${"%" + q + "%"}
               )`
             : Prisma.empty
         }
@@ -81,7 +111,8 @@ export async function GET(request: NextRequest) {
 
     const hasMore = rows.length > limit;
     const items = (hasMore ? rows.slice(0, limit) : rows).map((row) => ({
-      ...row,
+      ...serializeCustomer({ ...row } as Record<string, unknown>),
+      id: row.id,
       branchCount: Number(row.branchCount),
       createdAt: row.createdAt.toISOString(),
       customFields:
@@ -135,13 +166,19 @@ export async function POST(request: Request) {
     );
 
     const draftRecord: Record<string, unknown> = {
-      code: body.code,
-      name: body.name,
+      ...body,
       vatNumber: body.vatNumber || null,
       email: body.email || null,
       phone: body.phone || null,
       notes: body.notes || null,
       status: body.status ?? "ACTIVE",
+      country: body.country || "GR",
+      currency: body.currency || "EUR",
+      locale: body.locale || "el-GR",
+      vatStatus: body.vatStatus || "NORMAL",
+      isPerson: body.isPerson ?? false,
+      isBlocked: body.isBlocked ?? false,
+      sendEinvoice: body.sendEinvoice ?? false,
       customFields,
     };
 
@@ -164,16 +201,11 @@ export async function POST(request: Request) {
       );
     }
 
-    const patched = applyRecordPatch(draftRecord, before.record, [
-      "code",
-      "name",
-      "vatNumber",
-      "email",
-      "phone",
-      "notes",
-      "status",
-      "customFields",
-    ]);
+    const patched = applyRecordPatch(
+      draftRecord,
+      before.record,
+      [...CUSTOMER_PATCHABLE_KEYS],
+    );
     if (
       patched.customFields &&
       typeof patched.customFields === "object" &&
@@ -187,18 +219,13 @@ export async function POST(request: Request) {
       );
     }
 
+    const data = prismaCustomerDataFromPatched(patched);
     const customer = await prisma.customer.create({
       data: {
         tenantId: session.tenantId,
-        code: String(patched.code),
-        name: String(patched.name),
-        vatNumber: (patched.vatNumber as string | null) || null,
-        email: (patched.email as string | null) || null,
-        phone: (patched.phone as string | null) || null,
-        notes: (patched.notes as string | null) || null,
-        status: (patched.status as "ACTIVE" | "INACTIVE") ?? "ACTIVE",
+        ...data,
         customFields,
-      },
+      } as Parameters<typeof prisma.customer.create>[0]["data"],
     });
 
     await writeAuditEvent({
@@ -210,22 +237,16 @@ export async function POST(request: Request) {
       meta: { code: customer.code },
     });
 
-    const afterRecord: Record<string, unknown> = {
+    const afterRecord = {
       id: customer.id,
-      code: customer.code,
-      name: customer.name,
-      vatNumber: customer.vatNumber,
-      email: customer.email,
-      phone: customer.phone,
-      notes: customer.notes,
-      status: customer.status,
+      ...serializeCustomer({ ...customer } as Record<string, unknown>),
       customFields: customer.customFields,
     };
     const after = await dispatchScriptEvent(prisma, {
       tenantId: session.tenantId,
       module: "CUSTOMERS",
       eventKey: "after.create",
-      record: afterRecord,
+      record: afterRecord as Record<string, unknown>,
       user: {
         id: session.sub,
         role: session.role,
@@ -236,7 +257,7 @@ export async function POST(request: Request) {
     if (after.failed) {
       return NextResponse.json(
         {
-          item: customer,
+          item: serializeCustomer({ ...customer } as Record<string, unknown>),
           warning: after.failed.message,
           script: after.failed.scriptCode,
         },
@@ -244,7 +265,12 @@ export async function POST(request: Request) {
       );
     }
 
-    return NextResponse.json({ item: customer }, { status: 201 });
+    return NextResponse.json(
+      {
+        item: serializeCustomer({ ...customer } as Record<string, unknown>),
+      },
+      { status: 201 },
+    );
   } catch (error) {
     if (
       error instanceof Prisma.PrismaClientKnownRequestError &&

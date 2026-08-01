@@ -51,6 +51,9 @@ export default async function CustomerDetailPage({
     prisma.customer.findFirst({
       where: { id, tenantId: session.tenantId },
       include: {
+        contacts: {
+          orderBy: [{ isPrimary: "desc" }, { name: "asc" }],
+        },
         branches: {
           orderBy: [{ isPrimary: "desc" }, { name: "asc" }],
           include: {
@@ -145,7 +148,15 @@ export default async function CustomerDetailPage({
         </Link>
         <PageHeader
           title={customer.name}
-          description={`${customer.code}${customer.vatNumber ? ` · ΑΦΜ ${customer.vatNumber}` : ""}`}
+          description={[
+            customer.code,
+            customer.tradeName,
+            customer.vatNumber ? `ΑΦΜ ${customer.vatNumber}` : null,
+            customer.taxOffice ? `ΔΟΥ ${customer.taxOffice}` : null,
+            customer.city,
+          ]
+            .filter(Boolean)
+            .join(" · ")}
           actions={
             <Badge tone={customer.status === "ACTIVE" ? "emerald" : "slate"}>
               {customer.status === "ACTIVE" ? "Ενεργός" : "Ανενεργός"}
@@ -162,15 +173,60 @@ export default async function CustomerDetailPage({
         openInvoices={openInvoices.length}
         detailLayout={detailLayout}
         customer={{
+          id: customer.id,
           code: customer.code,
           name: customer.name,
+          tradeName: customer.tradeName,
+          legalForm: customer.legalForm,
+          isPerson: customer.isPerson,
           vatNumber: customer.vatNumber,
+          taxOffice: customer.taxOffice,
+          gemhNumber: customer.gemhNumber,
+          eoriNumber: customer.eoriNumber,
+          vatStatus: customer.vatStatus,
+          profession: customer.profession,
           email: customer.email,
           phone: customer.phone,
+          mobile: customer.mobile,
+          fax: customer.fax,
+          website: customer.website,
+          address: customer.address,
+          address2: customer.address2,
+          city: customer.city,
+          postalCode: customer.postalCode,
+          region: customer.region,
+          country: customer.country,
+          shippingAddress: customer.shippingAddress,
+          shippingAddress2: customer.shippingAddress2,
+          shippingCity: customer.shippingCity,
+          shippingPostalCode: customer.shippingPostalCode,
+          shippingRegion: customer.shippingRegion,
+          shippingCountry: customer.shippingCountry,
+          category: customer.category,
+          salesperson: customer.salesperson,
+          paymentTermsDays: customer.paymentTermsDays,
+          paymentTermsLabel: customer.paymentTermsLabel,
+          creditLimit:
+            customer.creditLimit == null ? null : Number(customer.creditLimit),
+          currency: customer.currency,
+          locale: customer.locale,
+          discountPercent:
+            customer.discountPercent == null
+              ? null
+              : Number(customer.discountPercent),
+          priceListCode: customer.priceListCode,
+          shippingMethod: customer.shippingMethod,
+          iban: customer.iban,
+          bic: customer.bic,
+          bankName: customer.bankName,
+          bankAccountHolder: customer.bankAccountHolder,
+          isBlocked: customer.isBlocked,
+          sendEinvoice: customer.sendEinvoice,
           notes: customer.notes,
           status: customer.status,
           customFields: parseCustomFields(customer.customFields),
         }}
+        contacts={customer.contacts}
         formViews={formViews.map(serializeFormView)}
         customFields={fieldDefs}
         branches={branches}
