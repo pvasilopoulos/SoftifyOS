@@ -1,22 +1,29 @@
 "use client";
 
-import { useMemo, useState, useTransition } from "react";
+import Link from "next/link";
+import { useEffect, useMemo, useState, useTransition } from "react";
 import {
+  AlertTriangle,
+  ChevronLeft,
+  ChevronRight,
   Download,
   Eye,
   Filter,
+  Radio,
   RefreshCw,
   Search,
   Shield,
-  X,
   Copy,
   Check,
   UserRound,
   Clock3,
+  Activity,
+  KeyRound,
 } from "lucide-react";
 import { PageHeader } from "@/shared/ui/page-header";
 import { Badge } from "@/shared/ui/badge";
 import { Button } from "@/shared/ui/button";
+import { Drawer } from "@/shared/ui/drawer";
 import { cn } from "@/shared/lib/cn";
 import {
   parseAuditMeta,
@@ -40,6 +47,13 @@ type AuditItem = {
   user?: AuditUser | null;
 };
 
+type Summary = {
+  lastHour: number;
+  last24h: number;
+  auth24h: number;
+  risk24h: number;
+};
+
 type ListResponse = {
   items: AuditItem[];
   nextCursor: string | null;
@@ -47,7 +61,9 @@ type ListResponse = {
     ms: number;
     total: number;
     hasMore?: boolean;
+    count?: number;
   };
+  summary?: Summary | null;
   error?: string;
 };
 
@@ -67,6 +83,8 @@ const EMPTY_FILTERS: Filters = {
   to: "",
 };
 
+const PAGE_SIZES = [25, 50, 100] as const;
+
 const ACTION_PRESETS = [
   { value: "", label: "Όλες οι ενέργειες" },
   { value: "auth.", label: "Auth" },
@@ -76,6 +94,7 @@ const ACTION_PRESETS = [
   { value: "invoice.", label: "Τιμολόγια" },
   { value: "order.", label: "Παραγγελίες" },
   { value: "quote.", label: "Προσφορές" },
+  { value: "banking.", label: "Τράπεζες" },
   { value: "script.", label: "Scripts" },
 ] as const;
 
@@ -89,12 +108,14 @@ const ENTITY_PRESETS = [
   { value: "tenant_settings", label: "tenant_settings" },
   { value: "script_definition", label: "script_definition" },
   { value: "membership", label: "membership" },
+  { value: "bank_statement_line", label: "bank_statement_line" },
 ] as const;
 
 function actionTone(
   action: string,
 ): "teal" | "amber" | "slate" | "rose" | "emerald" {
-  if (action.includes("delete") || action.includes("fail")) return "rose";
+  if (action.includes("delete") || action.includes("fail") || action.includes("cancel"))
+    return "rose";
   if (action.startsWith("auth.login")) return "emerald";
   if (action.startsWith("auth.")) return "slate";
   if (action.startsWith("settings.")) return "amber";
@@ -112,6 +133,22 @@ function shortId(id: string | null | undefined) {
   if (!id) return "—";
   if (id.length <= 12) return id;
   return `${id.slice(0, 6)}…${id.slice(-4)}`;
+}
+
+function entityHref(entity: string | null, entityId: string | null) {
+  if (!entity || !entityId) return null;
+  switch (entity) {
+    case "customer":
+      return `/customers/${entityId}`;
+    case "product":
+      return `/products/${entityId}`;
+    case "invoice":
+      return `/invoices/${entityId}`;
+    case "order":
+      return `/orders/${entityId}`;
+    default:
+      return null;
+  }
 }
 
 function formatWhen(iso: string) {
@@ -148,17 +185,18 @@ function fromLocalInputValue(local: string) {
   return Number.isNaN(d.getTime()) ? "" : d.toISOString();
 }
 
-function toLocalInputValue(iso: string) {
-  if (!iso) return "";
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return "";
+function toDatetimeLocal(d: Date) {
   const pad = (n: number) => String(n).padStart(2, "0");
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
-function buildQuery(filters: Filters, cursor?: string | null) {
-  const params = new URLSearchParams({ limit: "50" });
-  if (cursor) params.set("cursor", cursor);
+function buildQuery(
+  filters: Filters,
+  opts: { cursor?: string | null; limit: number; summary?: boolean },
+) {
+  const params = new URLSearchParams({ limit: String(opts.limit) });
+  if (opts.cursor) params.set("cursor", opts.cursor);
+  if (opts.summary) params.set("summary", "1");
   if (filters.q.trim()) params.set("q", filters.q.trim());
   if (filters.action) params.set("action", filters.action);
   if (filters.entity) params.set("entity", filters.entity);
@@ -175,7 +213,8 @@ function CopyButton({ value }: { value: string }) {
     <button
       type="button"
       title="Αντιγραφή"
-      onClick={async () => {
+      onClick={async (e) => {
+        e.stopPropagation();
         try {
           await navigator.clipboard.writeText(value);
           setOk(true);
@@ -196,22 +235,30 @@ export function AuditEventsClient({
   initialNextCursor,
   initialMs,
   initialTotal,
+  initialSummary = null,
 }: {
   initialItems: AuditItem[];
   initialNextCursor: string | null;
   initialMs: number;
   initialTotal: number;
+  initialSummary?: Summary | null;
 }) {
   const [items, setItems] = useState(initialItems);
   const [nextCursor, setNextCursor] = useState(initialNextCursor);
   const [ms, setMs] = useState(initialMs);
   const [total, setTotal] = useState(initialTotal);
+  const [summary, setSummary] = useState<Summary | null>(initialSummary);
   const [filters, setFilters] = useState<Filters>(EMPTY_FILTERS);
   const [draft, setDraft] = useState<Filters>(EMPTY_FILTERS);
+  const [pageSize, setPageSize] = useState<(typeof PAGE_SIZES)[number]>(50);
+  /** Cursors used to fetch each page (index 0 = null = first page). */
+  const [pageCursors, setPageCursors] = useState<(string | null)[]>([null]);
+  const [pageIndex, setPageIndex] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
   const [detail, setDetail] = useState<AuditItem | null>(null);
-  const [filtersOpen, setFiltersOpen] = useState(true);
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  const [live, setLive] = useState(false);
 
   const activeFilterCount = useMemo(() => {
     let n = 0;
@@ -223,49 +270,89 @@ export function AuditEventsClient({
     return n;
   }, [filters]);
 
+  const rangeStart = total === 0 ? 0 : pageIndex * pageSize + 1;
+  const rangeEnd = Math.min(total, pageIndex * pageSize + items.length);
+  const pageCount = Math.max(1, Math.ceil(total / pageSize));
+
   async function fetchPage(opts: {
     filters: Filters;
     cursor?: string | null;
-    append?: boolean;
+    limit?: number;
+    withSummary?: boolean;
   }) {
     setError(null);
-    const params = buildQuery(opts.filters, opts.cursor);
+    const limit = opts.limit ?? pageSize;
+    const params = buildQuery(opts.filters, {
+      cursor: opts.cursor,
+      limit,
+      summary: opts.withSummary ?? true,
+    });
     const res = await fetch(`/api/audit-events?${params}`, {
       cache: "no-store",
     });
     const data = (await res.json()) as ListResponse;
     if (!res.ok) {
       setError(data.error || "Αποτυχία φόρτωσης");
-      return;
+      return null;
     }
     startTransition(() => {
-      setItems((prev) =>
-        opts.append ? [...prev, ...data.items] : data.items,
-      );
+      setItems(data.items);
       setNextCursor(data.nextCursor);
       setMs(data.meta.ms);
       setTotal(data.meta.total);
+      if (data.summary) setSummary(data.summary);
+    });
+    return data;
+  }
+
+  function resetToFirst(nextFilters: Filters, nextLimit = pageSize) {
+    setPageCursors([null]);
+    setPageIndex(0);
+    void fetchPage({
+      filters: nextFilters,
+      cursor: null,
+      limit: nextLimit,
+      withSummary: true,
     });
   }
 
   function applyFilters() {
     setFilters(draft);
-    void fetchPage({ filters: draft });
+    resetToFirst(draft);
   }
 
   function clearFilters() {
     setDraft(EMPTY_FILTERS);
     setFilters(EMPTY_FILTERS);
-    void fetchPage({ filters: EMPTY_FILTERS });
+    resetToFirst(EMPTY_FILTERS);
   }
 
   function refresh() {
-    void fetchPage({ filters });
+    void fetchPage({
+      filters,
+      cursor: pageCursors[pageIndex] ?? null,
+      withSummary: true,
+    });
   }
 
-  function loadMore() {
-    if (!nextCursor) return;
-    void fetchPage({ filters, cursor: nextCursor, append: true });
+  async function goNext() {
+    if (!nextCursor || isPending) return;
+    const data = await fetchPage({ filters, cursor: nextCursor });
+    if (!data) return;
+    setPageCursors((prev) => {
+      const trimmed = prev.slice(0, pageIndex + 1);
+      return [...trimmed, nextCursor];
+    });
+    setPageIndex((i) => i + 1);
+  }
+
+  async function goPrev() {
+    if (pageIndex <= 0 || isPending) return;
+    const prevIdx = pageIndex - 1;
+    const cursor = pageCursors[prevIdx] ?? null;
+    const data = await fetchPage({ filters, cursor });
+    if (!data) return;
+    setPageIndex(prevIdx);
   }
 
   function exportCsv() {
@@ -305,14 +392,81 @@ export function AuditEventsClient({
     URL.revokeObjectURL(url);
   }
 
+  function applyQuick(patch: Partial<Filters>) {
+    const next = { ...EMPTY_FILTERS, ...patch };
+    setDraft(next);
+    setFilters(next);
+    resetToFirst(next);
+  }
+
+  useEffect(() => {
+    if (!live) return;
+    const t = setInterval(() => {
+      if (pageIndex === 0) {
+        void fetchPage({
+          filters,
+          cursor: null,
+          withSummary: true,
+        });
+      }
+    }, 15_000);
+    return () => clearInterval(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [live, filters, pageIndex, pageSize]);
+
+  const quickChips = [
+    {
+      id: "hour",
+      label: "Τελευταία ώρα",
+      active: Boolean(filters.from) && !filters.action && !filters.q,
+      onClick: () => {
+        const from = toDatetimeLocal(new Date(Date.now() - 60 * 60_000));
+        applyQuick({ from });
+      },
+    },
+    {
+      id: "auth",
+      label: "Auth",
+      active: filters.action === "auth.",
+      onClick: () => applyQuick({ action: "auth." }),
+    },
+    {
+      id: "orders",
+      label: "Παραγγελίες",
+      active: filters.action === "order.",
+      onClick: () => applyQuick({ action: "order." }),
+    },
+    {
+      id: "invoices",
+      label: "Τιμολόγια",
+      active: filters.action === "invoice.",
+      onClick: () => applyQuick({ action: "invoice." }),
+    },
+    {
+      id: "risk",
+      label: "Διαγραφές / αποτυχίες",
+      active: filters.q === "delete",
+      onClick: () => applyQuick({ q: "delete" }),
+    },
+  ] as const;
+
   return (
-    <div className="space-y-5">
+    <div className="space-y-4">
       <PageHeader
         title="Καταγραφή ενεργειών"
-        description="Πλήρες audit trail · φίλτρα, λεπτομέρειες και εξαγωγή"
+        description="Audit trail με φίλτρα, σελιδοποίηση και λεπτομέρειες αλλαγών."
         actions={
           <div className="flex flex-wrap items-center gap-2">
             <Badge tone={ms < 200 ? "emerald" : "amber"}>{ms} ms</Badge>
+            <Button
+              variant={live ? "primary" : "secondary"}
+              size="sm"
+              onClick={() => setLive((v) => !v)}
+              title="Αυτόματη ανανέωση κάθε 15″ (μόνο 1η σελίδα)"
+            >
+              <Radio size={14} className={cn(live && "text-rose-200")} />
+              {live ? "Live" : "Live off"}
+            </Button>
             <Button
               variant="secondary"
               size="sm"
@@ -350,11 +504,66 @@ export function AuditEventsClient({
         }
       />
 
+      {summary ? (
+        <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+          <Kpi
+            icon={<Activity size={15} />}
+            label="Τελευταία ώρα"
+            value={summary.lastHour}
+          />
+          <Kpi
+            icon={<Clock3 size={15} />}
+            label="Τελευταίες 24ώρες"
+            value={summary.last24h}
+          />
+          <Kpi
+            icon={<KeyRound size={15} />}
+            label="Auth · 24ώρες"
+            value={summary.auth24h}
+            onClick={() => applyQuick({ action: "auth." })}
+          />
+          <Kpi
+            icon={<AlertTriangle size={15} />}
+            label="Ρίσκο · 24ώρες"
+            value={summary.risk24h}
+            tone={summary.risk24h > 0 ? "rose" : "slate"}
+            onClick={() => applyQuick({ q: "delete" })}
+          />
+        </section>
+      ) : null}
+
+      <div className="flex flex-wrap items-center gap-1.5">
+        {quickChips.map((chip) => (
+          <button
+            key={chip.id}
+            type="button"
+            onClick={chip.onClick}
+            className={cn(
+              "rounded-full border px-3 py-1 text-xs font-medium transition",
+              chip.active
+                ? "border-ink-900 bg-ink-900 text-white"
+                : "border-slate-200 bg-white text-slate-600 hover:border-slate-300",
+            )}
+          >
+            {chip.label}
+          </button>
+        ))}
+        {activeFilterCount > 0 ? (
+          <button
+            type="button"
+            onClick={clearFilters}
+            className="ml-1 text-xs font-medium text-teal-700 hover:underline"
+          >
+            Καθαρισμός
+          </button>
+        ) : null}
+      </div>
+
       {filtersOpen ? (
         <section className="soft-panel space-y-3 p-4">
           <div className="flex items-center gap-2 text-sm font-semibold text-ink-900">
             <Filter size={15} className="text-slate-400" />
-            Φίλτρα αναζήτησης
+            Προχωρημένα φίλτρα
           </div>
           <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-5">
             <div className="relative xl:col-span-2">
@@ -433,14 +642,6 @@ export function AuditEventsClient({
             >
               Καθαρισμός
             </Button>
-            {activeFilterCount > 0 ? (
-              <p className="text-xs text-slate-500">
-                Ενεργά φίλτρα: {activeFilterCount}
-                {filters.from
-                  ? ` · από ${toLocalInputValue(fromLocalInputValue(filters.from)) || filters.from}`
-                  : ""}
-              </p>
-            ) : null}
           </div>
         </section>
       ) : null}
@@ -452,22 +653,25 @@ export function AuditEventsClient({
       ) : null}
 
       <section className="soft-panel overflow-hidden">
-        <div className="flex items-center justify-between gap-3 border-b border-slate-100 px-4 py-3">
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 px-4 py-3">
           <div className="flex items-center gap-2">
             <Shield size={15} className="text-slate-400" />
             <p className="text-sm font-semibold text-ink-900">Γεγονότα</p>
+            {live ? (
+              <span className="inline-flex items-center gap-1 rounded-full bg-rose-50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-rose-700">
+                <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-rose-500" />
+                Live
+              </span>
+            ) : null}
           </div>
-          <p className="text-xs text-slate-400">
-            {items.length.toLocaleString("el-GR")} από{" "}
+          <p className="text-xs text-slate-500">
+            {rangeStart.toLocaleString("el-GR")}–
+            {rangeEnd.toLocaleString("el-GR")} από{" "}
             {total.toLocaleString("el-GR")}
-            <span className="mx-2 hidden text-slate-300 sm:inline">·</span>
-            <span className="hidden sm:inline">
-              κλικ για λεπτομέρειες
-            </span>
           </p>
         </div>
 
-        <div className="hidden border-b border-slate-100 bg-slate-50/80 px-4 py-2.5 text-[11px] font-semibold uppercase tracking-[0.06em] text-slate-400 lg:grid lg:grid-cols-[minmax(0,1.4fr)_0.7fr_0.9fr_1fr_0.9fr_40px] lg:gap-3">
+        <div className="sticky top-0 z-10 hidden border-b border-slate-100 bg-slate-50/95 px-4 py-2.5 text-[11px] font-semibold uppercase tracking-[0.06em] text-slate-400 backdrop-blur lg:grid lg:grid-cols-[minmax(0,1.4fr)_0.7fr_0.9fr_1fr_0.9fr_40px] lg:gap-3">
           <span>Ενέργεια</span>
           <span>Οντότητα</span>
           <span>Αναφορά</span>
@@ -476,10 +680,16 @@ export function AuditEventsClient({
           <span />
         </div>
 
-        <ul className="divide-y divide-slate-100">
+        <ul
+          className={cn(
+            "divide-y divide-slate-100",
+            isPending && "opacity-60 transition-opacity",
+          )}
+        >
           {items.map((item) => {
             const when = formatWhen(item.createdAt);
             const family = actionFamily(item.action);
+            const href = entityHref(item.entity, item.entityId);
             return (
               <li key={item.id}>
                 <button
@@ -489,7 +699,10 @@ export function AuditEventsClient({
                 >
                   <div className="min-w-0">
                     <div className="flex flex-wrap items-center gap-2">
-                      <Badge tone={actionTone(item.action)} className="font-mono">
+                      <Badge
+                        tone={actionTone(item.action)}
+                        className="font-mono"
+                      >
                         {item.action}
                       </Badge>
                       <span className="text-[10px] font-medium uppercase tracking-wide text-slate-400">
@@ -503,15 +716,24 @@ export function AuditEventsClient({
                     )}
                   </p>
                   <div className="flex min-w-0 items-center gap-1 font-mono text-xs text-slate-500">
-                    <span className="truncate" title={item.entityId ?? item.id}>
-                      {shortId(item.entityId ?? item.id)}
-                    </span>
-                    <span
-                      onClick={(e) => e.stopPropagation()}
-                      className="shrink-0"
-                    >
-                      <CopyButton value={item.entityId ?? item.id} />
-                    </span>
+                    {href ? (
+                      <Link
+                        href={href}
+                        onClick={(e) => e.stopPropagation()}
+                        className="truncate text-teal-700 hover:underline"
+                        title={item.entityId ?? undefined}
+                      >
+                        {shortId(item.entityId ?? item.id)}
+                      </Link>
+                    ) : (
+                      <span
+                        className="truncate"
+                        title={item.entityId ?? item.id}
+                      >
+                        {shortId(item.entityId ?? item.id)}
+                      </span>
+                    )}
+                    <CopyButton value={item.entityId ?? item.id} />
                   </div>
                   <div className="min-w-0">
                     {item.user ? (
@@ -558,23 +780,59 @@ export function AuditEventsClient({
                 Δεν βρέθηκαν γεγονότα
               </p>
               <p className="mt-1 text-xs text-slate-500">
-                Δοκίμασε διαφορετικά φίλτρα ή σύνδεση / αλλαγή ρυθμίσεων για
-                νέα καταγραφή.
+                Δοκίμασε διαφορετικά φίλτρα ή καθάρισε τα ενεργά.
               </p>
             </li>
           ) : null}
         </ul>
 
-        <div className="flex items-center justify-end gap-3 border-t border-slate-100 px-4 py-3">
-          <Button
-            variant="secondary"
-            size="sm"
-            disabled={!nextCursor || isPending}
-            className={cn(!nextCursor && "opacity-50")}
-            onClick={loadMore}
-          >
-            Επόμενα 50
-          </Button>
+        <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 px-4 py-3">
+          <div className="flex items-center gap-2 text-xs text-slate-500">
+            <span>Ανά σελίδα</span>
+            <select
+              value={pageSize}
+              disabled={isPending}
+              onChange={(e) => {
+                const next = Number(e.target.value) as (typeof PAGE_SIZES)[number];
+                setPageSize(next);
+                resetToFirst(filters, next);
+              }}
+              className="h-8 rounded-lg border border-slate-200 bg-white px-2 text-xs font-medium text-ink-900"
+            >
+              {PAGE_SIZES.map((n) => (
+                <option key={n} value={n}>
+                  {n}
+                </option>
+              ))}
+            </select>
+            <span className="hidden sm:inline">
+              · Σελίδα {(pageIndex + 1).toLocaleString("el-GR")}
+              {total > 0
+                ? ` / ~${pageCount.toLocaleString("el-GR")}`
+                : ""}
+            </span>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <Button
+              variant="secondary"
+              size="sm"
+              disabled={pageIndex <= 0 || isPending}
+              onClick={() => void goPrev()}
+            >
+              <ChevronLeft size={14} />
+              Προηγούμενα
+            </Button>
+            <Button
+              variant="secondary"
+              size="sm"
+              disabled={!nextCursor || isPending}
+              onClick={() => void goNext()}
+            >
+              Επόμενα
+              <ChevronRight size={14} />
+            </Button>
+          </div>
         </div>
       </section>
 
@@ -582,6 +840,49 @@ export function AuditEventsClient({
         <DetailDrawer item={detail} onClose={() => setDetail(null)} />
       ) : null}
     </div>
+  );
+}
+
+function Kpi({
+  icon,
+  label,
+  value,
+  tone = "slate",
+  onClick,
+}: {
+  icon: React.ReactNode;
+  label: string;
+  value: number;
+  tone?: "slate" | "rose";
+  onClick?: () => void;
+}) {
+  const Comp = onClick ? "button" : "div";
+  return (
+    <Comp
+      type={onClick ? "button" : undefined}
+      onClick={onClick}
+      className={cn(
+        "soft-panel flex items-start gap-3 px-4 py-3 text-left",
+        onClick && "transition hover:border-teal-300 hover:bg-teal-50/40",
+      )}
+    >
+      <span
+        className={cn(
+          "mt-0.5 flex h-8 w-8 items-center justify-center rounded-xl",
+          tone === "rose"
+            ? "bg-rose-50 text-rose-700"
+            : "bg-slate-100 text-slate-600",
+        )}
+      >
+        {icon}
+      </span>
+      <div>
+        <p className="text-xs text-slate-500">{label}</p>
+        <p className="mt-0.5 text-xl font-semibold tabular-nums text-ink-950">
+          {value.toLocaleString("el-GR")}
+        </p>
+      </div>
+    </Comp>
   );
 }
 
@@ -677,158 +978,144 @@ function DetailDrawer({
   const [jsonTab, setJsonTab] = useState<"diff" | "before" | "after" | "raw">(
     hasChangeView ? "diff" : "raw",
   );
+  const href = entityHref(item.entity, item.entityId);
 
   return (
-    <div className="fixed inset-0 z-50 flex justify-end bg-ink-950/30 backdrop-blur-[2px]">
-      <button
-        type="button"
-        className="absolute inset-0 cursor-default"
-        aria-label="Κλείσιμο"
-        onClick={onClose}
-      />
-      <aside className="relative flex h-full w-full max-w-xl flex-col border-l border-slate-200 bg-white shadow-2xl animate-fade-in">
-        <div className="flex items-start justify-between gap-3 border-b border-slate-100 px-5 py-4">
-          <div className="min-w-0">
-            <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">
-              Λεπτομέρεια γεγονότος
-            </p>
-            <div className="mt-2">
-              <Badge tone={actionTone(item.action)} className="font-mono">
-                {item.action}
-              </Badge>
-            </div>
-          </div>
-          <button
-            type="button"
-            onClick={onClose}
-            className="rounded-lg p-2 text-slate-400 hover:bg-slate-100 hover:text-ink-900"
-          >
-            <X size={16} />
-          </button>
-        </div>
+    <Drawer
+      open
+      onClose={onClose}
+      title={item.action}
+      subtitle={when.absolute}
+      widthClass="max-w-xl"
+      headerExtra={<Badge tone={actionTone(item.action)}>λεπτομέρεια</Badge>}
+    >
+      <div className="space-y-5 text-sm">
+        <Field label="Χρόνος">
+          <p className="font-medium text-ink-950">{when.absolute}</p>
+          <p className="text-xs text-slate-500">{when.relative}</p>
+        </Field>
 
-        <div className="flex-1 space-y-5 overflow-y-auto px-5 py-4 text-sm">
-          <Field label="Χρόνος">
-            <p className="font-medium text-ink-950">{when.absolute}</p>
-            <p className="text-xs text-slate-500">{when.relative}</p>
-          </Field>
-
-          <Field label="Οντότητα">
+        <Field label="Οντότητα">
+          {href ? (
+            <Link
+              href={href}
+              className="font-medium text-teal-700 hover:underline"
+              onClick={onClose}
+            >
+              {item.entity}
+            </Link>
+          ) : (
             <p className="font-medium text-ink-950">{item.entity ?? "—"}</p>
-          </Field>
+          )}
+        </Field>
 
-          <Field label="Entity ID">
-            <div className="flex items-center gap-1">
-              <code className="break-all rounded-lg bg-slate-50 px-2 py-1 font-mono text-xs text-slate-700">
-                {item.entityId ?? "—"}
-              </code>
-              {item.entityId ? <CopyButton value={item.entityId} /> : null}
+        <Field label="Entity ID">
+          <div className="flex items-center gap-1">
+            <code className="break-all rounded-lg bg-slate-50 px-2 py-1 font-mono text-xs text-slate-700">
+              {item.entityId ?? "—"}
+            </code>
+            {item.entityId ? <CopyButton value={item.entityId} /> : null}
+          </div>
+        </Field>
+
+        <Field label="Event ID">
+          <div className="flex items-center gap-1">
+            <code className="break-all rounded-lg bg-slate-50 px-2 py-1 font-mono text-xs text-slate-700">
+              {item.id}
+            </code>
+            <CopyButton value={item.id} />
+          </div>
+        </Field>
+
+        <Field label="Χρήστης">
+          {item.user ? (
+            <div>
+              <p className="font-medium text-ink-950">{item.user.name}</p>
+              <p className="text-xs text-slate-500">{item.user.email}</p>
             </div>
-          </Field>
+          ) : (
+            <p className="text-slate-500">Σύστημα / άγνωστος</p>
+          )}
+        </Field>
 
-          <Field label="Event ID">
-            <div className="flex items-center gap-1">
-              <code className="break-all rounded-lg bg-slate-50 px-2 py-1 font-mono text-xs text-slate-700">
-                {item.id}
-              </code>
-              <CopyButton value={item.id} />
+        {hasChangeView ? (
+          <Field
+            label={`Αλλαγή${
+              parsed.changes.length
+                ? ` · ${parsed.changes.length} πεδί${parsed.changes.length === 1 ? "ο" : "α"}`
+                : ""
+            }`}
+          >
+            <div className="mb-3 flex flex-wrap gap-1.5">
+              {(
+                [
+                  ["diff", "Διαφορές"],
+                  ["before", "Πριν"],
+                  ["after", "Μετά"],
+                  ["raw", "Raw"],
+                ] as const
+              ).map(([key, label]) => (
+                <button
+                  key={key}
+                  type="button"
+                  onClick={() => setJsonTab(key)}
+                  className={cn(
+                    "rounded-lg px-2.5 py-1 text-xs font-medium transition",
+                    jsonTab === key
+                      ? "bg-ink-900 text-white"
+                      : "bg-slate-100 text-slate-600 hover:bg-slate-200",
+                  )}
+                >
+                  {label}
+                </button>
+              ))}
             </div>
-          </Field>
 
-          <Field label="Χρήστης">
-            {item.user ? (
-              <div>
-                <p className="font-medium text-ink-950">{item.user.name}</p>
-                <p className="text-xs text-slate-500">{item.user.email}</p>
-              </div>
+            {jsonTab === "diff" ? (
+              <ChangeDiffTable changes={parsed.changes} />
+            ) : null}
+            {jsonTab === "before" ? (
+              <JsonBlock
+                value={parsed.before}
+                empty="Δεν υπάρχει αποθηκευμένη κατάσταση πριν"
+                tone="rose"
+              />
+            ) : null}
+            {jsonTab === "after" ? (
+              <JsonBlock
+                value={parsed.after}
+                empty="Δεν υπάρχει αποθηκευμένη κατάσταση μετά"
+                tone="emerald"
+              />
+            ) : null}
+            {jsonTab === "raw" ? (
+              <JsonBlock value={item.meta} empty="Χωρίς meta" />
+            ) : null}
+          </Field>
+        ) : (
+          <Field label="Meta">
+            {item.meta == null ? (
+              <p className="text-slate-400">
+                Χωρίς πριν/μετά — παλαιότερη καταγραφή χωρίς snapshot.
+              </p>
             ) : (
-              <p className="text-slate-500">Σύστημα / άγνωστος</p>
+              <>
+                <p className="mb-2 text-xs text-amber-700">
+                  Η καταγραφή δεν περιλαμβάνει πλήρες πριν/μετά.
+                </p>
+                <JsonBlock value={item.meta} empty="Χωρίς meta" />
+              </>
             )}
           </Field>
+        )}
 
-          {hasChangeView ? (
-            <Field
-              label={`Αλλαγή${
-                parsed.changes.length
-                  ? ` · ${parsed.changes.length} πεδί${parsed.changes.length === 1 ? "ο" : "α"}`
-                  : ""
-              }`}
-            >
-              <div className="mb-3 flex flex-wrap gap-1.5">
-                {(
-                  [
-                    ["diff", "Διαφορές"],
-                    ["before", "Πριν"],
-                    ["after", "Μετά"],
-                    ["raw", "Raw"],
-                  ] as const
-                ).map(([key, label]) => (
-                  <button
-                    key={key}
-                    type="button"
-                    onClick={() => setJsonTab(key)}
-                    className={cn(
-                      "rounded-lg px-2.5 py-1 text-xs font-medium transition",
-                      jsonTab === key
-                        ? "bg-ink-900 text-white"
-                        : "bg-slate-100 text-slate-600 hover:bg-slate-200",
-                    )}
-                  >
-                    {label}
-                  </button>
-                ))}
-              </div>
-
-              {jsonTab === "diff" ? (
-                <ChangeDiffTable changes={parsed.changes} />
-              ) : null}
-
-              {jsonTab === "before" ? (
-                <JsonBlock
-                  value={parsed.before}
-                  empty="Δεν υπάρχει αποθηκευμένη κατάσταση πριν"
-                  tone="rose"
-                />
-              ) : null}
-
-              {jsonTab === "after" ? (
-                <JsonBlock
-                  value={parsed.after}
-                  empty="Δεν υπάρχει αποθηκευμένη κατάσταση μετά"
-                  tone="emerald"
-                />
-              ) : null}
-
-              {jsonTab === "raw" ? (
-                <JsonBlock value={item.meta} empty="Χωρίς meta" />
-              ) : null}
-            </Field>
-          ) : (
-            <Field label="Meta">
-              {item.meta == null ? (
-                <p className="text-slate-400">
-                  Χωρίς πριν/μετά — παλαιότερη καταγραφή χωρίς snapshot.
-                </p>
-              ) : (
-                <>
-                  <p className="mb-2 text-xs text-amber-700">
-                    Η καταγραφή δεν περιλαμβάνει πλήρες πριν/μετά. Νέες
-                    ενημερώσεις αποθηκεύουν λεπτομερή diff.
-                  </p>
-                  <JsonBlock value={item.meta} empty="Χωρίς meta" />
-                </>
-              )}
-            </Field>
-          )}
-
-          {parsed.rest ? (
-            <Field label="Επιπλέον">
-              <JsonBlock value={parsed.rest} empty="—" />
-            </Field>
-          ) : null}
-        </div>
-      </aside>
-    </div>
+        {parsed.rest ? (
+          <Field label="Επιπλέον">
+            <JsonBlock value={parsed.rest} empty="—" />
+          </Field>
+        ) : null}
+      </div>
+    </Drawer>
   );
 }
 

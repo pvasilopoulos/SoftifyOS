@@ -9,7 +9,11 @@ export const dynamic = "force-dynamic";
 
 async function loadFirstPage(tenantId: string) {
   const started = Date.now();
-  const [rows, total] = await Promise.all([
+  const now = Date.now();
+  const hourAgo = new Date(now - 60 * 60_000);
+  const dayAgo = new Date(now - 24 * 60 * 60_000);
+
+  const [rows, total, lastHour, last24h, auth24h, risk24h] = await Promise.all([
     prisma.auditEvent.findMany({
       where: { tenantId },
       orderBy: [{ createdAt: "desc" }, { id: "desc" }],
@@ -26,6 +30,30 @@ async function loadFirstPage(tenantId: string) {
       },
     }),
     prisma.auditEvent.count({ where: { tenantId } }),
+    prisma.auditEvent.count({
+      where: { tenantId, createdAt: { gte: hourAgo } },
+    }),
+    prisma.auditEvent.count({
+      where: { tenantId, createdAt: { gte: dayAgo } },
+    }),
+    prisma.auditEvent.count({
+      where: {
+        tenantId,
+        createdAt: { gte: dayAgo },
+        action: { startsWith: "auth." },
+      },
+    }),
+    prisma.auditEvent.count({
+      where: {
+        tenantId,
+        createdAt: { gte: dayAgo },
+        OR: [
+          { action: { contains: "delete" } },
+          { action: { contains: "fail" } },
+          { action: { contains: "cancel" } },
+        ],
+      },
+    }),
   ]);
 
   const ms = Date.now() - started;
@@ -52,6 +80,7 @@ async function loadFirstPage(tenantId: string) {
     nextCursor,
     ms,
     total,
+    summary: { lastHour, last24h, auth24h, risk24h },
   };
 }
 
@@ -70,6 +99,7 @@ export default async function AuditPage() {
       initialNextCursor={first.nextCursor}
       initialMs={first.ms}
       initialTotal={first.total}
+      initialSummary={first.summary}
     />
   );
 }
