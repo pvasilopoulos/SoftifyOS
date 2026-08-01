@@ -2,6 +2,17 @@ import type { Prisma, PrismaClient } from "@/generated/prisma/client";
 
 type Db = PrismaClient | Prisma.TransactionClient;
 
+type MyDataEnv = "simulator" | "test" | "prod";
+
+async function resolveMyDataEnv(db: Db, tenantId: string): Promise<MyDataEnv> {
+  const settings = await db.tenantSettings.findUnique({
+    where: { tenantId },
+    select: { integrationsJson: true },
+  });
+  const json = (settings?.integrationsJson as { myDataEnv?: MyDataEnv } | null) ?? {};
+  return json.myDataEnv ?? "simulator";
+}
+
 /** Enqueue a document for myDATA when series has myDataEnabled. */
 export async function enqueueMyDataSubmission(
   db: Db,
@@ -40,12 +51,17 @@ export async function enqueueMyDataSubmission(
 }
 
 /**
- * Local simulator — marks PENDING as SENT then ACCEPTED with a fake MARK.
- * Real AADE client plugs in here later.
+ * Process queue item.
+ * - simulator / test: local fake MARK (test prefix differs)
+ * - prod: still simulator until AADE credentials land — returns clear mode flag
  */
 export async function processMyDataSubmission(
   db: Db,
-  input: { tenantId: string; id: string },
+  input: {
+    tenantId: string;
+    id: string;
+    forceReject?: boolean;
+  },
 ) {
   const row = await db.myDataSubmission.findFirst({
     where: { id: input.id, tenantId: input.tenantId },
@@ -55,26 +71,94 @@ export async function processMyDataSubmission(
     return row;
   }
 
+  const env = await resolveMyDataEnv(db, input.tenantId);
   const now = new Date();
-  const mark = `MARK-SIM-${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, "0")}${String(now.getDate()).padStart(2, "0")}-${row.id.slice(-8).toUpperCase()}`;
-  const uid = `UID-SIM-${row.entityId.slice(0, 12).toUpperCase()}`;
+  const attempts = row.attempts + 1;
+
+  // Intermediate SENT hop for observability
+  if (row.status === "PENDING") {
+    await db.myDataSubmission.update({
+      where: { id: row.id },
+      data: {
+        status: "SENT",
+        attempts,
+        lastAttemptAt: now,
+        response: {
+          mode: env,
+          phase: "sent",
+          at: now.toISOString(),
+        },
+      },
+    });
+  }
+
+  if (input.forceReject || (env === "test" && attempts % 7 === 0)) {
+    return db.myDataSubmission.update({
+      where: { id: row.id },
+      data: {
+        status: "REJECTED",
+        attempts,
+        lastAttemptAt: now,
+        errorMessage: "Προσομοίωση απόρριψης AADE (validation)",
+        response: {
+          mode: env,
+          accepted: false,
+          errors: [{ code: "VAL-001", message: "Simulated rejection" }],
+          processedAt: now.toISOString(),
+        },
+      },
+    });
+  }
+
+  const prefix = env === "prod" ? "MARK-STUB" : env === "test" ? "MARK-TEST" : "MARK-SIM";
+  const mark = `${prefix}-${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, "0")}${String(now.getDate()).padStart(2, "0")}-${row.id.slice(-8).toUpperCase()}`;
+  const uid = `UID-${env.toUpperCase()}-${row.entityId.slice(0, 12).toUpperCase()}`;
 
   return db.myDataSubmission.update({
     where: { id: row.id },
     data: {
       status: "ACCEPTED",
-      attempts: row.attempts + 1,
+      attempts,
       lastAttemptAt: now,
       mark,
       uid,
       errorMessage: null,
       response: {
-        mode: "simulator",
+        mode: env,
         accepted: true,
         mark,
         uid,
+        note:
+          env === "prod"
+            ? "Stub — δεν υπάρχει ακόμα live AADE client"
+            : "Local simulator",
         processedAt: now.toISOString(),
       },
     },
   });
+}
+
+export async function processPendingMyDataBatch(
+  db: Db,
+  input: { tenantId: string; limit?: number },
+) {
+  const pending = await db.myDataSubmission.findMany({
+    where: {
+      tenantId: input.tenantId,
+      status: { in: ["PENDING", "SENT", "REJECTED"] },
+    },
+    orderBy: { createdAt: "asc" },
+    take: input.limit ?? 25,
+    select: { id: true },
+  });
+  const results = [];
+  for (const p of pending) {
+    results.push(
+      await processMyDataSubmission(db, {
+        tenantId: input.tenantId,
+        id: p.id,
+      }),
+    );
+  }
+  return results;
 }

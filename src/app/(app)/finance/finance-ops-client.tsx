@@ -2,6 +2,8 @@
 
 import Link from "next/link";
 import { useMemo, useState } from "react";
+import { BankingPanel } from "./banking-panel";
+import { toast } from "@/shared/ui/toaster";
 
 type ArRow = {
   id: string;
@@ -76,7 +78,9 @@ export function FinanceOpsClient({
   myData: MyDataRow[];
   canWrite: boolean;
 }) {
-  const [tab, setTab] = useState<"ar" | "ap" | "vat" | "mydata">("ar");
+  const [tab, setTab] = useState<"ar" | "ap" | "vat" | "mydata" | "banking">(
+    "ar",
+  );
   const [rows, setRows] = useState(myData);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -110,6 +114,37 @@ export function FinanceOpsClient({
             : r,
         ),
       );
+      toast.success(`myDATA ${data.item?.status ?? "OK"}`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Σφάλμα");
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  async function processBatch() {
+    setBusyId("batch");
+    setError(null);
+    try {
+      const res = await fetch("/api/mydata/submissions/process-batch", {
+        method: "POST",
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || "Αποτυχία batch");
+      const map = new Map(
+        (data.items as Array<{ id: string; status: string; mark: string | null }>).map(
+          (i) => [i.id, i],
+        ),
+      );
+      setRows((prev) =>
+        prev.map((r) => {
+          const next = map.get(r.id);
+          return next
+            ? { ...r, status: next.status, mark: next.mark }
+            : r;
+        }),
+      );
+      toast.success(`Επεξεργάστηκαν ${data.processed ?? 0} εγγραφές`);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Σφάλμα");
     } finally {
@@ -125,6 +160,7 @@ export function FinanceOpsClient({
             ["ar", `Απαιτήσεις (AR) · ${money(arTotal)}`],
             ["ap", `Υποχρεώσεις (AP) · ${money(apTotal)}`],
             ["vat", "ΦΠΑ περιόδου"],
+            ["banking", "Τράπεζες"],
             ["mydata", `myDATA · ${rows.length}`],
           ] as const
         ).map(([key, label]) => (
@@ -318,12 +354,36 @@ export function FinanceOpsClient({
         </div>
       ) : null}
 
+      {tab === "banking" ? (
+        <BankingPanel
+          canWrite={canWrite}
+          openInvoices={arRows.map((r) => ({
+            id: r.id,
+            number: r.number,
+            balance: r.balance,
+            customer: r.customer.name,
+          }))}
+        />
+      ) : null}
+
       {tab === "mydata" ? (
         <div className="overflow-hidden rounded-xl border border-slate-200 bg-white">
-          <p className="border-b border-slate-100 px-3 py-2 text-xs text-slate-500">
-            Τοπικός simulator — ενεργοποιείται όταν η σειρά έχει myDATA ON.
-            Πραγματικό AADE client σε επόμενη φάση.
-          </p>
+          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 px-3 py-2">
+            <p className="text-xs text-slate-500">
+              Simulator / test / prod stub — διάβασε env από Ρυθμίσεις →
+              Integrations. SENT → ACCEPTED με MARK.
+            </p>
+            {canWrite ? (
+              <button
+                type="button"
+                disabled={busyId === "batch"}
+                onClick={() => void processBatch()}
+                className="rounded-md bg-teal-700 px-2.5 py-1 text-xs font-medium text-white disabled:opacity-50"
+              >
+                Επεξεργασία ουράς
+              </button>
+            ) : null}
+          </div>
           <table className="w-full text-left text-sm">
             <thead className="bg-slate-50 text-xs uppercase text-slate-500">
               <tr>
@@ -351,7 +411,10 @@ export function FinanceOpsClient({
                     {r.mark || "—"}
                   </td>
                   <td className="px-3 py-2 text-right">
-                    {canWrite && r.status === "PENDING" ? (
+                    {canWrite &&
+                    (r.status === "PENDING" ||
+                      r.status === "SENT" ||
+                      r.status === "REJECTED") ? (
                       <button
                         type="button"
                         disabled={busyId === r.id}

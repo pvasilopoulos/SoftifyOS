@@ -10,6 +10,7 @@ import {
   loadVatSummary,
 } from "@/modules/finance/analytics";
 import { ReportsExport } from "./reports-export";
+import { ReportBuilder } from "@/modules/reports/report-builder";
 
 export const metadata = { title: "Αναφορές" };
 export const dynamic = "force-dynamic";
@@ -161,6 +162,8 @@ export default async function ReportsPage() {
           </div>
         ))}
       </section>
+
+      <ReportBuilder />
 
       <div className="grid gap-4 lg:grid-cols-2">
         <section className="soft-panel p-4 sm:p-5">

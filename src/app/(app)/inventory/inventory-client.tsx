@@ -5,6 +5,7 @@ import Link from "next/link";
 import {
   ArrowDownToLine,
   ArrowUpFromLine,
+  Layers3,
   Package,
   RefreshCw,
   Search,
@@ -47,6 +48,25 @@ type MovementRow = {
 
 type ProductOpt = { id: string; sku: string; name: string };
 
+type LotRow = {
+  id: string;
+  lotCode: string;
+  qtyOnHand: number;
+  expiresAt: string | null;
+  sku: string;
+  name: string;
+  siteCode: string;
+};
+
+type ReorderHint = {
+  productId: string;
+  sku: string;
+  name: string;
+  siteCode: string;
+  qtyOnHand: number;
+  reorderPoint: number;
+};
+
 export function InventoryClient({
   initialBalances,
   initialSites,
@@ -61,12 +81,14 @@ export function InventoryClient({
   };
 }) {
   const [tab, setTab] = useState<
-    "balances" | "movements" | "adjust" | "transfer"
+    "balances" | "movements" | "adjust" | "transfer" | "lots"
   >("balances");
   const [balances, setBalances] = useState(initialBalances);
   const [sites, setSites] = useState(initialSites);
   const [meta, setMeta] = useState(initialMeta);
   const [movements, setMovements] = useState<MovementRow[]>([]);
+  const [lots, setLots] = useState<LotRow[]>([]);
+  const [reorderHints, setReorderHints] = useState<ReorderHint[]>([]);
   const [q, setQ] = useState("");
   const [siteId, setSiteId] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -84,6 +106,12 @@ export function InventoryClient({
   const [trTo, setTrTo] = useState("");
   const [trQty, setTrQty] = useState("1");
   const [trNote, setTrNote] = useState("");
+  const [lotProductId, setLotProductId] = useState("");
+  const [lotSiteId, setLotSiteId] = useState("");
+  const [lotCode, setLotCode] = useState("");
+  const [lotQty, setLotQty] = useState("1");
+  const [lotExpires, setLotExpires] = useState("");
+  const [lotNote, setLotNote] = useState("");
 
   const siteOptions = useMemo(() => sites, [sites]);
 
@@ -122,8 +150,23 @@ export function InventoryClient({
     startTransition(() => setMovements(data.items));
   }
 
+  async function loadLots() {
+    setError(null);
+    const res = await fetch("/api/inventory/lots", { cache: "no-store" });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      setError(data.error || "Αποτυχία φόρτωσης lots");
+      return;
+    }
+    startTransition(() => {
+      setLots(data.lots || []);
+      setReorderHints(data.reorderHints || []);
+    });
+  }
+
   useEffect(() => {
     if (tab === "movements") void loadMovements();
+    if (tab === "lots") void loadLots();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab, siteId]);
 
@@ -219,6 +262,7 @@ export function InventoryClient({
           [
             ["balances", "Υπόλοιπα"],
             ["movements", "Κινήσεις"],
+            ["lots", "Lots / Reorder"],
             ["adjust", "Ρύθμιση"],
             ["transfer", "Ενδοδιακίνηση"],
           ] as const
@@ -479,6 +523,212 @@ export function InventoryClient({
             Καταχώρηση
           </Button>
         </section>
+      ) : null}
+
+      {tab === "lots" ? (
+        <div className="grid gap-4 lg:grid-cols-[1fr_1.1fr]">
+          <section className="soft-panel max-w-xl space-y-4 p-5">
+            <div className="flex items-center gap-2 text-sm font-semibold text-ink-950">
+              <Layers3 size={16} className="text-slate-400" />
+              Παραλαβή σε lot
+            </div>
+            <label className="block text-sm">
+              <span className="mb-1 block font-medium">Προϊόν</span>
+              <select
+                value={lotProductId}
+                onChange={(e) => setLotProductId(e.target.value)}
+                className="h-10 w-full rounded-xl border border-slate-200 px-3"
+              >
+                <option value="">— Επίλεξε —</option>
+                {products.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.sku} · {p.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="block text-sm">
+              <span className="mb-1 block font-medium">Υποκατάστημα</span>
+              <select
+                value={lotSiteId}
+                onChange={(e) => setLotSiteId(e.target.value)}
+                className="h-10 w-full rounded-xl border border-slate-200 px-3"
+              >
+                <option value="">Αυτόματο (κύριο)</option>
+                {siteOptions.map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.code} · {s.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="block text-sm">
+              <span className="mb-1 block font-medium">Κωδικός lot</span>
+              <input
+                value={lotCode}
+                onChange={(e) => setLotCode(e.target.value)}
+                className="h-10 w-full rounded-xl border border-slate-200 px-3"
+                placeholder="LOT-2026-001"
+              />
+            </label>
+            <div className="grid grid-cols-2 gap-3">
+              <label className="block text-sm">
+                <span className="mb-1 block font-medium">Ποσότητα</span>
+                <input
+                  type="number"
+                  min={0.001}
+                  step="0.001"
+                  value={lotQty}
+                  onChange={(e) => setLotQty(e.target.value)}
+                  className="h-10 w-full rounded-xl border border-slate-200 px-3"
+                />
+              </label>
+              <label className="block text-sm">
+                <span className="mb-1 block font-medium">Λήξη</span>
+                <input
+                  type="date"
+                  value={lotExpires}
+                  onChange={(e) => setLotExpires(e.target.value)}
+                  className="h-10 w-full rounded-xl border border-slate-200 px-3"
+                />
+              </label>
+            </div>
+            <label className="block text-sm">
+              <span className="mb-1 block font-medium">Σημείωση</span>
+              <input
+                value={lotNote}
+                onChange={(e) => setLotNote(e.target.value)}
+                className="h-10 w-full rounded-xl border border-slate-200 px-3"
+              />
+            </label>
+            <Button
+              disabled={pending}
+              onClick={() => {
+                startTransition(async () => {
+                  setError(null);
+                  setMessage(null);
+                  const res = await fetch("/api/inventory/lots", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                      productId: lotProductId,
+                      siteId: lotSiteId || null,
+                      lotCode,
+                      qty: Number(lotQty),
+                      expiresAt: lotExpires || null,
+                      note: lotNote || null,
+                    }),
+                  });
+                  const data = await res.json().catch(() => ({}));
+                  if (!res.ok) {
+                    setError(data.error || "Αποτυχία παραλαβής lot");
+                    return;
+                  }
+                  setMessage("Το lot ενημερώθηκε");
+                  setLotCode("");
+                  setLotQty("1");
+                  setLotNote("");
+                  await loadLots();
+                  await loadBalances();
+                });
+              }}
+            >
+              Παραλαβή
+            </Button>
+          </section>
+
+          <div className="space-y-4">
+            <section className="soft-panel overflow-hidden">
+              <div className="flex items-center justify-between border-b border-slate-100 px-4 py-3">
+                <h3 className="text-sm font-semibold text-ink-950">
+                  Ενεργά lots
+                </h3>
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  onClick={() => void loadLots()}
+                  disabled={pending}
+                >
+                  <RefreshCw size={14} />
+                  Ανανέωση
+                </Button>
+              </div>
+              <ul className="divide-y divide-slate-100">
+                {lots.map((l) => (
+                  <li
+                    key={l.id}
+                    className="flex flex-wrap items-center justify-between gap-2 px-4 py-3 text-sm"
+                  >
+                    <div className="min-w-0">
+                      <p className="font-mono font-medium text-teal-800">
+                        {l.lotCode}
+                      </p>
+                      <p className="truncate text-slate-600">
+                        {l.sku} · {l.name} · {l.siteCode}
+                      </p>
+                      {l.expiresAt ? (
+                        <p className="text-xs text-slate-400">
+                          Λήξη{" "}
+                          {new Date(l.expiresAt).toLocaleDateString("el-GR")}
+                        </p>
+                      ) : null}
+                    </div>
+                    <p className="font-semibold tabular-nums text-ink-950">
+                      {l.qtyOnHand.toLocaleString("el-GR")}
+                    </p>
+                  </li>
+                ))}
+                {lots.length === 0 ? (
+                  <li className="px-4 py-8 text-center text-sm text-slate-500">
+                    Δεν υπάρχουν ενεργά lots.
+                  </li>
+                ) : null}
+              </ul>
+            </section>
+
+            <section className="soft-panel overflow-hidden">
+              <div className="border-b border-slate-100 px-4 py-3">
+                <h3 className="text-sm font-semibold text-ink-950">
+                  Reorder hints
+                </h3>
+                <p className="mt-0.5 text-xs text-slate-500">
+                  Υπόλοιπο ≤ σημείο αναπαραγγελίας προϊόντος
+                </p>
+              </div>
+              <ul className="divide-y divide-slate-100">
+                {reorderHints.map((h) => (
+                  <li
+                    key={`${h.productId}-${h.siteCode}`}
+                    className="flex items-center justify-between gap-2 px-4 py-3 text-sm"
+                  >
+                    <div className="min-w-0">
+                      <Link
+                        href={`/products/${h.productId}`}
+                        className="font-mono font-medium text-teal-800 hover:underline"
+                      >
+                        {h.sku}
+                      </Link>
+                      <p className="truncate text-slate-600">
+                        {h.name} · {h.siteCode}
+                      </p>
+                    </div>
+                    <div className="text-right">
+                      <Badge tone="amber">
+                        {h.qtyOnHand.toLocaleString("el-GR")} /{" "}
+                        {h.reorderPoint.toLocaleString("el-GR")}
+                      </Badge>
+                    </div>
+                  </li>
+                ))}
+                {reorderHints.length === 0 ? (
+                  <li className="px-4 py-8 text-center text-sm text-slate-500">
+                    Κανένα προϊόν κάτω από reorder point.
+                  </li>
+                ) : null}
+              </ul>
+            </section>
+          </div>
+        </div>
       ) : null}
 
       {tab === "transfer" ? (

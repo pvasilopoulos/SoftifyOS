@@ -5,6 +5,7 @@ import { Building2, ChevronDown, LogOut, Search, Zap } from "lucide-react";
 import { Button } from "@/shared/ui/button";
 import type { SessionPayload } from "@/platform/auth/session";
 import { NotificationsButton } from "@/platform/shell/notifications-panel";
+import { ThemeToggle } from "@/shared/ui/theme";
 
 function initials(name: string) {
   return name
@@ -67,6 +68,7 @@ export function Topbar({
         >
           <Zap size={18} />
         </Button>
+        <ThemeToggle />
         <NotificationsButton />
         <button
           type="button"
