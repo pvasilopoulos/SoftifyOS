@@ -5,6 +5,7 @@ import {
   Columns3,
   LayoutGrid,
   List,
+  Map as MapIcon,
   Search,
   SlidersHorizontal,
   X,
@@ -78,6 +79,7 @@ const MODE_META: Partial<
   peek: { label: "Peek", icon: List },
   cards: { label: "Κάρτες", icon: LayoutGrid },
   kanban: { label: "Kanban", icon: LayoutGrid },
+  map: { label: "Χάρτης", icon: MapIcon },
 };
 
 export function ListExperienceToolbar({

@@ -6,7 +6,8 @@ export type ListMode =
   | "compact"
   | "peek"
   | "cards"
-  | "kanban";
+  | "kanban"
+  | "map";
 export type ListLifecycle = "draft" | "published";
 export type ListDensity = "compact" | "comfortable" | "detailed";
 export type ListRowClick = "navigate" | "peek" | "none";

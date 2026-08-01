@@ -196,6 +196,11 @@ model Branch {
   city       String?
   postalCode String?
   phone      String?
+  /// WGS84 latitude for map / near-me queries
+  lat        Float?
+  /// WGS84 longitude for map / near-me queries
+  lng        Float?
+  geocodedAt DateTime?
   isPrimary  Boolean  @default(false)
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
@@ -209,6 +214,7 @@ model Branch {
   @@unique([tenantId, customerId, code])
   @@index([tenantId, customerId, createdAt(sort: Desc)])
   @@index([tenantId, createdAt(sort: Desc), id(sort: Desc)])
+  @@index([tenantId, lat, lng])
   @@map("branches")
 }
 

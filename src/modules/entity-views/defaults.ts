@@ -224,6 +224,20 @@ function extraListViews(entity: EntityModule): Array<{
           ],
         },
       },
+      {
+        code: "map",
+        name: "Χάρτης πελατών",
+        description: "Διευθύνσεις σε χάρτη με clustering · κοντά μου",
+        config: {
+          ...defaultListConfig(entity),
+          mode: "map",
+          page: {
+            ...defaultListConfig(entity).page,
+            density: "comfortable",
+            rowClick: "navigate",
+          },
+        },
+      },
     ];
   }
   if (entity === "INVOICES") {

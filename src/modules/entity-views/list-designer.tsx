@@ -79,7 +79,15 @@ type Selection =
   | { kind: "bulkAction"; id: string }
   | { kind: "rule"; id: string };
 
-const MODES: ListMode[] = ["browse", "select", "compact", "peek", "cards", "kanban"];
+const MODES: ListMode[] = [
+  "browse",
+  "select",
+  "compact",
+  "peek",
+  "cards",
+  "kanban",
+  "map",
+];
 
 const MODE_LABELS: Record<ListMode, string> = {
   browse: "Λίστα",
@@ -88,6 +96,7 @@ const MODE_LABELS: Record<ListMode, string> = {
   peek: "Peek",
   cards: "Cards",
   kanban: "Kanban",
+  map: "Χάρτης",
 };
 
 const RULE_ACTIONS: ListRule["then"]["action"][] = [

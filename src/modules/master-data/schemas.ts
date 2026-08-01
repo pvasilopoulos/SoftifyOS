@@ -31,6 +31,8 @@ export const branchCreateSchema = z.object({
   city: z.string().trim().max(120).optional().nullable(),
   postalCode: z.string().trim().max(20).optional().nullable(),
   phone: z.string().trim().max(40).optional().nullable(),
+  lat: z.coerce.number().min(-90).max(90).optional().nullable(),
+  lng: z.coerce.number().min(-180).max(180).optional().nullable(),
   isPrimary: z.boolean().optional(),
 });
 

@@ -54,7 +54,7 @@ export const listViewConfigSchema = z.preprocess(
   z.object({
     schemaVersion: z.literal(2),
     mode: z
-      .enum(["browse", "select", "compact", "peek", "cards", "kanban"])
+      .enum(["browse", "select", "compact", "peek", "cards", "kanban", "map"])
       .optional()
       .default("browse"),
     lifecycle: z.enum(["draft", "published"]).optional().default("published"),

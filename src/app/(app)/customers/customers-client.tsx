@@ -3,8 +3,9 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useMemo, useState, useTransition } from "react";
-import { Plus, Settings2 } from "lucide-react";
+import { List, Map as MapIcon, Plus, Settings2 } from "lucide-react";
 import { Button } from "@/shared/ui/button";
+import { cn } from "@/shared/lib/cn";
 import { ENTITY_REGISTRY } from "@/modules/entity-views/registry";
 import type { CustomFieldDef } from "@/modules/entity-views/dynamic-ui";
 import {
@@ -28,6 +29,7 @@ import {
   CustomerPeekDrawer,
   type CustomerPeekData,
 } from "./customer-peek-drawer";
+import { CustomerMapView } from "./customer-map-view";
 
 export type CustomerListItem = {
   id: string;
@@ -112,9 +114,13 @@ export function CustomersClient({
   const [peekCustomer, setPeekCustomer] = useState<CustomerPeekData | null>(
     null,
   );
+  const [surface, setSurface] = useState<"list" | "map">(() =>
+    normalizeListConfig(defaultView?.config).mode === "map" ? "map" : "list",
+  );
 
   const activeView = listViews.find((v) => v.id === viewId) ?? defaultView;
   const builtins = ENTITY_REGISTRY.CUSTOMERS.builtins;
+  const showMap = surface === "map";
 
   const baseConfig = useMemo(
     () => normalizeListConfig(activeView?.config),
@@ -335,6 +341,7 @@ export function CustomersClient({
             listViews.find((v) => v.id === id)?.config,
           );
           setDensity(cfg.page?.density ?? "comfortable");
+          setSurface(cfg.mode === "map" ? "map" : "list");
           const locked = cfg.filters.find(
             (f) => f.source === "system" && f.key === "status" && f.op === "eq",
           );
@@ -345,7 +352,9 @@ export function CustomersClient({
           if (locked?.value === "ACTIVE" || locked?.value === "INACTIVE") {
             setStatus(locked.value);
           }
-          void search({ nextViewId: id, nextStatus });
+          if (cfg.mode !== "map") {
+            void search({ nextViewId: id, nextStatus });
+          }
         }}
         status={status}
         onStatusChange={(s) => {
@@ -375,6 +384,32 @@ export function CustomersClient({
         pending={isPending}
         extraActions={
           <>
+            <div className="inline-flex rounded-xl border border-slate-200 bg-white p-0.5">
+              <button
+                type="button"
+                onClick={() => setSurface("list")}
+                className={cn(
+                  "inline-flex h-7 items-center gap-1 rounded-lg px-2.5 text-xs font-medium",
+                  !showMap
+                    ? "bg-teal-800 text-white"
+                    : "text-slate-600 hover:bg-slate-50",
+                )}
+              >
+                <List size={13} /> Πίνακας
+              </button>
+              <button
+                type="button"
+                onClick={() => setSurface("map")}
+                className={cn(
+                  "inline-flex h-7 items-center gap-1 rounded-lg px-2.5 text-xs font-medium",
+                  showMap
+                    ? "bg-teal-800 text-white"
+                    : "text-slate-600 hover:bg-slate-50",
+                )}
+              >
+                <MapIcon size={13} /> Χάρτης
+              </button>
+            </div>
             {formViews.length > 0 ? (
               <Button
                 variant="secondary"
@@ -401,37 +436,43 @@ export function CustomersClient({
         </p>
       ) : null}
 
-      <ListExperienceRenderer
-        config={effectiveConfig}
-        builtins={builtins}
-        customDefs={customFields}
-        rows={rows}
-        hrefForRow={(row) => `/customers/${row.id}`}
-        onPeek={openPeek}
-        onEdit={openPeek}
-        onQuickCreate={() => setQuickOpen(true)}
-        onNavigateNew={() => router.push("/customers/new")}
-        onKanbanMove={(row, next) => void moveKanban(row, next)}
-        onBulkStatus={(ids, st) => bulkStatus(ids, st)}
-        onSortChange={(sort) => setSortOverride(sort)}
-        emptyActionLabel="Νέος πελάτης"
-      />
+      {showMap ? (
+        <CustomerMapView q={q} status={status} />
+      ) : (
+        <>
+          <ListExperienceRenderer
+            config={effectiveConfig}
+            builtins={builtins}
+            customDefs={customFields}
+            rows={rows}
+            hrefForRow={(row) => `/customers/${row.id}`}
+            onPeek={openPeek}
+            onEdit={openPeek}
+            onQuickCreate={() => setQuickOpen(true)}
+            onNavigateNew={() => router.push("/customers/new")}
+            onKanbanMove={(row, next) => void moveKanban(row, next)}
+            onBulkStatus={(ids, st) => bulkStatus(ids, st)}
+            onSortChange={(sort) => setSortOverride(sort)}
+            emptyActionLabel="Νέος πελάτης"
+          />
 
-      {nextCursor ? (
-        <div className="flex justify-center">
-          <Button
-            variant="secondary"
-            disabled={isPending}
-            onClick={() => void loadMore()}
-          >
-            Περισσότερα · {items.length} φορτωμένα
-          </Button>
-        </div>
-      ) : items.length > 0 ? (
-        <p className="text-center text-xs text-slate-400">
-          Τέλος αποτελεσμάτων · {items.length} εγγραφές
-        </p>
-      ) : null}
+          {nextCursor ? (
+            <div className="flex justify-center">
+              <Button
+                variant="secondary"
+                disabled={isPending}
+                onClick={() => void loadMore()}
+              >
+                Περισσότερα · {items.length} φορτωμένα
+              </Button>
+            </div>
+          ) : items.length > 0 ? (
+            <p className="text-center text-xs text-slate-400">
+              Τέλος αποτελεσμάτων · {items.length} εγγραφές
+            </p>
+          ) : null}
+        </>
+      )}
 
       <CustomerQuickDrawer
         open={quickOpen}
