@@ -95,6 +95,7 @@ model Tenant {
   stockLots                    StockLot[]
   orderStatusOptions           OrderStatusOption[]
   invoiceStatusOptions         InvoiceStatusOption[]
+  documentTransformRules       DocumentTransformRule[]
 
   @@map("tenants")
 }
@@ -448,31 +449,35 @@ enum DeliveryNoteStatus {
 
 /// Δελτίο αποστολής — έξοδος εμπορευμάτων προς πελάτη
 model DeliveryNote {
-  id               String             @id @default(cuid())
-  tenantId         String
-  customerId       String
-  siteId           String?
-  seriesId         String?
-  invoiceId        String?
-  number           String
-  status           DeliveryNoteStatus @default(DRAFT)
-  issuedAt         DateTime?
-  shippingAddress  String?
-  notes            String?
-  createdAt        DateTime           @default(now())
-  updatedAt        DateTime           @updatedAt
+  id              String             @id @default(cuid())
+  tenantId        String
+  customerId      String
+  siteId          String?
+  seriesId        String?
+  invoiceId       String?
+  orderId         String?
+  number          String
+  status          DeliveryNoteStatus @default(DRAFT)
+  issuedAt        DateTime?
+  shippingAddress String?
+  notes           String?
+  createdAt       DateTime           @default(now())
+  updatedAt       DateTime           @updatedAt
 
-  tenant   Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  customer Customer        @relation(fields: [customerId], references: [id], onDelete: Restrict)
-  site     Site?           @relation(fields: [siteId], references: [id], onDelete: SetNull)
-  series   DocumentSeries? @relation(fields: [seriesId], references: [id], onDelete: SetNull)
-  invoice  Invoice?        @relation(fields: [invoiceId], references: [id], onDelete: SetNull)
+  tenant   Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  customer Customer           @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  site     Site?              @relation(fields: [siteId], references: [id], onDelete: SetNull)
+  series   DocumentSeries?    @relation(fields: [seriesId], references: [id], onDelete: SetNull)
+  invoice  Invoice?           @relation(fields: [invoiceId], references: [id], onDelete: SetNull)
+  order    Order?             @relation(fields: [orderId], references: [id], onDelete: SetNull)
   lines    DeliveryNoteLine[]
 
   @@unique([tenantId, number])
   @@index([tenantId, status, issuedAt(sort: Desc)])
   @@index([tenantId, customerId, createdAt(sort: Desc)])
   @@index([tenantId, createdAt(sort: Desc), id(sort: Desc)])
+  @@index([tenantId, orderId])
+  @@index([tenantId, invoiceId])
   @@map("delivery_notes")
 }
 
@@ -481,17 +486,67 @@ model DeliveryNoteLine {
   tenantId       String
   deliveryNoteId String
   productId      String?
+  orderLineId    String?
+  invoiceLineId  String?
   position       Int
   description    String
   quantity       Decimal @db.Decimal(14, 3)
+  /// Qty already invoiced from this delivery line
+  quantityInvoiced Decimal @default(0) @db.Decimal(14, 3)
   unit           String  @default("τεμ")
 
   deliveryNote DeliveryNote @relation(fields: [deliveryNoteId], references: [id], onDelete: Cascade)
   product      Product?     @relation(fields: [productId], references: [id], onDelete: SetNull)
+  orderLine    OrderLine?   @relation(fields: [orderLineId], references: [id], onDelete: SetNull)
+  invoiceLine  InvoiceLine? @relation(fields: [invoiceLineId], references: [id], onDelete: SetNull)
 
   @@index([tenantId, deliveryNoteId, position])
   @@index([tenantId, productId])
+  @@index([tenantId, orderLineId])
+  @@index([tenantId, invoiceLineId])
   @@map("delivery_note_lines")
+}
+
+enum TransformCoverageMode {
+  FULL_COPY
+  QUANTITY
+}
+
+enum TransformIssueMode {
+  DRAFT
+  ISSUE_NOW
+}
+
+/// Παραμετρικοί κανόνες μετασχηματισμού παραστατικών (τι → τι)
+model DocumentTransformRule {
+  id              String                @id @default(cuid())
+  tenantId        String
+  code            String
+  name            String
+  description     String?
+  sourceKind      DocumentKind
+  targetKind      DocumentKind
+  /// Built-in engine handler key
+  handlerKey      String
+  isActive        Boolean               @default(true)
+  isSystem        Boolean               @default(false)
+  sortOrder       Int                   @default(0)
+  allowPartial    Boolean               @default(true)
+  coverageMode    TransformCoverageMode @default(QUANTITY)
+  issueMode       TransformIssueMode    @default(ISSUE_NOW)
+  copyNotes       Boolean               @default(true)
+  defaultSeriesId String?
+  createdAt       DateTime              @default(now())
+  updatedAt       DateTime              @updatedAt
+
+  tenant        Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  defaultSeries DocumentSeries? @relation(fields: [defaultSeriesId], references: [id], onDelete: SetNull)
+
+  @@unique([tenantId, code])
+  @@index([tenantId, sourceKind, isActive, sortOrder])
+  @@index([tenantId, handlerKey])
+  @@index([tenantId, defaultSeriesId])
+  @@map("document_transform_rules")
 }
 
 enum MyDataSubmissionStatus {
@@ -1091,25 +1146,32 @@ model Invoice {
 }
 
 model InvoiceLine {
-  id          String  @id @default(cuid())
-  tenantId    String
-  invoiceId   String
-  productId   String?
-  orderLineId String?
-  position    Int
-  description String
-  quantity    Decimal @db.Decimal(14, 3)
-  unitPrice   Decimal @db.Decimal(14, 2)
-  vatRate     Decimal @db.Decimal(5, 2)
-  lineTotal   Decimal @db.Decimal(14, 2)
+  id                  String  @id @default(cuid())
+  tenantId            String
+  invoiceId           String
+  productId           String?
+  orderLineId         String?
+  /// For credit notes: source invoice line being credited
+  sourceInvoiceLineId String?
+  position            Int
+  description         String
+  quantity            Decimal @db.Decimal(14, 3)
+  quantityCredited    Decimal @default(0) @db.Decimal(14, 3)
+  unitPrice           Decimal @db.Decimal(14, 2)
+  vatRate             Decimal @db.Decimal(5, 2)
+  lineTotal           Decimal @db.Decimal(14, 2)
 
-  invoice   Invoice    @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
-  product   Product?   @relation(fields: [productId], references: [id], onDelete: SetNull)
-  orderLine OrderLine? @relation(fields: [orderLineId], references: [id], onDelete: SetNull)
+  invoice           Invoice            @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  product           Product?           @relation(fields: [productId], references: [id], onDelete: SetNull)
+  orderLine         OrderLine?         @relation(fields: [orderLineId], references: [id], onDelete: SetNull)
+  sourceInvoiceLine InvoiceLine?       @relation("InvoiceLineCredits", fields: [sourceInvoiceLineId], references: [id], onDelete: SetNull)
+  creditLines       InvoiceLine[]      @relation("InvoiceLineCredits")
+  deliveryNoteLines DeliveryNoteLine[]
 
   @@index([tenantId, invoiceId, position])
   @@index([tenantId, productId])
   @@index([tenantId, orderLineId])
+  @@index([tenantId, sourceInvoiceLineId])
   @@map("invoice_lines")
 }
 
@@ -1214,8 +1276,9 @@ model Order {
   site        Site?           @relation(fields: [siteId], references: [id], onDelete: SetNull)
   sourceQuote Order?          @relation("QuoteToOrder", fields: [sourceQuoteId], references: [id], onDelete: SetNull)
   convertedOrders Order[]     @relation("QuoteToOrder")
-  lines       OrderLine[]
-  invoices    Invoice[]
+  lines         OrderLine[]
+  invoices      Invoice[]
+  deliveryNotes DeliveryNote[]
 
   @@unique([tenantId, number])
   @@index([tenantId, status, orderedAt(sort: Desc)])
@@ -1229,21 +1292,23 @@ model Order {
 }
 
 model OrderLine {
-  id               String  @id @default(cuid())
-  tenantId         String
-  orderId          String
-  productId        String?
-  position         Int
-  description      String
-  quantity         Decimal @db.Decimal(14, 3)
-  quantityInvoiced Decimal @default(0) @db.Decimal(14, 3)
-  unitPrice        Decimal @db.Decimal(14, 2)
-  vatRate          Decimal @db.Decimal(5, 2)
-  lineTotal        Decimal @db.Decimal(14, 2)
+  id                String  @id @default(cuid())
+  tenantId          String
+  orderId           String
+  productId         String?
+  position          Int
+  description       String
+  quantity          Decimal @db.Decimal(14, 3)
+  quantityInvoiced  Decimal @default(0) @db.Decimal(14, 3)
+  quantityDelivered Decimal @default(0) @db.Decimal(14, 3)
+  unitPrice         Decimal @db.Decimal(14, 2)
+  vatRate           Decimal @db.Decimal(5, 2)
+  lineTotal         Decimal @db.Decimal(14, 2)
 
-  order        Order         @relation(fields: [orderId], references: [id], onDelete: Cascade)
-  product      Product?      @relation(fields: [productId], references: [id], onDelete: SetNull)
-  invoiceLines InvoiceLine[]
+  order             Order             @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  product           Product?          @relation(fields: [productId], references: [id], onDelete: SetNull)
+  invoiceLines      InvoiceLine[]
+  deliveryNoteLines DeliveryNoteLine[]
 
   @@index([tenantId, orderId, position])
   @@index([tenantId, productId])
@@ -1360,6 +1425,7 @@ model DocumentSeries {
   deliveryNotes  DeliveryNote[]
   paymentMethods DocumentSeriesPaymentMethod[]
   printForms     DocumentSeriesPrintForm[]
+  transformRules DocumentTransformRule[]
 
   @@unique([tenantId, code])
   @@index([tenantId, kind, isActive])

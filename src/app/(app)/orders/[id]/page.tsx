@@ -15,6 +15,7 @@ import {
 import { OrderIssueInvoice } from "./order-issue-invoice";
 import { QuoteConvertOrder } from "./quote-convert-order";
 import { OrderEditPanel } from "./order-edit-panel";
+import { TransformActionButton } from "@/modules/document-transforms/transform-dialog";
 
 export const dynamic = "force-dynamic";
 
@@ -176,22 +177,31 @@ export default async function OrderDetailPage({
     listHref,
   };
 
-  const headerActions = isQuote ? (
-    <QuoteConvertOrder
-      quoteId={order.id}
-      canConvert={canConvert}
-      existingOrderId={order.convertedOrders[0]?.id}
-    />
-  ) : canInvoice ? (
-    <OrderIssueInvoice orderId={order.id} />
-  ) : order.invoices[0] ? (
-    <Link
-      href={`/invoices/${order.invoices[0].id}`}
-      className="inline-flex h-10 items-center rounded-xl bg-teal-600 px-4 text-sm font-medium text-white hover:bg-teal-700"
-    >
-      Άνοιγμα {order.invoices[0].number}
-    </Link>
-  ) : null;
+  const headerActions = (
+    <div className="flex flex-wrap items-center justify-end gap-2">
+      <TransformActionButton
+        sourceKind={isQuote ? "SALES_QUOTE" : "SALES_ORDER"}
+        sourceId={order.id}
+        canWrite={session.role !== "VIEWER"}
+      />
+      {isQuote ? (
+        <QuoteConvertOrder
+          quoteId={order.id}
+          canConvert={canConvert}
+          existingOrderId={order.convertedOrders[0]?.id}
+        />
+      ) : canInvoice ? (
+        <OrderIssueInvoice orderId={order.id} />
+      ) : order.invoices[0] ? (
+        <Link
+          href={`/invoices/${order.invoices[0].id}`}
+          className="inline-flex h-10 items-center rounded-xl bg-teal-600 px-4 text-sm font-medium text-white hover:bg-teal-700"
+        >
+          Άνοιγμα {order.invoices[0].number}
+        </Link>
+      ) : null}
+    </div>
+  );
 
   return (
     <OrderDetailClient

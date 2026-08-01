@@ -217,6 +217,16 @@ const SECTIONS: SettingsSection[] = [
         keywords: "invoice status κατάσταση τιμολόγιο έκδοση",
       },
       {
+        href: "/settings/document-transforms",
+        title: "Μετασχηματισμοί",
+        description:
+          "Τι μετατρέπεται σε τι, μερική κάλυψη γραμμών και υπόλοιπα.",
+        badge: "Advanced",
+        tone: "amber",
+        icon: "Workflow",
+        keywords: "transform μετασχηματισμός convert quote order invoice delivery",
+      },
+      {
         href: "/settings/print-forms",
         title: "Φόρμες εκτύπωσης",
         description: "Print Form Builder για τιμολόγια και ΑΠΥ.",

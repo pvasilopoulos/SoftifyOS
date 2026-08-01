@@ -34,6 +34,7 @@ import {
 } from "@/modules/sales/invoice-utils";
 import { InvoiceActions } from "../invoice-actions";
 import { CreditFromInvoice } from "./credit-from-invoice";
+import { TransformActionButton } from "@/modules/document-transforms/transform-dialog";
 
 export type InvoiceDetailPayload = {
   id: string;
@@ -400,7 +401,16 @@ export function InvoiceDetailClient({
                 size="md"
                 showCollect={invoice.kind !== "SALES_CREDIT"}
               />
-              <CreditFromInvoice invoiceId={invoice.id} canCredit={canCredit} />
+              <div className="flex flex-wrap justify-end gap-2">
+                <TransformActionButton
+                  sourceKind={invoice.kind}
+                  sourceId={invoice.id}
+                  canWrite={
+                    invoice.canWrite && invoice.kind !== "SALES_CREDIT"
+                  }
+                />
+                <CreditFromInvoice invoiceId={invoice.id} canCredit={canCredit} />
+              </div>
             </div>
           }
         />
