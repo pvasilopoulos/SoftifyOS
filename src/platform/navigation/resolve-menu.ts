@@ -13,10 +13,27 @@ import {
   type MobileFooterOverrides,
 } from "@/platform/navigation/menu-tree";
 
+/** Audit lives under Settings — strip legacy main-nav entries from stored menus. */
+function stripLegacyAuditNav(nodes: MenuNodeConfig[]): MenuNodeConfig[] {
+  return nodes
+    .filter((n) => {
+      if (n.id === "audit") return false;
+      if (n.type === "link" && (n.href === "/audit" || n.href?.startsWith("/audit/"))) {
+        return false;
+      }
+      return true;
+    })
+    .map((n) =>
+      n.children?.length
+        ? { ...n, children: stripLegacyAuditNav(n.children) }
+        : n,
+    );
+}
+
 function parseMenuJson(raw: unknown): MenuNodeConfig[] | null {
   if (!raw) return null;
   if (!Array.isArray(raw)) return null;
-  return raw as MenuNodeConfig[];
+  return stripLegacyAuditNav(raw as MenuNodeConfig[]);
 }
 
 export type TenantMenuSettings = {
