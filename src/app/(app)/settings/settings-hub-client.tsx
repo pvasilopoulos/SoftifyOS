@@ -120,6 +120,16 @@ const SECTIONS: SettingsSection[] = [
         keywords: "webhook api skroutz mydata",
       },
       {
+        href: "/docs",
+        title: "Docs — οδηγός προϊόντος",
+        description:
+          "Τι κάνει το SoftifyOS και πώς: πωλήσεις, FI, HR, αποθήκη, integrations.",
+        badge: "Help",
+        tone: "emerald",
+        icon: "BookOpen",
+        keywords: "docs βοήθεια οδηγός help documentation",
+      },
+      {
         href: "/api/settings/export",
         title: "Εξαγωγή ρυθμίσεων",
         description: "JSON snapshot ρυθμίσεων (χωρίς secrets).",

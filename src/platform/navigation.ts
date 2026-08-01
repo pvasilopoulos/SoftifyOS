@@ -17,6 +17,7 @@ import {
   FolderTree,
   Gift,
   Star,
+  BookOpen,
   MoreHorizontal,
   type LucideIcon,
 } from "lucide-react";
@@ -39,7 +40,8 @@ export type NavIconName =
   | "ScrollText"
   | "Settings"
   | "Shield"
-  | "FolderTree";
+  | "FolderTree"
+  | "BookOpen";
 
 export const navIconMap: Record<NavIconName, LucideIcon> = {
   LayoutDashboard,
@@ -60,6 +62,7 @@ export const navIconMap: Record<NavIconName, LucideIcon> = {
   Settings,
   Shield,
   FolderTree,
+  BookOpen,
 };
 
 /** Serializable menu node (stored in DB / edited in settings) */
@@ -287,6 +290,13 @@ export const defaultMenuTree: MenuNodeConfig[] = [
         label: "Αναφορές & BI",
         href: "/reports",
         icon: "BarChart3",
+      },
+      {
+        id: "docs",
+        type: "link",
+        label: "Docs",
+        href: "/docs",
+        icon: "BookOpen",
       },
       {
         id: "settings",

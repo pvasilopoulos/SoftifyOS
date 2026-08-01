@@ -11,6 +11,7 @@ Enterprise ERP platform — **Template v2 (Desktop + Mobile)** locked.
 - Softify design system (slate / teal / ink, IBM Plex Sans)
 - Multi-tenant ready folder structure (`platform/`, `modules/`, `shared/`)
 - ADR: [`docs/adr/0001-template-v2.md`](docs/adr/0001-template-v2.md)
+- **Product docs (in-app):** [/docs](http://localhost:3000/docs) · markdown: [`docs/product-guide.md`](docs/product-guide.md)
 
 ## Quick start
 

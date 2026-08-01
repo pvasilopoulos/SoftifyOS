@@ -367,15 +367,23 @@ export function IntegrationsHubClient({
           title="API & Integrations"
           description="SAP-style integration cockpit · webhooks · myDATA/ΑΑΔΕ · API tokens · monitor"
           actions={
-            canWrite ? (
-              <Button
-                disabled={pending}
-                onClick={() => save()}
-                className="bg-[var(--int-ink)] hover:bg-slate-900"
+            <div className="flex flex-wrap gap-2">
+              <Link
+                href="/docs"
+                className="inline-flex h-9 items-center rounded-xl border border-slate-200 bg-white/90 px-3 text-sm font-medium hover:bg-white"
               >
-                {pending ? "Αποθήκευση…" : "Αποθήκευση αλλαγών"}
-              </Button>
-            ) : null
+                Docs προϊόντος
+              </Link>
+              {canWrite ? (
+                <Button
+                  disabled={pending}
+                  onClick={() => save()}
+                  className="bg-[var(--int-ink)] hover:bg-slate-900"
+                >
+                  {pending ? "Αποθήκευση…" : "Αποθήκευση αλλαγών"}
+                </Button>
+              ) : null}
+            </div>
           }
         />
 
