@@ -13,6 +13,8 @@ import {
 import { parseCustomFields } from "@/modules/entity-views/types";
 import { CustomerHierarchyClient } from "./customer-hierarchy-client";
 import { CustomerEditPanel } from "./customer-edit-panel";
+import { Customer360 } from "./customer-360";
+import { toNumber } from "@/modules/sales/invoice-utils";
 
 export const dynamic = "force-dynamic";
 
@@ -38,23 +40,62 @@ export default async function CustomerDetailPage({
   if (!session) redirect("/login");
 
   const { id } = await params;
-  const [customer, formViews, customFields] = await Promise.all([
-    prisma.customer.findFirst({
-      where: { id, tenantId: session.tenantId },
-      include: {
-        branches: {
-          orderBy: [{ isPrimary: "desc" }, { name: "asc" }],
-          include: {
-            spaces: { orderBy: [{ type: "asc" }, { name: "asc" }] },
+  const [customer, formViews, customFields, invoices, orders, activities] =
+    await Promise.all([
+      prisma.customer.findFirst({
+        where: { id, tenantId: session.tenantId },
+        include: {
+          branches: {
+            orderBy: [{ isPrimary: "desc" }, { name: "asc" }],
+            include: {
+              spaces: { orderBy: [{ type: "asc" }, { name: "asc" }] },
+            },
           },
         },
-      },
-    }),
-    listEntityFormViews(prisma, session.tenantId, "CUSTOMERS", true),
-    listCustomFields(prisma, session.tenantId, "CUSTOMERS", true),
-  ]);
+      }),
+      listEntityFormViews(prisma, session.tenantId, "CUSTOMERS", true),
+      listCustomFields(prisma, session.tenantId, "CUSTOMERS", true),
+      prisma.invoice.findMany({
+        where: { tenantId: session.tenantId, customerId: id },
+        orderBy: { createdAt: "desc" },
+        take: 20,
+        select: {
+          id: true,
+          number: true,
+          status: true,
+          total: true,
+          paidAmount: true,
+          issuedAt: true,
+        },
+      }),
+      prisma.order.findMany({
+        where: { tenantId: session.tenantId, customerId: id },
+        orderBy: { createdAt: "desc" },
+        take: 20,
+        select: {
+          id: true,
+          number: true,
+          status: true,
+          kind: true,
+          total: true,
+        },
+      }),
+      prisma.crmActivity.findMany({
+        where: { tenantId: session.tenantId, customerId: id },
+        orderBy: { createdAt: "desc" },
+        take: 30,
+      }),
+    ]);
 
   if (!customer) notFound();
+
+  const openInvoices = invoices.filter((i) =>
+    ["ISSUED", "PARTIAL", "OVERDUE"].includes(i.status),
+  );
+  const openBalance = openInvoices.reduce(
+    (s, i) => s + Math.max(0, toNumber(i.total) - toNumber(i.paidAmount)),
+    0,
+  );
 
   const payload = {
     ...customer,
@@ -101,6 +142,35 @@ export default async function CustomerDetailPage({
           }
         />
       </div>
+
+      <Customer360
+        customerId={customer.id}
+        openBalance={openBalance}
+        openInvoices={openInvoices.length}
+        canWrite={session.role !== "VIEWER"}
+        invoices={invoices.map((i) => ({
+          id: i.id,
+          number: i.number,
+          status: i.status,
+          total: toNumber(i.total),
+          balance: Math.max(0, toNumber(i.total) - toNumber(i.paidAmount)),
+          issuedAt: i.issuedAt?.toISOString() ?? null,
+        }))}
+        orders={orders.map((o) => ({
+          id: o.id,
+          number: o.number,
+          status: o.status,
+          kind: o.kind,
+          total: toNumber(o.total),
+        }))}
+        activities={activities.map((a) => ({
+          id: a.id,
+          kind: a.kind,
+          title: a.title,
+          dueAt: a.dueAt?.toISOString() ?? null,
+          createdAt: a.createdAt.toISOString(),
+        }))}
+      />
 
       <CustomerEditPanel
         customerId={customer.id}

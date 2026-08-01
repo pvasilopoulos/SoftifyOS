@@ -9,6 +9,7 @@ import {
   loadArRows,
   loadVatSummary,
 } from "@/modules/finance/analytics";
+import { ReportsExport } from "./reports-export";
 
 export const metadata = { title: "Αναφορές" };
 export const dynamic = "force-dynamic";
@@ -28,8 +29,14 @@ export default async function ReportsPage() {
   const yearStart = new Date(`${startOfMonth.getFullYear()}-01-01T00:00:00.000Z`);
   const now = new Date();
 
+  const priorMonthStart = new Date(startOfMonth);
+  priorMonthStart.setFullYear(priorMonthStart.getFullYear() - 1);
+  const priorMonthEnd = new Date(startOfMonth);
+  priorMonthEnd.setMilliseconds(-1);
+
   const [
     issuedMonth,
+    issuedPriorYearMonth,
     openOrders,
     lowStock,
     arRows,
@@ -45,6 +52,14 @@ export default async function ReportsPage() {
         issuedAt: { gte: startOfMonth },
       },
       select: { total: true, vatAmount: true, kind: true },
+    }),
+    prisma.invoice.findMany({
+      where: {
+        tenantId,
+        status: { notIn: ["DRAFT", "CANCELLED"] },
+        issuedAt: { gte: priorMonthStart, lte: priorMonthEnd },
+      },
+      select: { total: true, kind: true },
     }),
     prisma.order.count({
       where: { tenantId, status: { in: ["DRAFT", "CONFIRMED"] } },
@@ -78,6 +93,15 @@ export default async function ReportsPage() {
     monthSales += sign * toNumber(inv.total);
     monthVat += sign * toNumber(inv.vatAmount);
   }
+  let priorSales = 0;
+  for (const inv of issuedPriorYearMonth) {
+    const sign = inv.kind === "SALES_CREDIT" ? -1 : 1;
+    priorSales += sign * toNumber(inv.total);
+  }
+  const yoyPct =
+    priorSales > 0
+      ? Math.round(((monthSales - priorSales) / priorSales) * 1000) / 10
+      : null;
 
   const customerIds = topCustomers.map((c) => c.customerId);
   const customers = customerIds.length
@@ -91,17 +115,39 @@ export default async function ReportsPage() {
   const arTotal = arRows.reduce((s, r) => s + r.balance, 0);
   const apTotal = apRows.reduce((s, r) => s + r.total, 0);
 
+  const exportRows = [
+    { metric: "Πωλήσεις μήνα", value: monthSales },
+    { metric: "Πωλήσεις ίδιου μήνα πέρυσι", value: priorSales },
+    { metric: "Open AR", value: arTotal },
+    { metric: "Open AP", value: apTotal },
+    { metric: "ΦΠΑ χρήσης", value: vat.netVatPayable },
+    { metric: "ΦΠΑ μήνα", value: monthVat },
+    { metric: "Ανοιχτές παραγγελίες", value: openOrders },
+    { metric: "Χαμηλό στοκ", value: lowStock },
+    { metric: "Δελτία μήνα", value: deliveryCount },
+  ];
+
   return (
     <div className="space-y-5">
       <PageHeader
         title="Αναφορές"
-        description="Ζωντανά aggregates από τιμολόγια, αγορές, απόθεμα και ΦΠΑ."
+        description="Ζωντανά aggregates, σύγκριση περιόδων και εξαγωγή."
+        actions={
+          <ReportsExport
+            rows={exportRows}
+            filename={`reports-${new Date().toISOString().slice(0, 10)}.csv`}
+          />
+        }
       />
 
-      <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+      <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
         {(
           [
             ["Πωλήσεις μήνα", money(monthSales)],
+            [
+              "vs πέρυσι",
+              yoyPct == null ? "—" : `${yoyPct > 0 ? "+" : ""}${yoyPct}%`,
+            ],
             ["Open AR", money(arTotal)],
             ["Open AP (PO)", money(apTotal)],
             ["ΦΠΑ χρήσης", money(vat.netVatPayable)],

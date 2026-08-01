@@ -60,9 +60,9 @@ export function InventoryClient({
     movements: number;
   };
 }) {
-  const [tab, setTab] = useState<"balances" | "movements" | "adjust">(
-    "balances",
-  );
+  const [tab, setTab] = useState<
+    "balances" | "movements" | "adjust" | "transfer"
+  >("balances");
   const [balances, setBalances] = useState(initialBalances);
   const [sites, setSites] = useState(initialSites);
   const [meta, setMeta] = useState(initialMeta);
@@ -79,6 +79,11 @@ export function InventoryClient({
   const [adjMode, setAdjMode] = useState<"IN" | "OUT" | "ADJUST">("IN");
   const [adjQty, setAdjQty] = useState("1");
   const [adjNote, setAdjNote] = useState("");
+  const [trProductId, setTrProductId] = useState("");
+  const [trFrom, setTrFrom] = useState("");
+  const [trTo, setTrTo] = useState("");
+  const [trQty, setTrQty] = useState("1");
+  const [trNote, setTrNote] = useState("");
 
   const siteOptions = useMemo(() => sites, [sites]);
 
@@ -215,6 +220,7 @@ export function InventoryClient({
             ["balances", "Υπόλοιπα"],
             ["movements", "Κινήσεις"],
             ["adjust", "Ρύθμιση"],
+            ["transfer", "Ενδοδιακίνηση"],
           ] as const
         ).map(([id, label]) => (
           <button
@@ -471,6 +477,110 @@ export function InventoryClient({
           </label>
           <Button onClick={() => void submitAdjust()} disabled={pending}>
             Καταχώρηση
+          </Button>
+        </section>
+      ) : null}
+
+      {tab === "transfer" ? (
+        <section className="soft-panel max-w-xl space-y-4 p-5">
+          <div className="flex items-center gap-2 text-sm font-semibold text-ink-950">
+            <RefreshCw size={16} className="text-slate-400" />
+            Ενδοδιακίνηση μεταξύ αποθηκών
+          </div>
+          <label className="block text-sm">
+            <span className="mb-1 block font-medium">Προϊόν</span>
+            <select
+              value={trProductId}
+              onChange={(e) => setTrProductId(e.target.value)}
+              className="h-10 w-full rounded-xl border border-slate-200 px-3"
+            >
+              <option value="">— Επίλεξε —</option>
+              {products.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.sku} · {p.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <label className="block text-sm">
+              <span className="mb-1 block font-medium">Από</span>
+              <select
+                value={trFrom}
+                onChange={(e) => setTrFrom(e.target.value)}
+                className="h-10 w-full rounded-xl border border-slate-200 px-3"
+              >
+                <option value="">—</option>
+                {siteOptions.map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.code} · {s.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="block text-sm">
+              <span className="mb-1 block font-medium">Προς</span>
+              <select
+                value={trTo}
+                onChange={(e) => setTrTo(e.target.value)}
+                className="h-10 w-full rounded-xl border border-slate-200 px-3"
+              >
+                <option value="">—</option>
+                {siteOptions.map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.code} · {s.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+          <label className="block text-sm">
+            <span className="mb-1 block font-medium">Ποσότητα</span>
+            <input
+              type="number"
+              min={0.001}
+              step="0.001"
+              value={trQty}
+              onChange={(e) => setTrQty(e.target.value)}
+              className="h-10 w-full rounded-xl border border-slate-200 px-3"
+            />
+          </label>
+          <label className="block text-sm">
+            <span className="mb-1 block font-medium">Σημείωση</span>
+            <input
+              value={trNote}
+              onChange={(e) => setTrNote(e.target.value)}
+              className="h-10 w-full rounded-xl border border-slate-200 px-3"
+            />
+          </label>
+          <Button
+            disabled={pending}
+            onClick={() => {
+              startTransition(async () => {
+                setError(null);
+                setMessage(null);
+                const res = await fetch("/api/inventory/transfer", {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({
+                    productId: trProductId,
+                    fromSiteId: trFrom,
+                    toSiteId: trTo,
+                    qty: Number(trQty),
+                    note: trNote || null,
+                  }),
+                });
+                const data = await res.json().catch(() => ({}));
+                if (!res.ok) {
+                  setError(data.error || "Αποτυχία ενδοδιακίνησης");
+                  return;
+                }
+                setMessage("Η ενδοδιακίνηση καταχωρήθηκε");
+                void loadBalances();
+              });
+            }}
+          >
+            Μεταφορά
           </Button>
         </section>
       ) : null}

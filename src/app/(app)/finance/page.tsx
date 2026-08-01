@@ -81,6 +81,53 @@ export default async function FinancePage() {
         </Badge>
       </div>
 
+      {(() => {
+        const now = Date.now();
+        const week = arRows
+          .filter((r) => r.dueAt && new Date(r.dueAt).getTime() <= now + 7 * 86_400_000)
+          .reduce((s, r) => s + r.balance, 0);
+        const month = arRows
+          .filter(
+            (r) =>
+              r.dueAt && new Date(r.dueAt).getTime() <= now + 30 * 86_400_000,
+          )
+          .reduce((s, r) => s + r.balance, 0);
+        const overdue = arRows
+          .filter((r) => r.bucket !== "current")
+          .reduce((s, r) => s + r.balance, 0);
+        return (
+          <section className="grid gap-3 sm:grid-cols-3">
+            <div className="soft-panel px-4 py-3">
+              <p className="text-xs text-slate-500">Cash forecast 7ημ.</p>
+              <p className="mt-1 text-xl font-semibold tabular-nums">
+                {toNumber(week).toLocaleString("el-GR", {
+                  style: "currency",
+                  currency: "EUR",
+                })}
+              </p>
+            </div>
+            <div className="soft-panel px-4 py-3">
+              <p className="text-xs text-slate-500">Cash forecast 30ημ.</p>
+              <p className="mt-1 text-xl font-semibold tabular-nums">
+                {toNumber(month).toLocaleString("el-GR", {
+                  style: "currency",
+                  currency: "EUR",
+                })}
+              </p>
+            </div>
+            <div className="soft-panel px-4 py-3">
+              <p className="text-xs text-slate-500">Ληξιπρόθεσμα AR</p>
+              <p className="mt-1 text-xl font-semibold tabular-nums text-rose-700">
+                {toNumber(overdue).toLocaleString("el-GR", {
+                  style: "currency",
+                  currency: "EUR",
+                })}
+              </p>
+            </div>
+          </section>
+        );
+      })()}
+
       <FinanceOpsClient
         arRows={arRows}
         apRows={apRows}

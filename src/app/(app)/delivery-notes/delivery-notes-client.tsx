@@ -236,7 +236,12 @@ export function DeliveryNotesClient({
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div>
                   <h2 className="font-mono text-lg font-semibold text-slate-900">
-                    {selected.number}
+                    <a
+                      href={`/delivery-notes/${selected.id}`}
+                      className="hover:text-teal-800 hover:underline"
+                    >
+                      {selected.number}
+                    </a>
                   </h2>
                   <p className="text-sm text-slate-600">
                     {selected.customer.name} ·{" "}

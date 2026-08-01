@@ -79,6 +79,10 @@ model Tenant {
   deliveryNotes                DeliveryNote[]
   myDataSubmissions            MyDataSubmission[]
   employees                    Employee[]
+  crmLeads                     CrmLead[]
+  crmActivities               CrmActivity[]
+  savedFilters                 SavedFilter[]
+  purchasePayments             PurchasePayment[]
 
   @@map("tenants")
 }
@@ -355,8 +359,9 @@ model Supplier {
   createdAt DateTime       @default(now())
   updatedAt DateTime       @updatedAt
 
-  tenant         Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  purchaseOrders PurchaseOrder[]
+  tenant           Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  purchaseOrders   PurchaseOrder[]
+  purchasePayments PurchasePayment[]
 
   @@unique([tenantId, code])
   @@index([tenantId, name])
@@ -387,6 +392,7 @@ model PurchaseOrder {
   site     Site?               @relation(fields: [siteId], references: [id], onDelete: SetNull)
   series   DocumentSeries?     @relation(fields: [seriesId], references: [id], onDelete: SetNull)
   lines    PurchaseOrderLine[]
+  payments PurchasePayment[]
 
   @@unique([tenantId, number])
   @@index([tenantId, status, orderedAt(sort: Desc)])
@@ -532,6 +538,106 @@ model Employee {
   @@index([tenantId, lastName, firstName])
   @@index([tenantId, status, createdAt(sort: Desc)])
   @@map("employees")
+}
+
+enum CrmLeadStatus {
+  NEW
+  CONTACTED
+  QUALIFIED
+  PROPOSAL
+  WON
+  LOST
+}
+
+model CrmLead {
+  id          String        @id @default(cuid())
+  tenantId    String
+  title       String
+  company     String?
+  contactName String?
+  email       String?
+  phone       String?
+  status      CrmLeadStatus @default(NEW)
+  value       Decimal       @default(0) @db.Decimal(14, 2)
+  customerId  String?
+  notes       String?
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  tenant     Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  activities CrmActivity[]
+
+  @@index([tenantId, status, updatedAt(sort: Desc)])
+  @@index([tenantId, createdAt(sort: Desc)])
+  @@map("crm_leads")
+}
+
+enum CrmActivityKind {
+  CALL
+  EMAIL
+  MEETING
+  TASK
+  NOTE
+}
+
+model CrmActivity {
+  id          String          @id @default(cuid())
+  tenantId    String
+  leadId      String?
+  customerId  String?
+  kind        CrmActivityKind @default(NOTE)
+  title       String
+  body        String?
+  dueAt       DateTime?
+  doneAt      DateTime?
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+
+  tenant Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  lead   CrmLead? @relation(fields: [leadId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, dueAt])
+  @@index([tenantId, customerId, createdAt(sort: Desc)])
+  @@index([tenantId, leadId, createdAt(sort: Desc)])
+  @@map("crm_activities")
+}
+
+model SavedFilter {
+  id        String   @id @default(cuid())
+  tenantId  String
+  userId    String
+  module    String
+  name      String
+  payload   Json
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, userId, module, name])
+  @@index([tenantId, userId, module])
+  @@map("saved_filters")
+}
+
+model PurchasePayment {
+  id               String   @id @default(cuid())
+  tenantId         String
+  supplierId       String
+  purchaseOrderId  String?
+  amount           Decimal  @db.Decimal(14, 2)
+  method           String   @default("TRANSFER")
+  reference        String?
+  paidAt           DateTime @default(now())
+  notes            String?
+  createdAt        DateTime @default(now())
+
+  tenant   Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  supplier Supplier       @relation(fields: [supplierId], references: [id], onDelete: Restrict)
+  purchaseOrder PurchaseOrder? @relation(fields: [purchaseOrderId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, supplierId, paidAt(sort: Desc)])
+  @@index([tenantId, purchaseOrderId])
+  @@map("purchase_payments")
 }
 
 enum UnitOfMeasureKind {

@@ -1,9 +1,10 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { Bell, Building2, ChevronDown, LogOut, Search, Zap } from "lucide-react";
+import { Building2, ChevronDown, LogOut, Search, Zap } from "lucide-react";
 import { Button } from "@/shared/ui/button";
 import type { SessionPayload } from "@/platform/auth/session";
+import { NotificationsButton } from "@/platform/shell/notifications-panel";
 
 function initials(name: string) {
   return name
@@ -66,16 +67,7 @@ export function Topbar({
         >
           <Zap size={18} />
         </Button>
-        <Button
-          type="button"
-          variant="secondary"
-          size="icon"
-          className="relative"
-          aria-label="Ειδοποιήσεις"
-        >
-          <Bell size={18} />
-          <span className="absolute right-2 top-2 h-2 w-2 rounded-full bg-teal-500 ring-2 ring-white" />
-        </Button>
+        <NotificationsButton />
         <button
           type="button"
           className="hidden items-center gap-2 rounded-2xl border border-slate-200 bg-white px-2.5 py-1.5 text-sm shadow-sm hover:bg-slate-50 md:flex"

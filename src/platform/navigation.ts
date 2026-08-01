@@ -173,6 +173,13 @@ export const defaultMenuTree: MenuNodeConfig[] = [
         mobileOrder: 1,
       },
       {
+        id: "crm",
+        type: "link",
+        label: "CRM",
+        href: "/crm",
+        icon: "FolderTree",
+      },
+      {
         id: "quotes",
         type: "link",
         label: "Προσφορές",

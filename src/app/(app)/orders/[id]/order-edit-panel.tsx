@@ -3,6 +3,7 @@
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/shared/ui/button";
+import { toast } from "@/shared/ui/toaster";
 
 export function OrderEditPanel({
   orderId,
@@ -41,12 +42,14 @@ export function OrderEditPanel({
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        setError(
-          typeof data.error === "string" ? data.error : "Αποτυχία αποθήκευσης",
-        );
+        const errMsg =
+          typeof data.error === "string" ? data.error : "Αποτυχία αποθήκευσης";
+        setError(errMsg);
+        toast.error(errMsg);
         return;
       }
       setMessage(ok);
+      toast.success(ok);
       router.refresh();
     });
   }
