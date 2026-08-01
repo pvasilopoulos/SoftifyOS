@@ -74,7 +74,7 @@ function defaultListConfig(entity: EntityModule): ListViewConfig {
     sort: { id: "sort_primary", key: "createdAt", source: "system", dir: "desc" },
     pageSize: 50,
     rowActions: [
-      { id: "open", label: "Άνοιγμα", type: "navigate" },
+      { id: "open", label: "Άνοιγμα", type: "navigate", icon: "external-link" },
       ...(entity === "CUSTOMERS"
         ? [
             {
@@ -82,12 +82,14 @@ function defaultListConfig(entity: EntityModule): ListViewConfig {
               label: "Επεξεργασία",
               type: "form_edit" as const,
               formCode: "default",
+              icon: "pencil",
             },
             {
               id: "peek",
               label: "Γρήγορη προβολή",
               type: "form_peek" as const,
               formCode: "quick",
+              icon: "eye",
             },
           ]
         : []),
@@ -514,8 +516,14 @@ function extraListViews(entity: EntityModule): Array<{
             density: "comfortable",
           },
           rowActions: [
-            { id: "edit", label: "Επεξεργασία", type: "form_edit", formCode: "default" },
-            { id: "open", label: "Άνοιγμα", type: "navigate" },
+            {
+              id: "edit",
+              label: "Επεξεργασία",
+              type: "form_edit",
+              formCode: "default",
+              icon: "pencil",
+            },
+            { id: "open", label: "Άνοιγμα", type: "navigate", icon: "external-link" },
           ],
         },
       },
@@ -533,8 +541,8 @@ function extraListViews(entity: EntityModule): Array<{
             editFormCode: "default",
           },
           rowActions: [
-            { id: "edit", label: "Επεξεργασία", type: "form_edit" },
-            { id: "open", label: "Καρτέλα", type: "navigate" },
+            { id: "edit", label: "Επεξεργασία", type: "form_edit", icon: "pencil" },
+            { id: "open", label: "Καρτέλα", type: "navigate", icon: "external-link" },
           ],
         },
       },

@@ -170,7 +170,7 @@ export function emptyListConfig(): ListViewConfig {
     sorts: [],
     pageSize: 50,
     rowActions: [
-      { id: "open", label: "Άνοιγμα", type: "navigate" },
+      { id: "open", label: "Άνοιγμα", type: "navigate", icon: "external-link" },
     ],
     bulkActions: [],
     rules: [],
