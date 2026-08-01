@@ -7,7 +7,7 @@ import { ArrowLeft, ArrowRight, Pencil, Plus } from "lucide-react";
 import { PageHeader } from "@/shared/ui/page-header";
 import { Button } from "@/shared/ui/button";
 import { Badge } from "@/shared/ui/badge";
-import { HANDLER_CATALOG } from "@/modules/document-transforms";
+import { HANDLER_CATALOG } from "@/modules/document-transforms/handlers";
 
 type Item = {
   id: string;

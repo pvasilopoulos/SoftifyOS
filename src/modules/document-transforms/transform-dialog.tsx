@@ -5,7 +5,42 @@ import { useRouter } from "next/navigation";
 import { ArrowRightLeft, Loader2 } from "lucide-react";
 import { Button } from "@/shared/ui/button";
 import { toast } from "@/shared/ui/toaster";
-import type { CoverageLine, TransformPreview } from "./engine";
+export type CoverageLine = {
+  sourceLineId: string;
+  description: string;
+  productId: string | null;
+  quantity: number;
+  covered: number;
+  remaining: number;
+  unitPrice: number;
+  vatRate: number;
+  selected: number;
+};
+
+export type TransformPreview = {
+  rule: {
+    id: string;
+    code: string;
+    name: string;
+    handlerKey: string;
+    sourceKind: string;
+    targetKind: string;
+    allowPartial: boolean;
+    coverageMode: string;
+    issueMode: string;
+    copyNotes: boolean;
+    defaultSeriesId: string | null;
+  };
+  source: {
+    id: string;
+    number: string;
+    kind: string;
+    status: string;
+  };
+  lines: CoverageLine[];
+  canExecute: boolean;
+  blockingReason?: string;
+};
 
 type AvailableRule = {
   id: string;
