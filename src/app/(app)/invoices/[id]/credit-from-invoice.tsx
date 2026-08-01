@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { FileMinus2 } from "lucide-react";
 import { Button } from "@/shared/ui/button";
@@ -16,9 +17,45 @@ export function CreditFromInvoice({
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [seriesId, setSeriesId] = useState("");
-  const [status, setStatus] = useState<"DRAFT" | "ISSUED">("DRAFT");
+  const [statusOptionId, setStatusOptionId] = useState("");
+  const [statusOptions, setStatusOptions] = useState<
+    Array<{ id: string; name: string; code: string; workflow: string }>
+  >([]);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(
+          "/api/settings/invoice-statuses?selectableOnCreate=1",
+        );
+        const data = (await res.json()) as {
+          items?: Array<{
+            id: string;
+            name: string;
+            code: string;
+            workflow: string;
+          }>;
+        };
+        if (cancelled) return;
+        const opts = data.items ?? [];
+        setStatusOptions(opts);
+        const draft =
+          opts.find((o) => o.code === "DRAFT") ??
+          opts.find((o) => o.workflow === "DRAFT") ??
+          opts[0];
+        if (draft) setStatusOptionId(draft.id);
+      } catch {
+        /* ignore */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [open]);
 
   if (!canCredit) return null;
 
@@ -32,7 +69,7 @@ export function CreditFromInvoice({
     const res = await fetch(`/api/invoices/${invoiceId}/credit`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ seriesId, status }),
+      body: JSON.stringify({ seriesId, statusOptionId }),
     });
     const data = (await res.json()) as {
       item?: { id: string };
@@ -76,14 +113,28 @@ export function CreditFromInvoice({
             className="block"
           />
           <label className="block text-sm">
-            <span className="mb-1.5 block font-medium">Κατάσταση</span>
+            <span className="mb-1.5 flex items-center justify-between gap-2 font-medium">
+              <span>Κατάσταση</span>
+              <Link
+                href="/settings/invoice-statuses"
+                className="text-xs font-normal text-teal-700 hover:underline"
+              >
+                Διαχείριση
+              </Link>
+            </span>
             <select
-              value={status}
-              onChange={(e) => setStatus(e.target.value as "DRAFT" | "ISSUED")}
+              value={statusOptionId}
+              onChange={(e) => setStatusOptionId(e.target.value)}
               className="h-11 w-full rounded-xl border border-slate-200 px-3 text-sm"
             >
-              <option value="DRAFT">Πρόχειρο</option>
-              <option value="ISSUED">Έκδοση τώρα</option>
+              {statusOptions.length === 0 ? (
+                <option value="">— Φόρτωση —</option>
+              ) : null}
+              {statusOptions.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.name}
+                </option>
+              ))}
             </select>
           </label>
           {error ? (
@@ -92,7 +143,7 @@ export function CreditFromInvoice({
           <div className="flex flex-wrap gap-2">
             <Button
               size="sm"
-              disabled={pending || !seriesId}
+              disabled={pending || !seriesId || !statusOptionId}
               onClick={() => void submit()}
             >
               {pending ? "Δημιουργία..." : "Δημιουργία πιστωτικού"}

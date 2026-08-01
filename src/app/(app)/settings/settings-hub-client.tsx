@@ -208,6 +208,15 @@ const SECTIONS: SettingsSection[] = [
         keywords: "order status κατάσταση παραγγελία",
       },
       {
+        href: "/settings/invoice-statuses",
+        title: "Καταστάσεις τιμολογίου",
+        description: "Πρόχειρο, έκδοση τώρα και δικές σου ετικέτες.",
+        badge: "Παραμετρικό",
+        tone: "teal",
+        icon: "ListChecks",
+        keywords: "invoice status κατάσταση τιμολόγιο έκδοση",
+      },
+      {
         href: "/settings/print-forms",
         title: "Φόρμες εκτύπωσης",
         description: "Print Form Builder για τιμολόγια και ΑΠΥ.",

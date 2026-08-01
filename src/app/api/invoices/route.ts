@@ -17,6 +17,10 @@ import {
   allocateFromSeries,
   resolveDefaultSeries,
 } from "@/modules/documents/series";
+import {
+  InvoiceStatusOptionError,
+  resolveInvoiceStatusOption,
+} from "@/modules/sales/invoice-status-options";
 
 export const dynamic = "force-dynamic";
 
@@ -287,7 +291,23 @@ export async function POST(request: Request) {
     }
 
     const totals = calcInvoiceTotals(body.lines);
-    const status = body.status ?? "DRAFT";
+    let statusOption;
+    try {
+      statusOption = await resolveInvoiceStatusOption(prisma, session.tenantId, {
+        statusOptionId: body.statusOptionId,
+        statusCode: body.status ?? "DRAFT",
+        forCreate: true,
+      });
+    } catch (err) {
+      if (err instanceof InvoiceStatusOptionError) {
+        return NextResponse.json(
+          { error: err.message },
+          { status: err.status },
+        );
+      }
+      throw err;
+    }
+    const status = statusOption.workflow === "ISSUED" ? "ISSUED" : "DRAFT";
     const docKind = body.kind ?? "SALES_INVOICE";
     const issuedAt = status === "ISSUED" ? new Date() : null;
     const dueAt = parseDueAt(body.dueAt ?? null);
@@ -422,6 +442,7 @@ export async function POST(request: Request) {
           kind: docKind,
           number,
           status,
+          statusOptionId: statusOption.id,
           issuedAt,
           dueAt,
           currency: "EUR",

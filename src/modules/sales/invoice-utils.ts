@@ -18,6 +18,18 @@ export const invoiceStatusTone = {
 
 export type InvoiceStatusKey = keyof typeof invoiceStatusLabel;
 
+export const INVOICE_WORKFLOWS = [
+  "DRAFT",
+  "ISSUED",
+  "PARTIAL",
+  "PAID",
+  "OVERDUE",
+  "CANCELLED",
+] as const;
+
+/** Allowed workflows when creating a new invoice / credit */
+export const INVOICE_CREATE_WORKFLOWS = ["DRAFT", "ISSUED"] as const;
+
 export function formatEUR(value: number) {
   const amount = Number.isFinite(value) ? value : 0;
   try {
