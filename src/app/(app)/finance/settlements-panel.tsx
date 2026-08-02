@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Button } from "@/shared/ui/button";
 import { Badge } from "@/shared/ui/badge";
 import { toast } from "@/shared/ui/toaster";
+import { SettlementTenders } from "./settlement-tenders";
 
 type SettlementRow = {
   id: string;
@@ -251,48 +252,64 @@ export function SettlementsPanel({ canWrite }: { canWrite: boolean }) {
         <table className="w-full text-left text-sm">
           <thead className="bg-slate-50 text-xs uppercase text-slate-500">
             <tr>
-              <th className="px-3 py-2">Αρ.</th>
-              <th className="px-3 py-2">Είδος</th>
-              <th className="px-3 py-2">Αντισυμβαλλόμενος</th>
-              <th className="px-3 py-2">Τρόποι</th>
-              <th className="px-3 py-2 text-right">Ποσό</th>
-              <th className="px-3 py-2">Κατάσταση</th>
-              <th className="px-3 py-2" />
+              <th className="px-3 py-2.5">Αρ.</th>
+              <th className="px-3 py-2.5">Είδος</th>
+              <th className="px-3 py-2.5">Αντισυμβαλλόμενος</th>
+              <th className="min-w-[14rem] px-3 py-2.5">Ανάλυση τρόπων</th>
+              <th className="px-3 py-2.5 text-right">Σύνολο</th>
+              <th className="px-3 py-2.5">Κατάσταση</th>
+              <th className="px-3 py-2.5" />
             </tr>
           </thead>
           <tbody>
             {items.map((s) => {
               const party = s.customer?.name || s.supplier?.name || "—";
-              const methods = s.methods
-                .map(
-                  (m) =>
-                    `${m.methodCode} ${Number(m.amount).toLocaleString("el-GR", {
-                      minimumFractionDigits: 2,
-                      maximumFractionDigits: 2,
-                    })}`,
-                )
-                .join(" · ");
               return (
-                <tr key={s.id} className="border-t border-slate-100">
-                  <td className="px-3 py-2 font-mono text-xs font-semibold">
-                    {s.number}
+                <tr
+                  key={s.id}
+                  className="border-t border-slate-100 align-top transition-colors hover:bg-slate-50/60"
+                >
+                  <td className="px-3 py-3">
+                    <p className="font-mono text-xs font-semibold text-ink-950">
+                      {s.number}
+                    </p>
+                    <p className="mt-0.5 text-[11px] text-slate-400">
+                      {new Date(s.settledAt).toLocaleDateString("el-GR")}
+                    </p>
                   </td>
-                  <td className="px-3 py-2 text-xs">
+                  <td className="px-3 py-3 text-xs text-slate-600">
                     {KIND_LABEL[s.kind] ?? s.kind}
                   </td>
-                  <td className="px-3 py-2">{party}</td>
-                  <td className="px-3 py-2 text-xs text-slate-500">
-                    {methods || "—"}
+                  <td className="px-3 py-3">
+                    <p className="text-sm font-medium text-ink-900">{party}</p>
+                    {s.allocations.length > 1 ? (
+                      <p className="mt-0.5 text-[11px] text-slate-400">
+                        {s.allocations.length} παραστατικά
+                      </p>
+                    ) : null}
                   </td>
-                  <td className="px-3 py-2 text-right font-medium tabular-nums">
-                    {money(s.totalAmount)}
+                  <td className="px-3 py-3">
+                    <SettlementTenders
+                      methods={s.methods}
+                      totalAmount={s.totalAmount}
+                    />
                   </td>
-                  <td className="px-3 py-2">
+                  <td className="px-3 py-3 text-right">
+                    <p className="text-sm font-semibold tabular-nums text-ink-950">
+                      {money(s.totalAmount)}
+                    </p>
+                    {s.methods.length > 1 ? (
+                      <p className="mt-0.5 text-[11px] text-slate-400">
+                        {s.methods.length} τρόποι
+                      </p>
+                    ) : null}
+                  </td>
+                  <td className="px-3 py-3">
                     <Badge tone={s.status === "POSTED" ? "emerald" : "rose"}>
                       {s.status === "POSTED" ? "Οριστική" : "Ακυρωμένη"}
                     </Badge>
                   </td>
-                  <td className="px-3 py-2 text-right">
+                  <td className="px-3 py-3 text-right">
                     {canWrite && s.status === "POSTED" ? (
                       <Button
                         size="sm"
