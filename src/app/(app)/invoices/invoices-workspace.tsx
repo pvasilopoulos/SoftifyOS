@@ -2,7 +2,23 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useState, useTransition } from "react";
-import { FileDown, Filter, Pencil, Search, Send } from "lucide-react";
+import {
+  Building2,
+  CalendarClock,
+  CalendarDays,
+  FileDown,
+  Filter,
+  Hash,
+  Mail,
+  MapPin,
+  Pencil,
+  Phone,
+  Receipt,
+  Search,
+  Send,
+  UserRound,
+  Wallet,
+} from "lucide-react";
 import { Badge } from "@/shared/ui/badge";
 import { Button } from "@/shared/ui/button";
 import { cn } from "@/shared/lib/cn";
@@ -77,12 +93,20 @@ type DetailItem = InvoiceListItem & {
   notes: string | null;
   customer: {
     name: string;
+    code?: string;
     email: string | null;
     vatNumber: string | null;
     phone: string | null;
+    mobile?: string | null;
   };
   branch: { name: string; city: string | null } | null;
   space: { name: string; code: string } | null;
+  series?: {
+    code: string;
+    name: string;
+    myDataInvoiceType?: string | null;
+  } | null;
+  site?: { code: string; name: string } | null;
   lines: Array<{
     id: string;
     description: string;
@@ -90,6 +114,15 @@ type DetailItem = InvoiceListItem & {
     unitPrice: number;
     vatRate: number;
     lineTotal: number;
+    product?: { sku: string; name: string } | null;
+  }>;
+  payments?: Array<{
+    id: string;
+    amount: number;
+    method: string;
+    paidAt: string;
+    note?: string | null;
+    externalRef?: string | null;
   }>;
 };
 
@@ -498,119 +531,36 @@ export function InvoicesWorkspace({
           </div>
         </section>
 
-        <aside className="soft-panel hidden p-5 xl:block">
+        <aside className="soft-panel hidden overflow-hidden xl:block">
           {preview && preview.id === previewId ? (
-            <div className="space-y-4">
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <p className="text-xs font-medium text-slate-500">
-                    Προεπισκόπηση
-                  </p>
-                  <h2 className="mt-1 text-lg font-semibold text-ink-950">
-                    {preview.number}
-                  </h2>
-                  <p className="text-sm text-slate-500">
-                    {preview.customer.name}
-                  </p>
-                </div>
-                <Badge
-                  tone={
-                    invoiceStatusTone[preview.status as InvoiceStatusKey] ??
-                    "slate"
-                  }
-                >
-                  {invoiceStatusLabel[preview.status as InvoiceStatusKey] ??
-                    preview.status}
-                </Badge>
+            <InvoicePreviewPanel
+              preview={preview}
+              onDone={() => {
+                void loadList(tab, false);
+                void (async () => {
+                  const res = await fetch(`/api/invoices/${preview.id}`, {
+                    cache: "no-store",
+                  });
+                  const data = (await res.json()) as DetailResponse;
+                  if (res.ok && data.item) setPreview(data.item);
+                })();
+              }}
+            />
+          ) : (
+            <div className="flex h-full min-h-[28rem] flex-col items-center justify-center gap-3 px-6 py-16 text-center">
+              <div className="flex size-14 items-center justify-center rounded-2xl bg-slate-100 text-slate-400">
+                <Receipt size={26} strokeWidth={1.5} />
               </div>
-
-              <p className="text-3xl font-semibold tracking-tight text-ink-950">
-                {formatEUR(preview.total)}
-              </p>
-              <p className="text-sm text-slate-500">
-                Υπόλοιπο{" "}
-                <span className="font-medium text-ink-900">
-                  {formatEUR(preview.total - preview.paidAmount)}
-                </span>
-              </p>
-
-              <div className="space-y-1.5 text-sm">
-                <Row
-                  label="Υποκατάστημα"
-                  value={preview.branch?.name ?? "—"}
-                />
-                <Row label="Χώρος" value={preview.space?.name ?? "—"} />
-                <Row
-                  label="Έκδοση"
-                  value={
-                    preview.issuedAt
-                      ? new Date(preview.issuedAt).toLocaleDateString("el-GR")
-                      : "—"
-                  }
-                />
-                <Row
-                  label="Λήξη"
-                  value={
-                    preview.dueAt
-                      ? new Date(preview.dueAt).toLocaleDateString("el-GR")
-                      : "—"
-                  }
-                />
-                <Row label="ΑΦΜ" value={preview.customer.vatNumber ?? "—"} />
-              </div>
-
               <div>
-                <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-400">
-                  Γραμμές
+                <p className="text-sm font-semibold text-ink-900">
+                  Επιλέξτε παραστατικό
                 </p>
-                <ul className="space-y-2">
-                  {preview.lines.map((line) => (
-                    <li
-                      key={line.id}
-                      className="flex items-start justify-between gap-3 rounded-xl bg-slate-50 px-3 py-2 text-sm"
-                    >
-                      <div>
-                        <p className="font-medium text-ink-900">
-                          {line.description}
-                        </p>
-                        <p className="text-xs text-slate-500">
-                          {line.quantity} × {formatEUR(line.unitPrice)} · ΦΠΑ{" "}
-                          {line.vatRate}%
-                        </p>
-                      </div>
-                      <p className="font-medium">{formatEUR(line.lineTotal)}</p>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-
-              <div className="space-y-2 pt-1">
-                <InvoiceActions
-                  invoiceId={preview.id}
-                  status={preview.status}
-                  total={preview.total}
-                  paidAmount={preview.paidAmount}
-                  onDone={() => {
-                    void loadList(tab, false);
-                    void (async () => {
-                      const res = await fetch(`/api/invoices/${preview.id}`, {
-                        cache: "no-store",
-                      });
-                      const data = (await res.json()) as DetailResponse;
-                      if (res.ok && data.item) setPreview(data.item);
-                    })();
-                  }}
-                />
-                <Link
-                  href={`/invoices/${preview.id}`}
-                  className="inline-flex h-8 items-center rounded-xl px-3 text-xs font-medium text-teal-700 hover:bg-teal-50"
-                >
-                  Πλήρης καρτέλα
-                </Link>
+                <p className="mt-1 max-w-[16rem] text-xs leading-relaxed text-slate-500">
+                  Η προεπισκόπηση δείχνει σύνολα, πελάτη, γραμμές, εισπράξεις και
+                  γρήγορες ενέργειες.
+                </p>
               </div>
             </div>
-          ) : (
-            <p className="text-sm text-slate-500">Επιλέξτε τιμολόγιο</p>
           )}
         </aside>
       </div>
@@ -618,11 +568,437 @@ export function InvoicesWorkspace({
   );
 }
 
-function Row({ label, value }: { label: string; value: string }) {
+function InvoicePreviewPanel({
+  preview,
+  onDone,
+}: {
+  preview: DetailItem;
+  onDone: () => void;
+}) {
+  const status = preview.status as InvoiceStatusKey;
+  const balance = Math.max(
+    0,
+    Math.round((preview.total - preview.paidAmount) * 100) / 100,
+  );
+  const ratio = paidRatio(preview.paidAmount, preview.total);
+  const pct = Math.round(ratio * 100);
+  const kindLabel =
+    invoiceKindLabel[preview.kind as keyof typeof invoiceKindLabel] ??
+    preview.kind ??
+    "Παραστατικό";
+  const overdue =
+    Boolean(preview.dueAt) &&
+    balance > 0 &&
+    new Date(preview.dueAt!).getTime() < Date.now() &&
+    status !== "CANCELLED";
+  const daysToDue = preview.dueAt
+    ? Math.ceil(
+        (new Date(preview.dueAt).getTime() - Date.now()) / 86_400_000,
+      )
+    : null;
+  const payments = preview.payments ?? [];
+  const contactPhone = preview.customer.mobile || preview.customer.phone;
+
   return (
-    <div className="flex justify-between gap-3 text-slate-500">
-      <span>{label}</span>
-      <span className="text-right text-ink-900">{value}</span>
+    <div className="flex h-full flex-col">
+      {/* Hero header */}
+      <div className="relative overflow-hidden border-b border-slate-100 bg-gradient-to-br from-slate-900 via-slate-800 to-teal-900 px-5 pb-5 pt-4 text-white">
+        <div
+          className="pointer-events-none absolute -right-10 -top-10 size-40 rounded-full bg-teal-400/20 blur-2xl"
+          aria-hidden
+        />
+        <div
+          className="pointer-events-none absolute -bottom-16 left-8 size-36 rounded-full bg-sky-400/10 blur-2xl"
+          aria-hidden
+        />
+        <div className="relative flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <p className="text-[11px] font-medium uppercase tracking-[0.14em] text-white/55">
+              Προεπισκόπηση
+            </p>
+            <h2 className="mt-1 truncate font-mono text-xl font-semibold tracking-tight">
+              {preview.number}
+            </h2>
+            <p className="mt-0.5 truncate text-sm text-white/75">
+              {preview.customer.name}
+            </p>
+          </div>
+          <Badge
+            tone={invoiceStatusTone[status] ?? "slate"}
+            className="shrink-0 bg-white/95 shadow-sm"
+          >
+            {invoiceStatusLabel[status] ?? preview.status}
+          </Badge>
+        </div>
+        <div className="relative mt-3 flex flex-wrap gap-1.5">
+          <span className="rounded-lg bg-white/10 px-2 py-0.5 text-[11px] font-medium text-white/90 ring-1 ring-white/15">
+            {kindLabel}
+          </span>
+          {preview.series ? (
+            <span className="rounded-lg bg-white/10 px-2 py-0.5 text-[11px] font-medium text-white/90 ring-1 ring-white/15">
+              Σειρά {preview.series.code}
+            </span>
+          ) : null}
+          {preview.series?.myDataInvoiceType ? (
+            <span className="rounded-lg bg-white/10 px-2 py-0.5 text-[11px] font-medium text-white/90 ring-1 ring-white/15">
+              myDATA {preview.series.myDataInvoiceType}
+            </span>
+          ) : null}
+          {overdue ? (
+            <span className="rounded-lg bg-rose-400/25 px-2 py-0.5 text-[11px] font-semibold text-rose-100 ring-1 ring-rose-300/30">
+              Ληξιπρόθεσμο
+            </span>
+          ) : null}
+        </div>
+      </div>
+
+      <div className="flex-1 space-y-4 overflow-y-auto px-5 py-4">
+        {/* Amounts + progress */}
+        <div className="rounded-2xl border border-slate-100 bg-gradient-to-b from-slate-50 to-white p-4">
+          <div className="flex items-end justify-between gap-3">
+            <div>
+              <p className="text-[11px] font-medium uppercase tracking-wide text-slate-400">
+                Σύνολο
+              </p>
+              <p className="mt-0.5 text-3xl font-semibold tracking-tight text-ink-950 tabular-nums">
+                {formatEUR(preview.total)}
+              </p>
+            </div>
+            <div className="text-right">
+              <p className="text-[11px] font-medium uppercase tracking-wide text-slate-400">
+                Υπόλοιπο
+              </p>
+              <p
+                className={cn(
+                  "mt-0.5 text-lg font-semibold tabular-nums",
+                  balance > 0 ? "text-amber-700" : "text-emerald-700",
+                )}
+              >
+                {formatEUR(balance)}
+              </p>
+            </div>
+          </div>
+          <div className="mt-3">
+            <div className="mb-1.5 flex items-center justify-between text-[11px] text-slate-500">
+              <span>Εξόφληση</span>
+              <span className="font-medium text-ink-800">
+                {pct}% · {formatEUR(preview.paidAmount)} εισπραχθέντα
+              </span>
+            </div>
+            <div className="h-2 overflow-hidden rounded-full bg-slate-200/80">
+              <div
+                className={cn(
+                  "h-full rounded-full transition-[width] duration-500",
+                  pct >= 100
+                    ? "bg-emerald-500"
+                    : pct > 0
+                      ? "bg-teal-500"
+                      : "bg-slate-300",
+                )}
+                style={{ width: `${pct}%` }}
+              />
+            </div>
+          </div>
+          <dl className="mt-3 grid grid-cols-3 gap-2 border-t border-slate-100 pt-3 text-center">
+            <div>
+              <dt className="text-[10px] uppercase tracking-wide text-slate-400">
+                Καθαρή
+              </dt>
+              <dd className="mt-0.5 text-xs font-semibold tabular-nums text-ink-900">
+                {formatEUR(preview.subtotal)}
+              </dd>
+            </div>
+            <div>
+              <dt className="text-[10px] uppercase tracking-wide text-slate-400">
+                ΦΠΑ
+              </dt>
+              <dd className="mt-0.5 text-xs font-semibold tabular-nums text-ink-900">
+                {formatEUR(preview.vatAmount)}
+              </dd>
+            </div>
+            <div>
+              <dt className="text-[10px] uppercase tracking-wide text-slate-400">
+                Γραμμές
+              </dt>
+              <dd className="mt-0.5 text-xs font-semibold tabular-nums text-ink-900">
+                {preview.lines.length}
+              </dd>
+            </div>
+          </dl>
+        </div>
+
+        {/* Customer */}
+        <section>
+          <SectionLabel>Πελάτης</SectionLabel>
+          <div className="mt-2 rounded-2xl border border-slate-100 p-3">
+            <div className="flex items-start gap-3">
+              <div className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-teal-50 text-teal-700">
+                <UserRound size={16} />
+              </div>
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-sm font-semibold text-ink-950">
+                  {preview.customer.name}
+                </p>
+                <p className="mt-0.5 text-xs text-slate-500">
+                  {[
+                    preview.customer.code || preview.customerCode,
+                    preview.customer.vatNumber
+                      ? `ΑΦΜ ${preview.customer.vatNumber}`
+                      : null,
+                  ]
+                    .filter(Boolean)
+                    .join(" · ") || "—"}
+                </p>
+                <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs text-slate-600">
+                  {preview.customer.email ? (
+                    <span className="inline-flex items-center gap-1">
+                      <Mail size={12} className="text-slate-400" />
+                      <span className="truncate">{preview.customer.email}</span>
+                    </span>
+                  ) : null}
+                  {contactPhone ? (
+                    <span className="inline-flex items-center gap-1">
+                      <Phone size={12} className="text-slate-400" />
+                      {contactPhone}
+                    </span>
+                  ) : null}
+                  {!preview.customer.email && !contactPhone ? (
+                    <span className="text-slate-400">Χωρίς στοιχεία επικοινωνίας</span>
+                  ) : null}
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        {/* Meta */}
+        <section>
+          <SectionLabel>Στοιχεία</SectionLabel>
+          <div className="mt-2 grid grid-cols-2 gap-2">
+            <MetaTile
+              icon={CalendarDays}
+              label="Έκδοση"
+              value={
+                preview.issuedAt
+                  ? new Date(preview.issuedAt).toLocaleDateString("el-GR")
+                  : "—"
+              }
+            />
+            <MetaTile
+              icon={CalendarClock}
+              label="Λήξη"
+              value={
+                preview.dueAt
+                  ? new Date(preview.dueAt).toLocaleDateString("el-GR")
+                  : "—"
+              }
+              hint={
+                daysToDue == null
+                  ? undefined
+                  : daysToDue < 0
+                    ? `${Math.abs(daysToDue)}η καθυστ.`
+                    : daysToDue === 0
+                      ? "Σήμερα"
+                      : `σε ${daysToDue}η`
+              }
+              tone={overdue ? "rose" : undefined}
+            />
+            <MetaTile
+              icon={Building2}
+              label="Υποκατάστημα"
+              value={preview.branch?.name ?? "—"}
+              hint={preview.branch?.city ?? undefined}
+            />
+            <MetaTile
+              icon={MapPin}
+              label="Χώρος"
+              value={preview.space?.name ?? "—"}
+              hint={preview.space?.code ?? preview.site?.code}
+            />
+          </div>
+        </section>
+
+        {/* Lines */}
+        <section>
+          <div className="mb-2 flex items-center justify-between">
+            <SectionLabel className="mb-0">Γραμμές</SectionLabel>
+            <span className="text-[11px] text-slate-400">
+              {preview.lines.length} είδη
+            </span>
+          </div>
+          <ul className="space-y-1.5">
+            {preview.lines.map((line, idx) => {
+              const net =
+                Math.round(line.quantity * line.unitPrice * 100) / 100;
+              const vat =
+                Math.round(((net * line.vatRate) / 100) * 100) / 100;
+              return (
+                <li
+                  key={line.id}
+                  className="rounded-xl border border-slate-100 bg-white px-3 py-2.5"
+                >
+                  <div className="flex items-start gap-2.5">
+                    <span className="mt-0.5 flex size-6 shrink-0 items-center justify-center rounded-lg bg-slate-100 font-mono text-[10px] font-semibold text-slate-500">
+                      {idx + 1}
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-start justify-between gap-2">
+                        <p className="text-sm font-medium leading-snug text-ink-900">
+                          {line.description}
+                        </p>
+                        <p className="shrink-0 text-sm font-semibold tabular-nums text-ink-950">
+                          {formatEUR(line.lineTotal)}
+                        </p>
+                      </div>
+                      <p className="mt-0.5 text-[11px] text-slate-500">
+                        {line.quantity} × {formatEUR(line.unitPrice)}
+                        {line.product?.sku ? ` · ${line.product.sku}` : ""}
+                      </p>
+                      <p className="mt-0.5 text-[11px] text-slate-400">
+                        Καθαρή {formatEUR(net)} · ΦΠΑ {line.vatRate}% (
+                        {formatEUR(vat)})
+                      </p>
+                    </div>
+                  </div>
+                </li>
+              );
+            })}
+            {preview.lines.length === 0 ? (
+              <li className="rounded-xl border border-dashed border-slate-200 px-3 py-6 text-center text-xs text-slate-400">
+                Καμία γραμμή
+              </li>
+            ) : null}
+          </ul>
+        </section>
+
+        {/* Payments */}
+        {payments.length > 0 ? (
+          <section>
+            <SectionLabel>Εισπράξεις</SectionLabel>
+            <ul className="mt-2 space-y-1.5">
+              {payments.slice(0, 5).map((p) => (
+                <li
+                  key={p.id}
+                  className="flex items-center justify-between gap-2 rounded-xl border border-emerald-100/80 bg-emerald-50/40 px-3 py-2 text-sm"
+                >
+                  <div className="min-w-0">
+                    <p className="flex items-center gap-1.5 font-medium text-ink-900">
+                      <Wallet size={13} className="shrink-0 text-emerald-600" />
+                      {p.method}
+                    </p>
+                    <p className="text-[11px] text-slate-500">
+                      {new Date(p.paidAt).toLocaleString("el-GR")}
+                      {p.externalRef ? ` · ${p.externalRef}` : ""}
+                    </p>
+                  </div>
+                  <p className="font-semibold tabular-nums text-emerald-800">
+                    {formatEUR(p.amount)}
+                  </p>
+                </li>
+              ))}
+              {payments.length > 5 ? (
+                <li className="text-center text-[11px] text-slate-400">
+                  +{payments.length - 5} ακόμη στην πλήρη καρτέλα
+                </li>
+              ) : null}
+            </ul>
+          </section>
+        ) : null}
+
+        {preview.notes ? (
+          <section>
+            <SectionLabel>Σημειώσεις</SectionLabel>
+            <p className="mt-2 rounded-xl border border-amber-100 bg-amber-50/50 px-3 py-2 text-xs leading-relaxed text-slate-700">
+              {preview.notes}
+            </p>
+          </section>
+        ) : null}
+      </div>
+
+      {/* Sticky actions */}
+      <div className="sticky bottom-0 space-y-2 border-t border-slate-100 bg-white/95 px-5 py-3 backdrop-blur">
+        <InvoiceActions
+          invoiceId={preview.id}
+          status={preview.status}
+          total={preview.total}
+          paidAmount={preview.paidAmount}
+          onDone={onDone}
+        />
+        <Link
+          href={`/invoices/${preview.id}`}
+          className="inline-flex h-8 w-full items-center justify-center gap-1.5 rounded-xl text-xs font-medium text-teal-700 hover:bg-teal-50"
+        >
+          <Hash size={12} />
+          Πλήρης καρτέλα
+        </Link>
+      </div>
+    </div>
+  );
+}
+
+function SectionLabel({
+  children,
+  className,
+}: {
+  children: React.ReactNode;
+  className?: string;
+}) {
+  return (
+    <p
+      className={cn(
+        "text-[11px] font-semibold uppercase tracking-wide text-slate-400",
+        className,
+      )}
+    >
+      {children}
+    </p>
+  );
+}
+
+function MetaTile({
+  icon: Icon,
+  label,
+  value,
+  hint,
+  tone,
+}: {
+  icon: typeof CalendarDays;
+  label: string;
+  value: string;
+  hint?: string;
+  tone?: "rose";
+}) {
+  return (
+    <div
+      className={cn(
+        "rounded-xl border px-3 py-2.5",
+        tone === "rose"
+          ? "border-rose-100 bg-rose-50/50"
+          : "border-slate-100 bg-slate-50/60",
+      )}
+    >
+      <div className="flex items-center gap-1.5 text-[10px] font-medium uppercase tracking-wide text-slate-400">
+        <Icon size={11} />
+        {label}
+      </div>
+      <p
+        className={cn(
+          "mt-1 truncate text-sm font-semibold",
+          tone === "rose" ? "text-rose-800" : "text-ink-900",
+        )}
+      >
+        {value}
+      </p>
+      {hint ? (
+        <p
+          className={cn(
+            "mt-0.5 truncate text-[11px]",
+            tone === "rose" ? "text-rose-600" : "text-slate-500",
+          )}
+        >
+          {hint}
+        </p>
+      ) : null}
     </div>
   );
 }
