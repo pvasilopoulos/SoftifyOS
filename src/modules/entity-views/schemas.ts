@@ -9,6 +9,17 @@ export const entityModuleSchema = z.enum([
   "ORDERS",
   "QUOTES",
   "GIFT_CARDS",
+  "SUPPLIERS",
+  "PURCHASE_ORDERS",
+  "DELIVERY_NOTES",
+  "CRM_LEADS",
+  "EMPLOYEES",
+  "LOYALTY",
+  "SITES",
+  "JOURNAL_ENTRIES",
+  "MARKETPLACE_CHANNELS",
+  "PAYMENT_METHODS",
+  "DOCUMENT_SERIES",
 ]);
 
 export const customFieldTypeSchema = z.enum([

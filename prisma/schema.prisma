@@ -587,17 +587,18 @@ enum PurchaseOrderStatus {
 
 /// Προμηθευτής
 model Supplier {
-  id        String         @id @default(cuid())
-  tenantId  String
-  code      String
-  name      String
-  vatNumber String?
-  email     String?
-  phone     String?
-  notes     String?
-  status    SupplierStatus @default(ACTIVE)
-  createdAt DateTime       @default(now())
-  updatedAt DateTime       @updatedAt
+  id           String         @id @default(cuid())
+  tenantId     String
+  code         String
+  name         String
+  vatNumber    String?
+  email        String?
+  phone        String?
+  notes        String?
+  status       SupplierStatus @default(ACTIVE)
+  customFields Json?
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
 
   tenant           Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   purchaseOrders   PurchaseOrder[]
@@ -626,6 +627,7 @@ model PurchaseOrder {
   vatAmount     Decimal             @default(0) @db.Decimal(14, 2)
   total         Decimal             @default(0) @db.Decimal(14, 2)
   notes         String?
+  customFields  Json?
   createdAt     DateTime            @default(now())
   updatedAt     DateTime            @updatedAt
 
@@ -686,6 +688,7 @@ model DeliveryNote {
   issuedAt        DateTime?
   shippingAddress String?
   notes           String?
+  customFields    Json?
   createdAt       DateTime           @default(now())
   updatedAt       DateTime           @updatedAt
 
@@ -900,6 +903,7 @@ model Employee {
   erganiEmployeeId String?
   status           EmployeeStatus @default(ACTIVE)
   notes            String?
+  customFields     Json?
   createdAt        DateTime       @default(now())
   updatedAt        DateTime       @updatedAt
 
@@ -1166,11 +1170,12 @@ model CrmLead {
   email       String?
   phone       String?
   status      CrmLeadStatus @default(NEW)
-  value       Decimal       @default(0) @db.Decimal(14, 2)
-  customerId  String?
-  notes       String?
-  createdAt   DateTime      @default(now())
-  updatedAt   DateTime      @updatedAt
+  value        Decimal       @default(0) @db.Decimal(14, 2)
+  customerId   String?
+  notes        String?
+  customFields Json?
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
 
   tenant     Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   activities CrmActivity[]
@@ -1914,15 +1919,16 @@ enum SiteKind {
 
 /// Υποκατάστημα / ταμείο εταιρείας (όχι πελάτη)
 model Site {
-  id        String   @id @default(cuid())
-  tenantId  String
-  code      String
-  name      String
-  kind      SiteKind @default(BRANCH)
-  parentId  String?
-  isActive  Boolean  @default(true)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id           String   @id @default(cuid())
+  tenantId     String
+  code         String
+  name         String
+  kind         SiteKind @default(BRANCH)
+  parentId     String?
+  isActive     Boolean  @default(true)
+  customFields Json?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
 
   tenant   Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   parent   Site?            @relation("SiteTree", fields: [parentId], references: [id], onDelete: SetNull)
@@ -2143,6 +2149,7 @@ model MarketplaceChannel {
   lastSyncAt           DateTime?
   lastError            String?
   metaJson             Json?
+  customFields         Json?
   createdAt            DateTime                 @default(now())
   updatedAt            DateTime                 @updatedAt
 
@@ -2321,6 +2328,7 @@ model LoyaltyAccount {
   pointsBalance Int      @default(0)
   tier          String   @default("STANDARD")
   isActive      Boolean  @default(true)
+  customFields  Json?
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 
@@ -2719,6 +2727,7 @@ model JournalEntry {
   postedAt         DateTime?
   voidedAt         DateTime?
   createdByUserId  String?
+  customFields     Json?
   createdAt        DateTime      @default(now())
   updatedAt        DateTime      @updatedAt
 
@@ -2969,6 +2978,17 @@ enum EntityModule {
   ORDERS
   QUOTES
   GIFT_CARDS
+  SUPPLIERS
+  PURCHASE_ORDERS
+  DELIVERY_NOTES
+  CRM_LEADS
+  EMPLOYEES
+  LOYALTY
+  SITES
+  JOURNAL_ENTRIES
+  MARKETPLACE_CHANNELS
+  PAYMENT_METHODS
+  DOCUMENT_SERIES
 }
 
 enum CustomFieldType {
