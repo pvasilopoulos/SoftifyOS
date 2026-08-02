@@ -336,7 +336,7 @@ export const PRODUCT_DOC_SECTIONS: DocSection[] = [
           "myDATA — simulator / AADE test / production SendInvoices",
           "API tokens — Bearer ή X-Softify-Api-Key για εξωτερικά συστήματα",
           "Script Hooks — form.onLoad / onFieldChange / beforeSubmit + server hooks",
-          "Skroutz / marketplace — flag + secrets στο Script Secrets allow-list",
+          "Marketplaces & channels — CRUD καναλιών (Skroutz/Shopify/Woo…) + Script Secrets / allow-list",
         ],
       },
       {

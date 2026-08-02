@@ -149,6 +149,7 @@ model Tenant {
   orderStatusOptions           OrderStatusOption[]
   invoiceStatusOptions         InvoiceStatusOption[]
   documentTransformRules       DocumentTransformRule[]
+  marketplaceChannels          MarketplaceChannel[]
 
   @@map("tenants")
 }
@@ -2100,6 +2101,59 @@ enum PaymentMethodKind {
 }
 
 /// Tenant catalog of payment / tender methods (POS + εισπράξεις)
+enum MarketplaceProvider {
+  SKROUTZ
+  BESTPRICE
+  PUBLIC
+  SHOPIFY
+  WOOCOMMERCE
+  AMAZON
+  CUSTOM
+}
+
+enum MarketplaceChannelStatus {
+  DRAFT
+  ACTIVE
+  PAUSED
+  ERROR
+}
+
+/// Marketplace / e-commerce channel — sync via Script Hooks + secrets
+model MarketplaceChannel {
+  id                   String                   @id @default(cuid())
+  tenantId             String
+  code                 String
+  name                 String
+  provider             MarketplaceProvider
+  status               MarketplaceChannelStatus @default(DRAFT)
+  merchantId           String?
+  externalShopId       String?
+  /// ScriptSecret.key για API token (όχι raw secret)
+  credentialsSecretKey String?
+  apiBaseHost          String?
+  apiBaseUrl           String?
+  syncCatalog          Boolean                  @default(true)
+  syncOrders           Boolean                  @default(true)
+  syncStock            Boolean                  @default(false)
+  syncPrices           Boolean                  @default(false)
+  autoImportOrders     Boolean                  @default(false)
+  isActive             Boolean                  @default(true)
+  sortOrder            Int                      @default(100)
+  notes                String?
+  lastSyncAt           DateTime?
+  lastError            String?
+  metaJson             Json?
+  createdAt            DateTime                 @default(now())
+  updatedAt            DateTime                 @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, code])
+  @@index([tenantId, provider, isActive])
+  @@index([tenantId, status, sortOrder])
+  @@map("marketplace_channels")
+}
+
 model PaymentMethod {
   id                  String            @id @default(cuid())
   tenantId            String

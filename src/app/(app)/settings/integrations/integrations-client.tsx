@@ -28,6 +28,10 @@ import {
   type WebhookEventKey,
 } from "@/modules/integrations/types";
 import type { ApiEndpointDoc } from "@/modules/integrations/api-catalog";
+import {
+  MarketplaceChannelsPanel,
+  type MarketplaceChannelItem,
+} from "./marketplace-channels-panel";
 
 type Section =
   | "overview"
@@ -113,6 +117,7 @@ export function IntegrationsHubClient({
   status,
   logs: initialLogs,
   endpoints,
+  marketplaceChannels: initialChannels,
 }: {
   canWrite: boolean;
   initial: FormState;
@@ -126,12 +131,15 @@ export function IntegrationsHubClient({
   };
   logs: LogRow[];
   endpoints: ApiEndpointDoc[];
+  marketplaceChannels: MarketplaceChannelItem[];
 }) {
   const router = useRouter();
   const [section, setSection] = useState<Section>("overview");
   const [form, setForm] = useState(initial);
   const [tokens, setTokens] = useState(initialTokens);
   const [logs, setLogs] = useState(initialLogs);
+  const [marketplaceChannels, setMarketplaceChannels] =
+    useState(initialChannels);
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
@@ -175,12 +183,23 @@ export function IntegrationsHubClient({
       },
       {
         label: "Marketplace",
-        ok: form.skroutzEnabled,
-        detail: form.skroutzEnabled ? "Skroutz sync ON" : "ανενεργό",
+        ok: marketplaceChannels.some(
+          (c) => c.status === "ACTIVE" && c.isActive,
+        ),
+        detail: (() => {
+          const active = marketplaceChannels.filter(
+            (c) => c.status === "ACTIVE" && c.isActive,
+          ).length;
+          if (active > 0) return `${active} ενεργά κανάλια`;
+          if (marketplaceChannels.length > 0) {
+            return `${marketplaceChannels.length} κανάλια (χωρίς ACTIVE)`;
+          }
+          return "κανένα κανάλι";
+        })(),
       },
     ];
     return items;
-  }, [form, tokens]);
+  }, [form, tokens, marketplaceChannels]);
 
   const save = (extra?: Record<string, unknown>) => {
     if (!canWrite) return;
@@ -889,67 +908,11 @@ export function IntegrationsHubClient({
           ) : null}
 
           {section === "marketplaces" ? (
-            <section className="soft-panel space-y-4 p-5">
-              <div>
-                <h2 className="text-sm font-semibold">Marketplaces & channels</h2>
-                <p className="mt-1 text-xs text-slate-500">
-                  Ξεχωριστά από myDATA · sync μέσω Script Hooks / allow-listed HTTP
-                </p>
-              </div>
-              <label className="flex items-center gap-2 rounded-xl border border-slate-100 px-3 py-3 text-sm">
-                <input
-                  type="checkbox"
-                  disabled={!canWrite}
-                  checked={form.skroutzEnabled}
-                  onChange={(e) =>
-                    setForm((f) => ({ ...f, skroutzEnabled: e.target.checked }))
-                  }
-                />
-                <span>
-                  <span className="font-medium">Skroutz Marketplace sync</span>
-                  <span className="mt-0.5 block text-xs text-slate-500">
-                    Ενεργοποιεί hooks για καταλόγους / παραγγελίες (Script Hooks)
-                  </span>
-                </span>
-              </label>
-              <label className="block text-xs text-slate-600">
-                Shop / Merchant ID
-                <input
-                  disabled={!canWrite}
-                  value={form.skroutzShopId}
-                  onChange={(e) =>
-                    setForm((f) => ({ ...f, skroutzShopId: e.target.value }))
-                  }
-                  className={inputClass}
-                  placeholder="skroutz shop id"
-                />
-              </label>
-              <label className="block text-xs text-slate-600">
-                Σημειώσεις marketplace
-                <textarea
-                  disabled={!canWrite}
-                  rows={3}
-                  value={form.marketplaceNotes}
-                  onChange={(e) =>
-                    setForm((f) => ({
-                      ...f,
-                      marketplaceNotes: e.target.value,
-                    }))
-                  }
-                  className={inputClass}
-                />
-              </label>
-              <div className="rounded-xl border border-dashed border-slate-200 px-3 py-3 text-xs text-slate-500">
-                Secrets για marketplace tokens →{" "}
-                <Link
-                  href="/settings/scripts"
-                  className="font-medium text-teal-700 hover:underline"
-                >
-                  Script Secrets
-                </Link>
-                . HTTP hosts → Allow-list.
-              </div>
-            </section>
+            <MarketplaceChannelsPanel
+              canWrite={canWrite}
+              initialItems={marketplaceChannels}
+              onItemsChange={setMarketplaceChannels}
+            />
           ) : null}
 
           {section === "developer" ? (
@@ -1289,7 +1252,11 @@ export function IntegrationsHubClient({
             </section>
           ) : null}
 
-          {canWrite && section !== "overview" && section !== "logs" ? (
+          {canWrite &&
+          section !== "overview" &&
+          section !== "logs" &&
+          section !== "marketplaces" &&
+          section !== "developer" ? (
             <div className="flex justify-end">
               <Button disabled={pending} onClick={() => save()}>
                 {pending ? "Αποθήκευση…" : "Αποθήκευση"}

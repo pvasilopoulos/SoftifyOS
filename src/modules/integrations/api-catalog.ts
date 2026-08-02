@@ -289,6 +289,54 @@ curl -sS -X PATCH https://YOUR_HOST/api/settings/integrations/tokens \\
     ],
   },
   {
+    key: "marketplaceChannels",
+    path: "/api/settings/marketplace-channels",
+    method: "GET | POST",
+    title: "Marketplace channels",
+    desc: "CRUD καναλιών Skroutz / Shopify / Woo / BestPrice κ.ά. για sync μέσω Script Hooks.",
+    auth: "Session cookie",
+    access: "GET: συνδεδεμένοι · POST: OWNER / ADMIN",
+    body: [
+      { name: "code", required: true, desc: "Μοναδικός κωδικός (A-Z0-9_)" },
+      { name: "name", required: true, desc: "Εμφανιζόμενο όνομα" },
+      {
+        name: "provider",
+        required: true,
+        desc: "SKROUTZ | BESTPRICE | PUBLIC | SHOPIFY | WOOCOMMERCE | AMAZON | CUSTOM",
+      },
+      { name: "merchantId", desc: "Shop / merchant id" },
+      {
+        name: "credentialsSecretKey",
+        desc: "Κλειδί στο Script Secrets (όχι raw token)",
+      },
+      { name: "syncCatalog / syncOrders / syncStock / syncPrices", desc: "Boolean flags" },
+    ],
+    curl: `# Λίστα
+curl -sS https://YOUR_HOST/api/settings/marketplace-channels \\
+  -H 'Cookie: softify_session=...'
+
+# Δημιουργία
+curl -sS -X POST https://YOUR_HOST/api/settings/marketplace-channels \\
+  -H 'Cookie: softify_session=...' \\
+  -H 'Content-Type: application/json' \\
+  -d '{"code":"SKROUTZ","name":"Skroutz","provider":"SKROUTZ","status":"ACTIVE","merchantId":"12345","credentialsSecretKey":"SKROUTZ_TOKEN","syncCatalog":true,"syncOrders":true}'`,
+    responseExample: `{
+  "item": {
+    "id": "…",
+    "code": "SKROUTZ",
+    "provider": "SKROUTZ",
+    "status": "ACTIVE",
+    "merchantId": "12345",
+    "lastSyncAt": null
+  }
+}`,
+    notes: [
+      "PATCH/DELETE: /api/settings/marketplace-channels/:id",
+      "Sync heartbeat: POST /api/settings/marketplace-channels/:id/sync-ping",
+      "UI: Ρυθμίσεις → Integrations → Marketplaces",
+    ],
+  },
+  {
     key: "audit",
     path: "/api/audit-events",
     method: "GET",

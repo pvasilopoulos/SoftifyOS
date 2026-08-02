@@ -10,6 +10,12 @@ import {
   publicTokenView,
 } from "@/modules/integrations/service";
 import { INTEGRATION_API_CATALOG } from "@/modules/integrations/api-catalog";
+import {
+  listMarketplaceChannels,
+  serializeMarketplaceChannel,
+} from "@/modules/marketplace-channels/service";
+import type { MarketplaceProvider } from "@/modules/marketplace-channels/labels";
+import type { MarketplaceChannelStatus } from "@/modules/marketplace-channels/labels";
 import { IntegrationsHubClient } from "./integrations-client";
 
 export const metadata = { title: "API & Integrations" };
@@ -26,32 +32,35 @@ export default async function IntegrationsSettingsPage() {
   });
   const raw = asIntegrationsConfig(settings.integrationsJson);
 
-  const [myDataCounts, recentLogs, pendingMyData] = await Promise.all([
-    prisma.myDataSubmission.groupBy({
-      by: ["status"],
-      where: { tenantId: session.tenantId },
-      _count: { _all: true },
-    }),
-    prisma.auditEvent.findMany({
-      where: {
-        tenantId: session.tenantId,
-        OR: [
-          { action: { startsWith: "integrations." } },
-          { action: { startsWith: "mydata." } },
-          { action: { startsWith: "ergani." } },
-        ],
-      },
-      orderBy: { createdAt: "desc" },
-      take: 40,
-      include: { user: { select: { name: true, email: true } } },
-    }),
-    prisma.myDataSubmission.count({
-      where: {
-        tenantId: session.tenantId,
-        status: { in: ["PENDING", "SENT", "REJECTED"] },
-      },
-    }),
-  ]);
+  const [myDataCounts, recentLogs, pendingMyData, marketplaceRows] =
+    await Promise.all([
+      prisma.myDataSubmission.groupBy({
+        by: ["status"],
+        where: { tenantId: session.tenantId },
+        _count: { _all: true },
+      }),
+      prisma.auditEvent.findMany({
+        where: {
+          tenantId: session.tenantId,
+          OR: [
+            { action: { startsWith: "integrations." } },
+            { action: { startsWith: "mydata." } },
+            { action: { startsWith: "ergani." } },
+            { action: { startsWith: "marketplace_channels." } },
+          ],
+        },
+        orderBy: { createdAt: "desc" },
+        take: 40,
+        include: { user: { select: { name: true, email: true } } },
+      }),
+      prisma.myDataSubmission.count({
+        where: {
+          tenantId: session.tenantId,
+          status: { in: ["PENDING", "SENT", "REJECTED"] },
+        },
+      }),
+      listMarketplaceChannels(prisma, session.tenantId),
+    ]);
 
   const statusMap = Object.fromEntries(
     myDataCounts.map((r) => [r.status, r._count._all]),
@@ -110,6 +119,14 @@ export default async function IntegrationsSettingsPage() {
             : null,
       }))}
       endpoints={INTEGRATION_API_CATALOG}
+      marketplaceChannels={marketplaceRows.map((row) => {
+        const item = serializeMarketplaceChannel(row);
+        return {
+          ...item,
+          provider: item.provider as MarketplaceProvider,
+          status: item.status as MarketplaceChannelStatus,
+        };
+      })}
     />
   );
 }
