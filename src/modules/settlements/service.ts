@@ -33,6 +33,19 @@ function round2(n: number) {
   return Math.round(n * 100) / 100;
 }
 
+/** Pro-rate `amount` across weight parts; last bucket absorbs rounding drift. */
+function distributeAmountAcross(weights: number[], amount: number): number[] {
+  if (weights.length === 0) return [];
+  const sum = round2(weights.reduce((s, w) => s + w, 0));
+  if (sum <= 0) return weights.map(() => 0);
+  const shares = weights.map((w) => round2((amount * w) / sum));
+  const drift = round2(amount - shares.reduce((s, x) => s + x, 0));
+  if (drift !== 0) {
+    shares[shares.length - 1] = round2((shares[shares.length - 1] ?? 0) + drift);
+  }
+  return shares;
+}
+
 async function nextSettlementNumber(db: Db, tenantId: string, kind: string) {
   const year = new Date().getFullYear();
   const prefix =
@@ -562,8 +575,10 @@ export async function createReceiptSettlement(
       },
     });
 
-    for (const a of allocations) {
-      if (!a.invoiceId) continue;
+    const invoiceAllocs = allocations.filter((a) => a.invoiceId);
+    const allocAmounts = invoiceAllocs.map((a) => a.amount);
+
+    for (const a of invoiceAllocs) {
       const inv = invoices.find((i) => i.id === a.invoiceId);
       if (!inv) continue;
       const paidAmount = roundMoney(toNumber(inv.paidAmount) + a.amount);
@@ -576,25 +591,35 @@ export async function createReceiptSettlement(
         where: { id: inv.id },
         data: { paidAmount, status: nextStatus },
       });
-      // Keep InvoicePayment rows for compatibility / POS / history
-      const shareMethods = resolvedMethods;
-      const primary = shareMethods[0]!;
-      await tx.invoicePayment.create({
-        data: {
-          tenantId: input.tenantId,
-          invoiceId: inv.id,
-          settlementId: row.id,
-          amount: a.amount,
-          method: primary.methodCode,
-          paymentMethodId: primary.paymentMethodId,
-          note: input.data.notes ?? null,
-          changeAmount: primary.changeAmount,
-          externalRef: primary.externalRef,
-          giftCardId: primary.giftCardId,
-          loyaltyAccountId: primary.loyaltyAccountId,
-          paidAt: settledAt,
-        },
-      });
+    }
+
+    // One InvoicePayment per tender (like POS) — pro-rate across multi-doc allocations.
+    // Previously only the primary method was mirrored, so «διπλή είσπραξη» collapsed to one CASH.
+    for (let mi = 0; mi < resolvedMethods.length; mi += 1) {
+      const m = resolvedMethods[mi]!;
+      const shares = distributeAmountAcross(allocAmounts, m.amount);
+      for (let ai = 0; ai < invoiceAllocs.length; ai += 1) {
+        const amt = shares[ai] ?? 0;
+        if (amt <= 0) continue;
+        const a = invoiceAllocs[ai]!;
+        await tx.invoicePayment.create({
+          data: {
+            tenantId: input.tenantId,
+            invoiceId: a.invoiceId!,
+            settlementId: row.id,
+            amount: amt,
+            method: m.methodCode,
+            paymentMethodId: m.paymentMethodId,
+            note: input.data.notes ?? null,
+            // Change / refs stay on the first allocation of each tender
+            changeAmount: ai === 0 ? m.changeAmount : 0,
+            externalRef: ai === 0 ? m.externalRef : null,
+            giftCardId: ai === 0 ? m.giftCardId : null,
+            loyaltyAccountId: ai === 0 ? m.loyaltyAccountId : null,
+            paidAt: settledAt,
+          },
+        });
+      }
     }
 
     return row;
@@ -627,6 +652,82 @@ export async function createReceiptSettlement(
   }
 
   return { settlement, journalId };
+}
+
+/**
+ * Rebuild InvoicePayment mirrors from Settlement method lines when an older
+ * bug collapsed multi-tender receipts into a single primary-method row.
+ */
+export async function repairCollapsedInvoicePaymentMirrors(
+  db: PrismaClient,
+  tenantId: string,
+) {
+  const settlements = await db.settlement.findMany({
+    where: { tenantId, kind: "RECEIPT", status: "POSTED" },
+    include: {
+      methods: { orderBy: { createdAt: "asc" } },
+      allocations: {
+        where: { invoiceId: { not: null } },
+        orderBy: { createdAt: "asc" },
+      },
+      invoicePayments: true,
+    },
+    take: 2000,
+  });
+
+  let repaired = 0;
+  for (const s of settlements) {
+    if (s.methods.length <= 1) continue;
+    if (s.allocations.length === 0) continue;
+    // Old bug: one payment per allocation (primary only) instead of per tender
+    const expected = s.methods.length * s.allocations.length;
+    if (s.invoicePayments.length >= expected) continue;
+    // Also catch single-invoice multi-tender collapsed to 1 row
+    if (
+      s.invoicePayments.length >= s.methods.length &&
+      s.allocations.length === 1
+    ) {
+      continue;
+    }
+
+    await db.$transaction(async (tx) => {
+      await tx.invoicePayment.deleteMany({
+        where: { tenantId, settlementId: s.id },
+      });
+      const allocAmounts = s.allocations.map((a) => toNumber(a.amount));
+      for (let mi = 0; mi < s.methods.length; mi += 1) {
+        const m = s.methods[mi]!;
+        const shares = distributeAmountAcross(
+          allocAmounts,
+          toNumber(m.amount),
+        );
+        for (let ai = 0; ai < s.allocations.length; ai += 1) {
+          const amt = shares[ai] ?? 0;
+          if (amt <= 0) continue;
+          const a = s.allocations[ai]!;
+          if (!a.invoiceId) continue;
+          await tx.invoicePayment.create({
+            data: {
+              tenantId,
+              invoiceId: a.invoiceId,
+              settlementId: s.id,
+              amount: amt,
+              method: m.methodCode,
+              paymentMethodId: m.paymentMethodId,
+              changeAmount: ai === 0 ? toNumber(m.changeAmount) : 0,
+              externalRef: ai === 0 ? m.externalRef : null,
+              giftCardId: ai === 0 ? m.giftCardId : null,
+              loyaltyAccountId: ai === 0 ? m.loyaltyAccountId : null,
+              paidAt: s.settledAt,
+            },
+          });
+        }
+      }
+    });
+    repaired += 1;
+  }
+
+  return { scanned: settlements.length, repaired };
 }
 
 /** Φ3 — AP payment settlement against purchase invoices */

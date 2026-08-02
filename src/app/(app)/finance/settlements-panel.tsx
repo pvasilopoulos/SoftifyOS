@@ -263,7 +263,15 @@ export function SettlementsPanel({ canWrite }: { canWrite: boolean }) {
           <tbody>
             {items.map((s) => {
               const party = s.customer?.name || s.supplier?.name || "—";
-              const methods = s.methods.map((m) => m.methodCode).join(" · ");
+              const methods = s.methods
+                .map(
+                  (m) =>
+                    `${m.methodCode} ${Number(m.amount).toLocaleString("el-GR", {
+                      minimumFractionDigits: 2,
+                      maximumFractionDigits: 2,
+                    })}`,
+                )
+                .join(" · ");
               return (
                 <tr key={s.id} className="border-t border-slate-100">
                   <td className="px-3 py-2 font-mono text-xs font-semibold">
