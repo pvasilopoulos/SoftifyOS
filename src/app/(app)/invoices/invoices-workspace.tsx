@@ -531,7 +531,7 @@ export function InvoicesWorkspace({
           </div>
         </section>
 
-        <aside className="soft-panel hidden overflow-hidden xl:block">
+        <aside className="soft-panel hidden min-h-0 self-start overflow-hidden xl:sticky xl:top-20 xl:block xl:h-[calc(100dvh-6rem)] xl:max-h-[calc(100dvh-6rem)]">
           {preview && preview.id === previewId ? (
             <InvoicePreviewPanel
               preview={preview}
@@ -600,9 +600,9 @@ function InvoicePreviewPanel({
   const contactPhone = preview.customer.mobile || preview.customer.phone;
 
   return (
-    <div className="flex h-full flex-col">
+    <div className="flex h-full min-h-0 max-h-full flex-col">
       {/* Hero header */}
-      <div className="relative overflow-hidden border-b border-slate-100 bg-gradient-to-br from-slate-900 via-slate-800 to-teal-900 px-5 pb-5 pt-4 text-white">
+      <div className="relative shrink-0 overflow-hidden border-b border-slate-100 bg-gradient-to-br from-slate-900 via-slate-800 to-teal-900 px-5 pb-5 pt-4 text-white">
         <div
           className="pointer-events-none absolute -right-10 -top-10 size-40 rounded-full bg-teal-400/20 blur-2xl"
           aria-hidden
@@ -652,7 +652,7 @@ function InvoicePreviewPanel({
         </div>
       </div>
 
-      <div className="flex-1 space-y-4 overflow-y-auto px-5 py-4">
+      <div className="min-h-0 flex-1 space-y-4 overflow-y-auto overscroll-contain px-5 py-4">
         {/* Amounts + progress */}
         <div className="rounded-2xl border border-slate-100 bg-gradient-to-b from-slate-50 to-white p-4">
           <div className="flex items-end justify-between gap-3">
@@ -915,8 +915,8 @@ function InvoicePreviewPanel({
         ) : null}
       </div>
 
-      {/* Sticky actions */}
-      <div className="sticky bottom-0 space-y-2 border-t border-slate-100 bg-white/95 px-5 py-3 backdrop-blur">
+      {/* Footer actions — shrink-0 so the scroll region above stays bounded */}
+      <div className="shrink-0 space-y-2 border-t border-slate-100 bg-white px-5 py-3">
         <InvoiceActions
           invoiceId={preview.id}
           status={preview.status}

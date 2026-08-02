@@ -2,6 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import { Ban, CheckCircle2, FileDown, Send, Wallet, X } from "lucide-react";
 import { Button } from "@/shared/ui/button";
 import { formatEUR } from "@/modules/sales/invoice-utils";
@@ -320,6 +321,9 @@ function CollectDialog({
     };
   }, [invoiceId, balance]);
 
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
+
   const total = lines.reduce((s, l) => {
     const n = Number(l.amount);
     return s + (Number.isFinite(n) && n > 0 ? n : 0);
@@ -327,15 +331,30 @@ function CollectDialog({
   const round2 = (n: number) => Math.round(n * 100) / 100;
   const remaining = round2(Math.max(0, balance - total));
 
-  return (
-    <div className="fixed inset-0 z-50 flex items-end justify-center bg-ink-950/40 p-4 sm:items-center">
+  useEffect(() => {
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => {
+      document.body.style.overflow = prev;
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [onClose]);
+
+  if (!mounted) return null;
+
+  return createPortal(
+    <div className="fixed inset-0 z-[100] flex items-end justify-center bg-ink-950/40 p-4 sm:items-center">
       <div
         role="dialog"
         aria-modal="true"
         aria-labelledby="collect-title"
-        className="w-full max-w-lg rounded-2xl bg-white p-5 shadow-xl"
+        className="flex max-h-[min(90dvh,40rem)] w-full max-w-lg flex-col overflow-hidden rounded-2xl bg-white shadow-xl"
       >
-        <div className="mb-4 flex items-start justify-between gap-3">
+        <div className="flex shrink-0 items-start justify-between gap-3 border-b border-slate-100 px-5 py-4">
           <div>
             <h3 id="collect-title" className="text-lg font-semibold text-ink-950">
               Είσπραξη
@@ -359,7 +378,7 @@ function CollectDialog({
           </button>
         </div>
         <form
-          className="space-y-3"
+          className="min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain px-5 py-4"
           onSubmit={(e) => {
             e.preventDefault();
             const methods = lines
@@ -514,6 +533,7 @@ function CollectDialog({
           </div>
         </form>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
