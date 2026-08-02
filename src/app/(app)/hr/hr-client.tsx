@@ -10,14 +10,21 @@ import {
 } from "react";
 import { useRouter } from "next/navigation";
 import {
+  Building2,
   CalendarDays,
+  CalendarRange,
+  ClipboardCheck,
   ClipboardList,
   Clock3,
+  FileStack,
   Filter,
   IdCard,
   LayoutDashboard,
+  PartyPopper,
   Search,
   Send,
+  Settings2,
+  SlidersHorizontal,
   UserRound,
   Users,
   Wallet,
@@ -37,6 +44,16 @@ import {
 import { PageHeader } from "@/shared/ui/page-header";
 import { Badge } from "@/shared/ui/badge";
 import { WorkCardPanel } from "./work-card-panel";
+import { LeaveCalendarPanel } from "./leave-calendar-panel";
+import {
+  DirectoryPanel,
+  DocumentsPanel,
+  HolidaysPanel,
+  LeaveAdjustmentsPanel,
+  LeaveTypesAdminPanel,
+  OnboardingPanel,
+  TeamPulsePanel,
+} from "./hr-suite-panels";
 import { Button } from "@/shared/ui/button";
 import { cn } from "@/shared/lib/cn";
 
@@ -86,6 +103,7 @@ type LeaveType = {
 type LeaveRequest = {
   id: string;
   days: number;
+  halfDay?: boolean;
   status: string;
   fromDate: string;
   toDate: string;
@@ -109,6 +127,7 @@ type LeaveBalanceRow = {
     name: string;
     isPaid: boolean;
     entitlement: number;
+    adjustment?: number;
     used: number;
     remaining: number;
   }>;
@@ -207,10 +226,18 @@ type Shift = {
 
 type Section =
   | "overview"
+  | "pulse"
   | "employees"
+  | "directory"
   | "employee"
+  | "onboarding"
+  | "documents"
+  | "calendar"
   | "leaves"
   | "balances"
+  | "adjustments"
+  | "leave-types"
+  | "holidays"
   | "schedules"
   | "workcard"
   | "ergani"
@@ -244,11 +271,17 @@ const NAV: Array<{
         hint: "Εκκρεμότητες & γρήγορα",
         icon: LayoutDashboard,
       },
+      {
+        id: "pulse",
+        label: "Σήμερα / ομάδα",
+        hint: "Άδειες · γενέθλια · τμήματα",
+        icon: PartyPopper,
+      },
     ],
   },
   {
     group: "Άνθρωποι",
-    hint: "Μητρώο & καρτέλα",
+    hint: "Μητρώο · οργανόγραμμα · docs",
     items: [
       {
         id: "employees",
@@ -257,17 +290,41 @@ const NAV: Array<{
         icon: Users,
       },
       {
+        id: "directory",
+        label: "Οργανόγραμμα",
+        hint: "Τμήματα & κάρτες",
+        icon: Building2,
+      },
+      {
         id: "employee",
         label: "Καρτέλα εργαζομένου",
         hint: "Επεξεργασία / αποχώρηση",
         icon: UserRound,
       },
+      {
+        id: "onboarding",
+        label: "Onboarding",
+        hint: "Checklist πρόσληψης",
+        icon: ClipboardCheck,
+      },
+      {
+        id: "documents",
+        label: "Έγγραφα",
+        hint: "Συμβάσεις · λήξεις",
+        icon: FileStack,
+      },
     ],
   },
   {
     group: "Χρόνος",
-    hint: "Άδειες · ωράρια · βάρδιες",
+    hint: "Άδειες · ημερολόγιο · ωράρια",
     items: [
+      {
+        id: "calendar",
+        label: "Ημερολόγιο αδειών",
+        hint: "Μήνας · ομάδα · αργίες",
+        icon: CalendarRange,
+      },
       {
         id: "leaves",
         label: "Άδειες",
@@ -279,6 +336,24 @@ const NAV: Array<{
         label: "Υπόλοιπα αδειών",
         hint: "Δικαίωμα − χρήση",
         icon: ClipboardList,
+      },
+      {
+        id: "adjustments",
+        label: "Προσαρμογές",
+        hint: "Μεταφορές ημερών",
+        icon: SlidersHorizontal,
+      },
+      {
+        id: "leave-types",
+        label: "Τύποι αδειών",
+        hint: "Δικαιώματα / έτος",
+        icon: Settings2,
+      },
+      {
+        id: "holidays",
+        label: "Αργίες & blackout",
+        hint: "Ελληνικό ημερολόγιο",
+        icon: CalendarDays,
       },
       {
         id: "schedules",
@@ -323,23 +398,55 @@ const NAV: Array<{
 const SECTION_HELP: Record<Section, { title: string; body: string }> = {
   overview: {
     title: "Επισκόπηση HR",
-    body: "Ξεκίνα από εδώ: άδειες σε αναμονή, ουρά Εργάνη, πρόχειρη μισθοδοσία.",
+    body: "Command center: εκκρεμότητες, γρήγορα shortcuts σε ημερολόγιο, pulse ομάδας και παρουσία.",
+  },
+  pulse: {
+    title: "Σήμερα / ομάδα",
+    body: "Ποιοι λείπουν, γενέθλια εβδομάδας, επέτειοι, κατανομή τμημάτων και έγγραφα που λήγουν.",
   },
   employees: {
     title: "Μητρώο εργαζομένων",
     body: "Αναζήτηση/φίλτρο κατάστασης. Δημιούργησε νέο εργαζόμενο με ΑΦΜ/ΑΜΚΑ/ΑΜΑ και μικτές αποδοχές.",
   },
+  directory: {
+    title: "Οργανόγραμμα τμημάτων",
+    body: "Οπτική λίστα ανά τμήμα — κλικ ανοίγει την καρτέλα εργαζομένου.",
+  },
   employee: {
     title: "Καρτέλα εργαζομένου",
     body: "Επίλεξε από τη λίστα ή κλικ σε γραμμή. Αποθήκευση με PATCH · Αποχώρηση ορίζει TERMINATED.",
   },
+  onboarding: {
+    title: "Onboarding checklist",
+    body: "Αυτόματο seed στην πρόσληψη. Σημείωσε βήματα ως ολοκληρωμένα μέχρι 100%.",
+  },
+  documents: {
+    title: "Μητρώο εγγράφων HR",
+    body: "Συμβάσεις, ταυτότητες, πιστοποιητικά με ημερομηνία λήξης και ειδοποίηση 30 ημερών.",
+  },
+  calendar: {
+    title: "Ημερολόγιο αδειών",
+    body: "Μηνιαία οπτική παρουσίαση εγκεκριμένων/σε αναμονή αδειών + αργίες. Φίλτρα τμήματος.",
+  },
   leaves: {
     title: "Αιτήσεις αδειών",
-    body: "Υποβολή αίτησης, έγκριση / απόρριψη / ακύρωση. Οι τύποι αδειών ακολουθούν ελληνικά πρότυπα.",
+    body: "Υποβολή με έλεγχο επικάλυψης, υπολοίπου και blackout αργιών. Υποστήριξη μισής ημέρας.",
   },
   balances: {
     title: "Υπόλοιπα αδειών",
-    body: "Δικαίωμα ανά τύπο μείον εγκεκριμένες ημέρες για το επιλεγμένο έτος φίλτρου.",
+    body: "Δικαίωμα + προσαρμογές − εγκεκριμένες ημέρες για το επιλεγμένο έτος φίλτρου.",
+  },
+  adjustments: {
+    title: "Προσαρμογές υπολοίπων",
+    body: "Μεταφορά ημερών από προηγούμενο έτος ή διορθώσεις δικαιώματος ανά τύπο.",
+  },
+  "leave-types": {
+    title: "Τύποι αδειών",
+    body: "Διαχείριση ελληνικών προτύπων και προσαρμοσμένων τύπων (ημέρες/έτος, έμμισθη).",
+  },
+  holidays: {
+    title: "Αργίες & blackout",
+    body: "Αυτόματο seed ελληνικών αργιών (συμπ. κινητών). Blackout μπλοκάρει νέες αιτήσεις.",
   },
   schedules: {
     title: "Ωράρια & βάρδιες",
@@ -504,6 +611,7 @@ export function HrClient({
     leaveTypeId: "",
     fromDate: "",
     toDate: "",
+    halfDay: false,
     notes: "",
   });
   const [cardForm, setCardForm] = useState({
@@ -822,9 +930,18 @@ export function HrClient({
         leaveTypeId: "",
         fromDate: "",
         toDate: "",
+        halfDay: false,
         notes: "",
       });
     }, "Η αίτηση άδειας υποβλήθηκε");
+  }
+
+  async function reloadLeaveBalances() {
+    const res = await fetch(`/api/hr/leave-balances?year=${filters.year}`);
+    const data = await res.json().catch(() => ({}));
+    if (res.ok && Array.isArray(data.items)) {
+      setLeaveBalances(data.items);
+    }
   }
 
   async function decideLeave(
@@ -1316,6 +1433,66 @@ export function HrClient({
             />
           ) : null}
 
+          {section === "pulse" ? (
+            <TeamPulsePanel employees={employees} />
+          ) : null}
+
+          {section === "directory" ? (
+            <DirectoryPanel onOpenEmployee={openEmployee} />
+          ) : null}
+
+          {section === "onboarding" ? (
+            <OnboardingPanel
+              employees={activeEmployees}
+              canWrite={canWrite}
+            />
+          ) : null}
+
+          {section === "documents" ? (
+            <DocumentsPanel
+              employees={activeEmployees}
+              canWrite={canWrite}
+            />
+          ) : null}
+
+          {section === "calendar" ? (
+            <LeaveCalendarPanel
+              year={filters.year}
+              initialLeaves={leaveRequests.map((r) => ({
+                ...r,
+                halfDay: Boolean(r.halfDay),
+                employee: {
+                  ...r.employee,
+                  department:
+                    employees.find((e) => e.id === r.employee.id)?.department ??
+                    null,
+                },
+              }))}
+            />
+          ) : null}
+
+          {section === "adjustments" ? (
+            <LeaveAdjustmentsPanel
+              employees={activeEmployees}
+              leaveTypes={leaveTypes}
+              year={filters.year}
+              canWrite={canWrite}
+              onAdjusted={() => void reloadLeaveBalances()}
+            />
+          ) : null}
+
+          {section === "leave-types" ? (
+            <LeaveTypesAdminPanel
+              initialTypes={leaveTypes}
+              canWrite={canWrite}
+              onChanged={setLeaveTypes}
+            />
+          ) : null}
+
+          {section === "holidays" ? (
+            <HolidaysPanel year={filters.year} canWrite={canWrite} />
+          ) : null}
+
           {section === "employees" ? (
             <div className="grid gap-4 xl:grid-cols-[1fr_340px]">
               <section className="soft-panel overflow-hidden">
@@ -1587,7 +1764,8 @@ export function HrClient({
           {section === "balances" ? (
             <section className="soft-panel overflow-hidden">
               <div className="border-b border-slate-100 px-4 py-2 text-xs text-slate-500">
-                Έτος {filters.year} · δικαίωμα − εγκεκριμένες ημέρες
+                Έτος {filters.year} · δικαίωμα (+ προσαρμογές) − εγκεκριμένες
+                ημέρες
               </div>
               <div className="overflow-x-auto">
                 <table className="w-full text-left text-sm">
@@ -1902,9 +2080,15 @@ function OverviewPanel({
         <div className="mt-4 flex flex-wrap gap-2">
           {(
             [
+              ["Ημερολόγιο", "calendar"],
+              ["Σήμερα", "pulse"],
+              ["Οργανόγραμμα", "directory"],
               ["Εργαζόμενοι", "employees"],
               ["Υπόλοιπα", "balances"],
+              ["Onboarding", "onboarding"],
+              ["Έγγραφα", "documents"],
               ["Ωράρια", "schedules"],
+              ["Κάρτα QR", "workcard"],
               ["Μισθοδοσία", "payroll"],
             ] as Array<[string, Section]>
           ).map(([label, id]) => (
@@ -2305,6 +2489,7 @@ function LeavesPanel({
     leaveTypeId: string;
     fromDate: string;
     toDate: string;
+    halfDay: boolean;
     notes: string;
   };
   setLeaveForm: Dispatch<
@@ -2313,6 +2498,7 @@ function LeavesPanel({
       leaveTypeId: string;
       fromDate: string;
       toDate: string;
+      halfDay: boolean;
       notes: string;
     }>
   >;
@@ -2379,6 +2565,11 @@ function LeavesPanel({
                     <td className="px-3 py-2">{r.leaveType.name}</td>
                     <td className="px-3 py-2 text-slate-600">
                       {day(r.fromDate)} – {day(r.toDate)}
+                      {r.halfDay ? (
+                        <span className="ml-1 text-[10px] text-slate-400">
+                          ½ ημέρα
+                        </span>
+                      ) : null}
                     </td>
                     <td className="px-3 py-2 tabular-nums">{r.days}</td>
                     <td className="px-3 py-2">
@@ -2505,6 +2696,20 @@ function LeavesPanel({
               className={inputCls}
             />
           </label>
+          <label className="flex items-center gap-2 text-xs text-slate-600">
+            <input
+              type="checkbox"
+              checked={leaveForm.halfDay}
+              onChange={(ev) =>
+                setLeaveForm((f) => ({
+                  ...f,
+                  halfDay: ev.target.checked,
+                  toDate: ev.target.checked ? f.fromDate || f.toDate : f.toDate,
+                }))
+              }
+            />
+            Μισή ημέρα (0.5)
+          </label>
           <label className={labelCls}>
             Σημειώσεις
             <textarea
@@ -2516,6 +2721,9 @@ function LeavesPanel({
               className="mt-1 w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm"
             />
           </label>
+          <p className="text-[11px] text-slate-500">
+            Έλεγχος επικάλυψης, υπολοίπου και αργιών/blackout πριν την υποβολή.
+          </p>
           <Button type="submit" disabled={busy} className="w-full" size="sm">
             Υποβολή
           </Button>

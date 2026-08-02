@@ -4,12 +4,12 @@ import { prisma } from "@/server/db";
 import { getSession } from "@/platform/auth/session";
 import { writeAuditEvent } from "@/platform/tenancy/audit";
 import { getErrorMessage } from "@/shared/lib/safe";
-import { leaveRequestCreateSchema } from "@/modules/hr/schemas";
+import { leaveBalanceAdjustmentSchema } from "@/modules/hr/schemas";
+import { HrError } from "@/modules/hr/errors";
 import {
-  createLeaveRequest,
-  HrError,
-  listLeaveRequests,
-} from "@/modules/hr/service";
+  createLeaveBalanceAdjustment,
+  listLeaveBalanceAdjustments,
+} from "@/modules/hr/suite";
 
 export const dynamic = "force-dynamic";
 
@@ -19,18 +19,19 @@ export async function GET(request: NextRequest) {
     if (!session) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
-    const status = request.nextUrl.searchParams.get("status") || undefined;
-    const items = await listLeaveRequests(prisma, session.tenantId, { status });
+    const sp = request.nextUrl.searchParams;
+    const year = Number(sp.get("year") || new Date().getFullYear());
+    const employeeId = sp.get("employeeId") || undefined;
+    const items = await listLeaveBalanceAdjustments(prisma, session.tenantId, {
+      year,
+      employeeId,
+    });
     return NextResponse.json({
-      items: items.map((r) => ({
-        ...r,
-        days: Number(r.days),
-        halfDay: r.halfDay,
-        fromDate: r.fromDate.toISOString(),
-        toDate: r.toDate.toISOString(),
-        decidedAt: r.decidedAt?.toISOString() ?? null,
-        createdAt: r.createdAt.toISOString(),
-        updatedAt: r.updatedAt.toISOString(),
+      items: items.map((a) => ({
+        ...a,
+        days: Number(a.days),
+        createdAt: a.createdAt.toISOString(),
+        updatedAt: a.updatedAt.toISOString(),
       })),
     });
   } catch (error) {
@@ -50,28 +51,28 @@ export async function POST(request: Request) {
     if (session.role === "VIEWER") {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
-    const body = leaveRequestCreateSchema.parse(await request.json());
-    const item = await createLeaveRequest(prisma, {
+    const body = leaveBalanceAdjustmentSchema.parse(await request.json());
+    const item = await createLeaveBalanceAdjustment(prisma, {
       tenantId: session.tenantId,
       data: body,
     });
     await writeAuditEvent({
       tenantId: session.tenantId,
       userId: session.sub,
-      action: "leave_request.create",
-      entity: "leave_request",
+      action: "leave_balance_adjustment.create",
+      entity: "leave_balance_adjustment",
       entityId: item.id,
-      meta: { employeeId: item.employeeId, leaveTypeId: item.leaveTypeId },
+      meta: {
+        employeeId: item.employeeId,
+        days: Number(item.days),
+        year: item.year,
+      },
     });
     return NextResponse.json(
       {
         item: {
           ...item,
           days: Number(item.days),
-          halfDay: item.halfDay,
-          fromDate: item.fromDate.toISOString(),
-          toDate: item.toDate.toISOString(),
-          decidedAt: item.decidedAt?.toISOString() ?? null,
           createdAt: item.createdAt.toISOString(),
           updatedAt: item.updatedAt.toISOString(),
         },

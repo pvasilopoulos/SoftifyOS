@@ -78,6 +78,7 @@ export default async function HrPage() {
       initialLeaveRequests={leaveRequests.map((r) => ({
         id: r.id,
         days: Number(r.days),
+        halfDay: r.halfDay,
         status: r.status,
         fromDate: r.fromDate.toISOString(),
         toDate: r.toDate.toISOString(),

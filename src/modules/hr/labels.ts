@@ -65,6 +65,40 @@ export const workShiftKindLabel = {
   ON_CALL: "Εφημερία",
 } as const;
 
+export const hrDocumentCategoryLabel = {
+  CONTRACT: "Σύμβαση",
+  ID: "Ταυτότητα",
+  MEDICAL: "Ιατρικό",
+  CERTIFICATE: "Πιστοποιητικό",
+  TAX: "Φορολογικό",
+  TRAINING: "Εκπαίδευση",
+  OTHER: "Άλλο",
+} as const;
+
+export const checklistKindLabel = {
+  ONBOARDING: "Onboarding",
+  OFFBOARDING: "Offboarding",
+  PERIODIC: "Περιοδικό",
+} as const;
+
+export const checklistItemStatusLabel = {
+  TODO: "Εκκρεμεί",
+  DONE: "Ολοκληρώθηκε",
+  SKIPPED: "Παράλειψη",
+} as const;
+
+/** Προεπιλεγμένα βήματα πρόσληψης */
+export const DEFAULT_ONBOARDING_TASKS = [
+  "Σύμβαση εργασίας υπογεγραμμένη",
+  "Αντίγραφο ταυτότητας / διαβατηρίου",
+  "Καταχώρηση ΑΦΜ / ΑΜΚΑ / ΑΜΑ",
+  "IBAN μισθοδοσίας",
+  "Δημιουργία εταιρικού λογαριασμού",
+  "Έκδοση κάρτας εργασίας (QR)",
+  "Δήλωση Εργάνη πρόσληψης",
+  "Ενημέρωση πολιτικών & ασφάλειας",
+] as const;
+
 export const WEEKDAY_BITS = [
   { bit: 1, label: "Δευ" },
   { bit: 2, label: "Τρι" },

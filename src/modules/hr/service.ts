@@ -15,17 +15,12 @@ import type {
   WorkScheduleUpsertInput,
   WorkShiftCreateInput,
 } from "./schemas";
+import { assertLeaveRequestAllowed } from "./suite";
+import { HrError } from "./errors";
+
+export { HrError };
 
 type Db = PrismaClient | Prisma.TransactionClient;
-
-export class HrError extends Error {
-  constructor(
-    message: string,
-    public status = 400,
-  ) {
-    super(message);
-  }
-}
 
 function emptyToNull(v?: string | null) {
   if (v == null) return null;
@@ -232,6 +227,16 @@ export async function createEmployee(
     },
   });
 
+  try {
+    const { seedOnboardingChecklist } = await import("./suite");
+    await seedOnboardingChecklist(db, {
+      tenantId: input.tenantId,
+      employeeId: row.id,
+    });
+  } catch {
+    /* checklist seed is best-effort */
+  }
+
   return row;
 }
 
@@ -379,8 +384,23 @@ export async function createLeaveRequest(
   if (!fromDate || !toDate) throw new HrError("Μη έγκυρες ημερομηνίες");
   if (toDate < fromDate) throw new HrError("Η λήξη πρέπει να είναι ≥ έναρξη");
 
+  const halfDay = Boolean(input.data.halfDay);
+  if (halfDay && ymdLocal(fromDate) !== ymdLocal(toDate)) {
+    throw new HrError("Η μισή ημέρα ισχύει μόνο για μονοήμερη άδεια");
+  }
   const days =
-    input.data.days ?? businessDaysInclusive(fromDate, toDate);
+    input.data.days ??
+    (halfDay ? 0.5 : businessDaysInclusive(fromDate, toDate));
+
+  await assertLeaveRequestAllowed(db, {
+    tenantId: input.tenantId,
+    employeeId: employee.id,
+    fromDate,
+    toDate,
+    leaveTypeId: leaveType.id,
+    days,
+    year: fromDate.getUTCFullYear(),
+  });
 
   return db.leaveRequest.create({
     data: {
@@ -390,6 +410,7 @@ export async function createLeaveRequest(
       fromDate,
       toDate,
       days: new Prisma.Decimal(days),
+      halfDay,
       status: "PENDING",
       notes: emptyToNull(input.data.notes),
     },
@@ -400,6 +421,10 @@ export async function createLeaveRequest(
       leaveType: { select: { id: true, code: true, name: true, isPaid: true } },
     },
   });
+}
+
+function ymdLocal(d: Date) {
+  return d.toISOString().slice(0, 10);
 }
 
 export async function decideLeaveRequest(
@@ -468,7 +493,7 @@ export async function loadLeaveBalances(
   const from = new Date(Date.UTC(year, 0, 1));
   const to = new Date(Date.UTC(year, 11, 31, 23, 59, 59, 999));
 
-  const [types, employees, approved] = await Promise.all([
+  const [types, employees, approved, adjustments] = await Promise.all([
     db.leaveType.findMany({
       where: { tenantId, isActive: true },
       orderBy: [{ sortOrder: "asc" }, { name: "asc" }],
@@ -503,6 +528,14 @@ export async function loadLeaveBalances(
         days: true,
       },
     }),
+    db.leaveBalanceAdjustment.findMany({
+      where: {
+        tenantId,
+        year,
+        ...(opts?.employeeId ? { employeeId: opts.employeeId } : {}),
+      },
+      select: { employeeId: true, leaveTypeId: true, days: true },
+    }),
   ]);
 
   const usedMap = new Map<string, number>();
@@ -510,19 +543,26 @@ export async function loadLeaveBalances(
     const key = `${r.employeeId}:${r.leaveTypeId}`;
     usedMap.set(key, (usedMap.get(key) ?? 0) + Number(r.days));
   }
+  const adjMap = new Map<string, number>();
+  for (const a of adjustments) {
+    const key = `${a.employeeId}:${a.leaveTypeId}`;
+    adjMap.set(key, (adjMap.get(key) ?? 0) + Number(a.days));
+  }
 
   return employees.map((e) => ({
     employee: e,
     year,
     balances: types.map((t) => {
       const used = usedMap.get(`${e.id}:${t.id}`) ?? 0;
-      const entitlement = t.daysPerYear;
+      const adjustment = adjMap.get(`${e.id}:${t.id}`) ?? 0;
+      const entitlement = t.daysPerYear + adjustment;
       return {
         leaveTypeId: t.id,
         code: t.code,
         name: t.name,
         isPaid: t.isPaid,
-        entitlement,
+        entitlement: Math.round(entitlement * 100) / 100,
+        adjustment: Math.round(adjustment * 100) / 100,
         used,
         remaining: Math.max(0, Math.round((entitlement - used) * 100) / 100),
       };

@@ -90,6 +90,7 @@ export const leaveRequestCreateSchema = z.object({
   fromDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
   toDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
   days: z.coerce.number().min(0.5).max(366).optional(),
+  halfDay: z.boolean().optional().default(false),
   notes: optStr(2000),
 });
 
@@ -97,6 +98,76 @@ export const leaveRequestDecideSchema = z.object({
   status: z.enum(["APPROVED", "REJECTED", "CANCELLED"]),
   notes: optStr(2000),
 });
+
+export const leaveTypePatchSchema = leaveTypeUpsertSchema.partial().extend({
+  code: leaveTypeUpsertSchema.shape.code.optional(),
+});
+
+export const leaveBalanceAdjustmentSchema = z.object({
+  employeeId: z.string().trim().min(1),
+  leaveTypeId: z.string().trim().min(1),
+  year: z.coerce.number().int().min(2000).max(2100),
+  days: z.coerce.number().min(-366).max(366),
+  reason: optStr(500),
+});
+
+export const companyHolidaySchema = z.object({
+  name: z.string().trim().min(2).max(120),
+  date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  isRecurring: z.boolean().optional().default(false),
+  isBlackout: z.boolean().optional().default(false),
+  notes: optStr(500),
+});
+
+export const hrDocumentSchema = z.object({
+  employeeId: z.string().trim().min(1),
+  category: z
+    .enum([
+      "CONTRACT",
+      "ID",
+      "MEDICAL",
+      "CERTIFICATE",
+      "TAX",
+      "TRAINING",
+      "OTHER",
+    ])
+    .optional()
+    .default("OTHER"),
+  title: z.string().trim().min(2).max(160),
+  fileName: optStr(200),
+  fileUrl: optStr(500),
+  issuedAt: dateLike,
+  expiresAt: dateLike,
+  notes: optStr(2000),
+});
+
+export const checklistItemCreateSchema = z.object({
+  employeeId: z.string().trim().min(1),
+  kind: z
+    .enum(["ONBOARDING", "OFFBOARDING", "PERIODIC"])
+    .optional()
+    .default("ONBOARDING"),
+  title: z.string().trim().min(2).max(200),
+  dueDate: dateLike,
+  sortOrder: z.coerce.number().int().min(0).max(9999).optional().default(0),
+  notes: optStr(1000),
+});
+
+export const checklistItemPatchSchema = z.object({
+  status: z.enum(["TODO", "DONE", "SKIPPED"]).optional(),
+  title: z.string().trim().min(2).max(200).optional(),
+  dueDate: dateLike,
+  notes: optStr(1000),
+  sortOrder: z.coerce.number().int().min(0).max(9999).optional(),
+});
+
+export type LeaveBalanceAdjustmentInput = z.infer<
+  typeof leaveBalanceAdjustmentSchema
+>;
+export type CompanyHolidayInput = z.infer<typeof companyHolidaySchema>;
+export type HrDocumentInput = z.infer<typeof hrDocumentSchema>;
+export type ChecklistItemCreateInput = z.infer<typeof checklistItemCreateSchema>;
+export type ChecklistItemPatchInput = z.infer<typeof checklistItemPatchSchema>;
 
 export const workCardCreateSchema = z.object({
   employeeId: z.string().trim().min(1),
