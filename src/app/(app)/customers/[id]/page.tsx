@@ -65,7 +65,13 @@ export default async function CustomerDetailPage({
     listEntityFormViews(prisma, session.tenantId, "CUSTOMERS", true),
     listCustomFields(prisma, session.tenantId, "CUSTOMERS", true),
     prisma.invoice.findMany({
-      where: { tenantId: session.tenantId, customerId: id },
+      where: {
+        tenantId: session.tenantId,
+        customerId: id,
+        ...(session.legalEntityId
+          ? { legalEntityId: session.legalEntityId }
+          : {}),
+      },
       orderBy: { createdAt: "desc" },
       take: 20,
       select: {
@@ -78,7 +84,13 @@ export default async function CustomerDetailPage({
       },
     }),
     prisma.order.findMany({
-      where: { tenantId: session.tenantId, customerId: id },
+      where: {
+        tenantId: session.tenantId,
+        customerId: id,
+        ...(session.legalEntityId
+          ? { legalEntityId: session.legalEntityId }
+          : {}),
+      },
       orderBy: { createdAt: "desc" },
       take: 20,
       select: {

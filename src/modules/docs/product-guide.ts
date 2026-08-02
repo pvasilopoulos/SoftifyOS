@@ -42,9 +42,9 @@ export const PRODUCT_DOC_SECTIONS: DocSection[] = [
       {
         type: "ul",
         items: [
-          "Ένα tenant = μία εταιρεία / οργανισμός με δικά του δεδομένα",
-          "Ρόλοι OWNER / ADMIN / MEMBER / VIEWER ελέγχουν τι βλέπει και τι αλλάζει ο χρήστης",
-          "Όλα τα business records έχουν tenantId · Postgres RLS απομονώνει δεδομένα",
+          "A · Tenant = οργανισμός με απομονωμένα δεδομένα (RLS)",
+          "B · Company (LegalEntity) = νομική οντότητα μέσα στον tenant (παραστατικά / λογιστική)",
+          "Ρόλοι OWNER / ADMIN / MEMBER / VIEWER + προαιρετικό ACL ανά εταιρεία",
           "Ελληνικό UI (el-GR), ποσά σε EUR, πρότυπα ΑΑΔΕ / ΕΦΚΑ όπου εφαρμόζονται",
         ],
       },
@@ -78,10 +78,10 @@ export const PRODUCT_DOC_SECTIONS: DocSection[] = [
       {
         type: "ol",
         items: [
-          "Login → δημιουργία session + audit event",
-          "Κάθε API φορτώνει tenantId από το session",
-          "Prisma queries φιλτράρουν πάντα με tenantId",
-          "RLS πολιτικές στο Postgres ως δεύτερο τείχος",
+          "Login → επιλογή Tenant (A) + Company (B) όταν χρειάζεται → session JWT",
+          "Κάθε API φορτώνει tenantId και legalEntityId από το session",
+          "Παραστατικά / σειρές φιλτράρονται και σφραγίζονται με την ενεργή εταιρεία",
+          "RLS στο Postgres απομονώνει δεδομένα ανά tenant",
           "Σημαντικές ενέργειες γράφουν στο audit log",
         ],
       },
@@ -100,8 +100,20 @@ export const PRODUCT_DOC_SECTIONS: DocSection[] = [
         text: "OWNER/ADMIN διαχειρίζονται χρήστες, ρόλους, integrations και εξαγωγή ρυθμίσεων. VIEWER είναι μόνο ανάγνωση.",
       },
       {
-        type: "p",
-        text: "Workspace A+B: Tenant (οργανισμός / απομόνωση δεδομένων) και Company/LegalEntity (νομική οντότητα μέσα στον tenant). Στο login με πολλά memberships επιλέγεις και τα δύο· στο header εναλλάσσεις οργανισμό (A) και εταιρεία (B). Οι προτιμήσεις αποθηκεύονται ανά χρήστη.",
+        type: "steps",
+        title: "Workspace A + B",
+        items: [
+          "A · Tenant: οργανισμός / απομόνωση δεδομένων (Membership)",
+          "B · Company (LegalEntity): νομική οντότητα / ΑΦΜ μέσα στον tenant — τιμολόγια, παραγγελίες, σειρές, ημερολόγιο",
+          "Login picker όταν έχεις πολλά memberships· στο header εναλλάσσεις A και B",
+          "Ρυθμίσεις → Χρήστες: ανά tenant ορίζεις ποιες εταιρείες βλέπει ο χρήστης (κενό = όλες)",
+          "Αλλαγή εταιρείας στο header αλλάζει λίστες παραστατικών και προεπιλογή FI φίλτρων",
+        ],
+      },
+      {
+        type: "callout",
+        tone: "warn",
+        text: "Η αρίθμηση σειρών είναι ανά εταιρεία (tenant + legalEntity + code). Μην μετακινείς παραστατικά μεταξύ εταιρειών — δημιούργησε νέο στην σωστή εταιρεία.",
       },
     ],
   },

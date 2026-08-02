@@ -6,6 +6,7 @@ import {
   type SessionPayload,
 } from "@/platform/auth/session";
 import {
+  getAllowedCompanyIds,
   persistWorkspaceChoice,
   readWorkspacePrefs,
   resolveCompanyForTenant,
@@ -23,14 +24,40 @@ export async function issueWorkspaceSession(
     role: MembershipRole;
     legalEntityId?: string | null;
     existingPrefs?: unknown;
+    membershipId?: string;
   },
 ): Promise<{ token: string; session: SessionPayload }> {
   const prefs = readWorkspacePrefs(input.existingPrefs);
+  let allowedCompanyIds: string[] | null = null;
+  if (input.membershipId) {
+    allowedCompanyIds = await getAllowedCompanyIds(db, {
+      membershipId: input.membershipId,
+      role: input.role,
+    });
+  } else {
+    const mem = await db.membership.findUnique({
+      where: {
+        tenantId_userId: {
+          tenantId: input.tenantId,
+          userId: input.userId,
+        },
+      },
+      select: { id: true },
+    });
+    if (mem) {
+      allowedCompanyIds = await getAllowedCompanyIds(db, {
+        membershipId: mem.id,
+        role: input.role,
+      });
+    }
+  }
+
   const { company } = await resolveCompanyForTenant(db, {
     tenantId: input.tenantId,
     tenantName: input.tenantName,
     preferredCompanyId: input.legalEntityId,
     prefs,
+    allowedCompanyIds,
   });
 
   await persistWorkspaceChoice(db, {

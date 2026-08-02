@@ -15,22 +15,30 @@ export async function allocateDeliveryNoteNumber(
   db: Db,
   tenantId: string,
   siteId?: string | null,
+  legalEntityId?: string | null,
 ) {
   const series = await resolveDefaultSeries(
     db,
     tenantId,
     "DELIVERY_NOTE",
     siteId,
+    legalEntityId,
   );
   if (series) {
     return allocateFromSeries(db, {
       tenantId,
       seriesId: series.id,
       kind: "DELIVERY_NOTE",
+      legalEntityId,
     });
   }
   const year = new Date().getFullYear();
-  const count = await db.deliveryNote.count({ where: { tenantId } });
+  const count = await db.deliveryNote.count({
+    where: {
+      tenantId,
+      ...(legalEntityId ? { legalEntityId } : {}),
+    },
+  });
   return {
     number: `ΔΑ-${year}-${String(count + 1).padStart(5, "0")}`,
     seriesId: null as string | null,

@@ -3,6 +3,11 @@ import { z } from "zod";
 import { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/server/db";
 import { getSession } from "@/platform/auth/session";
+import {
+  companyStamp,
+  isCompanyScopeError,
+  requireCompanyId,
+} from "@/platform/tenancy/company-scope";
 import { writeAuditEvent } from "@/platform/tenancy/audit";
 import { buildChangeMeta } from "@/platform/tenancy/audit-diff";
 import { getErrorMessage } from "@/shared/lib/safe";
@@ -32,6 +37,7 @@ export async function POST(
     if (session.role === "VIEWER") {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
+    const legalEntityId = requireCompanyId(session);
 
     const { id } = await context.params;
     const body = orderInvoiceSchema.parse(
@@ -39,7 +45,7 @@ export async function POST(
     );
 
     const order = await prisma.order.findFirst({
-      where: { id, tenantId: session.tenantId },
+      where: { id, tenantId: session.tenantId, legalEntityId },
       include: {
         series: true,
         lines: { orderBy: { position: "asc" } },
@@ -65,7 +71,7 @@ export async function POST(
     }
     if (order.status === "INVOICED") {
       const existing = await prisma.invoice.findFirst({
-        where: { tenantId: session.tenantId, orderId: order.id },
+        where: { tenantId: session.tenantId, legalEntityId, orderId: order.id },
         select: { id: true, number: true },
         orderBy: { createdAt: "desc" },
       });
@@ -105,12 +111,19 @@ export async function POST(
             where: {
               id: body.seriesId,
               tenantId: session.tenantId,
+              legalEntityId,
               kind: "SALES_INVOICE",
               isActive: true,
             },
           })
         : null) ??
-      (await resolveDefaultSeries(prisma, session.tenantId, "SALES_INVOICE"));
+      (await resolveDefaultSeries(
+        prisma,
+        session.tenantId,
+        "SALES_INVOICE",
+        null,
+        legalEntityId,
+      ));
 
     if (!invoiceSeries) {
       return NextResponse.json(
@@ -179,11 +192,13 @@ export async function POST(
         tenantId: session.tenantId,
         seriesId: invoiceSeries.id,
         kind: "SALES_INVOICE",
+        legalEntityId,
       });
 
       const invoice = await tx.invoice.create({
         data: {
           tenantId: session.tenantId,
+          ...companyStamp(session),
           customerId: order.customerId,
           branchId: order.branchId,
           spaceId: order.spaceId,
@@ -290,6 +305,9 @@ export async function POST(
       { status: 201 },
     );
   } catch (error) {
+    if (isCompanyScopeError(error)) {
+      return NextResponse.json({ error: error.message }, { status: error.status });
+    }
     if (error instanceof z.ZodError) {
       return NextResponse.json(
         { error: "Μη έγκυρα δεδομένα τιμολόγησης" },

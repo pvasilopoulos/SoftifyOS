@@ -21,6 +21,12 @@ import {
   InvoiceStatusOptionError,
   resolveInvoiceStatusOption,
 } from "@/modules/sales/invoice-status-options";
+import {
+  companySqlAnd,
+  companyStamp,
+  isCompanyScopeError,
+  requireCompanyId,
+} from "@/platform/tenancy/company-scope";
 
 export const dynamic = "force-dynamic";
 
@@ -36,13 +42,17 @@ const listSchema = listQuerySchema.extend({
   kind: z.enum(["SALES_INVOICE", "SALES_CREDIT", "RETAIL_RECEIPT"]).optional(),
 });
 
-async function nextInvoiceNumberFallback(tenantId: string, kind: string) {
+async function nextInvoiceNumberFallback(
+  tenantId: string,
+  legalEntityId: string,
+  kind: string,
+) {
   const year = new Date().getFullYear();
   const code =
     kind === "SALES_CREDIT" ? "ΠΙΣ" : kind === "RETAIL_RECEIPT" ? "ΑΠΥ" : "ΤΙΜ";
   const prefix = `${code}-${year}-`;
   const latest = await prisma.invoice.findFirst({
-    where: { tenantId, number: { startsWith: prefix } },
+    where: { tenantId, legalEntityId, number: { startsWith: prefix } },
     orderBy: { number: "desc" },
     select: { number: true },
   });
@@ -68,6 +78,7 @@ export async function GET(request: NextRequest) {
     if (!session) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
+    const legalEntityId = requireCompanyId(session);
 
     await syncOverdueInvoices(session.tenantId);
 
@@ -99,6 +110,8 @@ export async function GET(request: NextRequest) {
                 ? Prisma.sql`AND i.status IN ('ISSUED'::"InvoiceStatus", 'PARTIAL'::"InvoiceStatus", 'OVERDUE'::"InvoiceStatus")`
                 : Prisma.empty;
 
+    const companyFilter = companySqlAnd(session);
+
     const rows = await prisma.$queryRaw<
       Array<{
         id: string;
@@ -128,6 +141,7 @@ export async function GET(request: NextRequest) {
       LEFT JOIN branches b ON b.id = i."branchId"
       LEFT JOIN spaces s ON s.id = i."spaceId"
       WHERE i."tenantId" = ${session.tenantId}
+        ${companyFilter}
         ${statusFilter}
         ${kind ? Prisma.sql`AND i.kind = ${kind}::"InvoiceKind"` : Prisma.empty}
         ${customerId ? Prisma.sql`AND i."customerId" = ${customerId}` : Prisma.empty}
@@ -168,6 +182,7 @@ export async function GET(request: NextRequest) {
         COUNT(*) FILTER (WHERE status = 'PAID')::bigint AS paid
       FROM invoices
       WHERE "tenantId" = ${session.tenantId}
+        AND "legalEntityId" = ${legalEntityId}
     `;
 
     const hasMore = rows.length > limit;
@@ -216,6 +231,9 @@ export async function GET(request: NextRequest) {
       meta: { ms: Date.now() - started, count: items.length, hasMore },
     });
   } catch (error) {
+    if (isCompanyScopeError(error)) {
+      return NextResponse.json({ error: error.message }, { status: error.status });
+    }
     return NextResponse.json(
       { error: getErrorMessage(error, "List failed") },
       { status: 500 },
@@ -232,6 +250,7 @@ export async function POST(request: Request) {
     if (session.role === "VIEWER") {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
+    const legalEntityId = requireCompanyId(session);
 
     const body = invoiceCreateSchema.parse(await request.json());
     const customer = await prisma.customer.findFirst({
@@ -318,12 +337,19 @@ export async function POST(request: Request) {
             where: {
               id: body.seriesId,
               tenantId: session.tenantId,
+              legalEntityId,
               kind: docKind,
               isActive: true,
             },
           })
         : null) ??
-      (await resolveDefaultSeries(prisma, session.tenantId, docKind));
+      (await resolveDefaultSeries(
+        prisma,
+        session.tenantId,
+        docKind,
+        null,
+        legalEntityId,
+      ));
 
     if (!series && !body.number?.trim()) {
       return NextResponse.json(
@@ -348,6 +374,7 @@ export async function POST(request: Request) {
         where: {
           id: relatedInvoiceId,
           tenantId: session.tenantId,
+          legalEntityId,
           customerId: customer.id,
           kind: { in: ["SALES_INVOICE", "RETAIL_RECEIPT"] },
           status: { not: "CANCELLED" },
@@ -421,18 +448,24 @@ export async function POST(request: Request) {
             tenantId: session.tenantId,
             seriesId: series.id,
             kind: docKind,
+            legalEntityId,
           });
           number = allocated.number;
           seriesId = allocated.seriesId;
           siteId = allocated.siteId;
         } else {
-          number = await nextInvoiceNumberFallback(session.tenantId, docKind);
+          number = await nextInvoiceNumberFallback(
+            session.tenantId,
+            legalEntityId,
+            docKind,
+          );
         }
       }
 
       return tx.invoice.create({
         data: {
           tenantId: session.tenantId,
+          ...companyStamp(session),
           customerId: customer.id,
           branchId,
           spaceId,
@@ -536,6 +569,9 @@ export async function POST(request: Request) {
 
     return NextResponse.json({ item }, { status: 201 });
   } catch (error) {
+    if (isCompanyScopeError(error)) {
+      return NextResponse.json({ error: error.message }, { status: error.status });
+    }
     if (error instanceof z.ZodError) {
       return NextResponse.json(
         { error: "Μη έγκυρα δεδομένα τιμολογίου" },

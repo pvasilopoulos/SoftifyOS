@@ -11,6 +11,10 @@ import {
 } from "@/modules/ledger/purchase-invoices";
 import { ensureChartOfAccounts, LedgerError } from "@/modules/ledger/service";
 import { toNumber } from "@/modules/sales/invoice-utils";
+import {
+  CompanyScopeError,
+  requireCompanyId,
+} from "@/platform/tenancy/company-scope";
 
 export const dynamic = "force-dynamic";
 
@@ -20,7 +24,10 @@ export async function GET() {
     if (!session) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
-    const items = await listPurchaseInvoices(prisma, session.tenantId);
+    const legalEntityId = requireCompanyId(session);
+    const items = await listPurchaseInvoices(prisma, session.tenantId, {
+      legalEntityId,
+    });
     return NextResponse.json({
       items: items.map((inv) => ({
         ...inv,
@@ -39,6 +46,9 @@ export async function GET() {
       })),
     });
   } catch (error) {
+    if (error instanceof CompanyScopeError) {
+      return NextResponse.json({ error: error.message }, { status: error.status });
+    }
     return NextResponse.json(
       { error: getErrorMessage(error, "Load failed") },
       { status: 500 },
@@ -55,11 +65,13 @@ export async function POST(request: Request) {
     if (session.role === "VIEWER") {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
+    const legalEntityId = requireCompanyId(session);
     await ensureChartOfAccounts(prisma, session.tenantId);
     const body = purchaseInvoiceCreateSchema.parse(await request.json());
     const { invoice, journalId } = await createPurchaseInvoice(prisma, {
       tenantId: session.tenantId,
       ...body,
+      legalEntityId: body.legalEntityId ?? legalEntityId,
       userId: session.sub,
     });
     await writeAuditEvent({

@@ -32,7 +32,13 @@ export async function POST(
     const body = invoiceCollectSchema.parse(await request.json());
 
     const invoice = await prisma.invoice.findFirst({
-      where: { id, tenantId: session.tenantId },
+      where: {
+        id,
+        tenantId: session.tenantId,
+        ...(session.legalEntityId
+          ? { legalEntityId: session.legalEntityId }
+          : {}),
+      },
       select: {
         id: true,
         number: true,
@@ -40,6 +46,7 @@ export async function POST(
         total: true,
         paidAmount: true,
         seriesId: true,
+        legalEntityId: true,
         series: {
           select: { glDebitAccount: true },
         },
@@ -165,6 +172,7 @@ export async function POST(
           pmGl?.glClearingAccount ||
           "38.00.00",
         userId: session.sub,
+        legalEntityId: invoice.legalEntityId ?? session.legalEntityId,
       });
       journalId = journal?.id ?? null;
     } catch {

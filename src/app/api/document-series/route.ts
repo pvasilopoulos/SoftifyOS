@@ -3,6 +3,11 @@ import { z } from "zod";
 import { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/server/db";
 import { getSession } from "@/platform/auth/session";
+import {
+  companyStamp,
+  isCompanyScopeError,
+  requireCompanyId,
+} from "@/platform/tenancy/company-scope";
 import { writeAuditEvent } from "@/platform/tenancy/audit";
 import { getErrorMessage } from "@/shared/lib/safe";
 import { documentKindSchema, seriesCreateSchema } from "@/modules/documents/schemas";
@@ -81,6 +86,7 @@ export async function GET(request: NextRequest) {
     if (!session) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
+    const legalEntityId = requireCompanyId(session);
     const parsed = listSchema.safeParse(
       Object.fromEntries(request.nextUrl.searchParams),
     );
@@ -96,6 +102,7 @@ export async function GET(request: NextRequest) {
     const items = await prisma.documentSeries.findMany({
       where: {
         tenantId: session.tenantId,
+        legalEntityId,
         kind: parsed.data.kind,
         siteId: parsed.data.siteId,
       },
@@ -110,6 +117,9 @@ export async function GET(request: NextRequest) {
       items: items.map((s) => mapSeriesItem(s)),
     });
   } catch (error) {
+    if (isCompanyScopeError(error)) {
+      return NextResponse.json({ error: error.message }, { status: error.status });
+    }
     return NextResponse.json(
       { error: getErrorMessage(error, "List failed") },
       { status: 500 },
@@ -126,6 +136,7 @@ export async function POST(request: Request) {
     if (session.role === "VIEWER" || session.role === "MEMBER") {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
+    const legalEntityId = requireCompanyId(session);
 
     const body = seriesCreateSchema.parse(await request.json());
     if (body.siteId) {
@@ -147,6 +158,7 @@ export async function POST(request: Request) {
         await tx.documentSeries.updateMany({
           where: {
             tenantId: session.tenantId,
+            legalEntityId,
             kind: body.kind,
             isDefault: true,
           },
@@ -156,6 +168,7 @@ export async function POST(request: Request) {
       const created = await tx.documentSeries.create({
         data: {
           tenantId: session.tenantId,
+          ...companyStamp(session),
           code: body.code,
           name: body.name,
           kind: body.kind,
@@ -220,6 +233,9 @@ export async function POST(request: Request) {
 
     return NextResponse.json({ item: mapSeriesItem(item) }, { status: 201 });
   } catch (error) {
+    if (isCompanyScopeError(error)) {
+      return NextResponse.json({ error: error.message }, { status: error.status });
+    }
     if (
       error instanceof Prisma.PrismaClientKnownRequestError &&
       error.code === "P2002"

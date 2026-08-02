@@ -4,6 +4,7 @@ import { prisma } from "@/server/db";
 import { getSession } from "@/platform/auth/session";
 import { getErrorMessage } from "@/shared/lib/safe";
 import { writeAuditEvent } from "@/platform/tenancy/audit";
+import { setMembershipCompanies } from "@/platform/tenancy/workspace";
 
 export const dynamic = "force-dynamic";
 
@@ -53,9 +54,29 @@ export async function GET(request: Request) {
       where: { userId },
       include: {
         tenant: { select: { id: true, name: true, slug: true } },
+        companies: { select: { legalEntityId: true } },
       },
       orderBy: { createdAt: "asc" },
     });
+
+    const tenantIds = [...new Set(memberships.map((m) => m.tenantId))];
+    const allCompanies = await prisma.legalEntity.findMany({
+      where: { tenantId: { in: tenantIds }, isActive: true },
+      orderBy: [{ isDefault: "desc" }, { code: "asc" }],
+      select: {
+        id: true,
+        tenantId: true,
+        code: true,
+        name: true,
+        isDefault: true,
+      },
+    });
+    const companiesByTenant = new Map<string, typeof allCompanies>();
+    for (const c of allCompanies) {
+      const list = companiesByTenant.get(c.tenantId) ?? [];
+      list.push(c);
+      companiesByTenant.set(c.tenantId, list);
+    }
 
     return NextResponse.json({
       manageableTenants: manageable.map((m) => ({
@@ -64,13 +85,24 @@ export async function GET(request: Request) {
         slug: m.tenant.slug,
         myRole: m.role,
       })),
-      memberships: memberships.map((m) => ({
-        id: m.id,
-        tenantId: m.tenantId,
-        role: m.role,
-        tenant: m.tenant,
-        canManage: manageableIds.has(m.tenantId),
-      })),
+      memberships: memberships.map((m) => {
+        const allowed = m.companies.map((c) => c.legalEntityId);
+        return {
+          id: m.id,
+          tenantId: m.tenantId,
+          role: m.role,
+          tenant: m.tenant,
+          canManage: manageableIds.has(m.tenantId),
+          /** null = όλες οι εταιρείες */
+          allowedCompanyIds: allowed.length ? allowed : null,
+          companies: (companiesByTenant.get(m.tenantId) ?? []).map((c) => ({
+            id: c.id,
+            code: c.code,
+            name: c.name,
+            isDefault: c.isDefault,
+          })),
+        };
+      }),
     });
   } catch (error) {
     return NextResponse.json(
@@ -92,6 +124,14 @@ const removeSchema = z.object({
   action: z.literal("remove"),
 });
 
+const setCompaniesSchema = z.object({
+  action: z.literal("setCompanies"),
+  userId: z.string().min(1),
+  tenantId: z.string().min(1),
+  /** null ή [] = όλες οι εταιρείες */
+  companyIds: z.array(z.string().min(1)).nullable(),
+});
+
 export async function POST(request: Request) {
   try {
     const session = await getSession();
@@ -99,6 +139,50 @@ export async function POST(request: Request) {
     if (denied) return denied;
 
     const raw = await request.json();
+
+    if (raw?.action === "setCompanies") {
+      const body = setCompaniesSchema.parse(raw);
+      const myMem = await prisma.membership.findUnique({
+        where: {
+          tenantId_userId: {
+            tenantId: body.tenantId,
+            userId: session!.sub,
+          },
+        },
+      });
+      if (!myMem || (myMem.role !== "OWNER" && myMem.role !== "ADMIN")) {
+        return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+      }
+      const target = await prisma.membership.findUnique({
+        where: {
+          tenantId_userId: {
+            tenantId: body.tenantId,
+            userId: body.userId,
+          },
+        },
+      });
+      if (!target) {
+        return NextResponse.json({ error: "Δεν βρέθηκε" }, { status: 404 });
+      }
+      const result = await setMembershipCompanies(prisma, {
+        membershipId: target.id,
+        tenantId: body.tenantId,
+        companyIds: body.companyIds,
+      });
+      await writeAuditEvent({
+        tenantId: body.tenantId,
+        userId: session!.sub,
+        action: "membership.companies.set",
+        entity: "user",
+        entityId: body.userId,
+        meta: { allowedCompanyIds: result.allowedCompanyIds },
+      });
+      return NextResponse.json({
+        ok: true,
+        allowedCompanyIds: result.allowedCompanyIds,
+      });
+    }
+
     if (raw?.action === "remove") {
       const body = removeSchema.parse(raw);
       const myMem = await prisma.membership.findUnique({
@@ -187,6 +271,7 @@ export async function POST(request: Request) {
       update: { role: body.role },
       include: {
         tenant: { select: { id: true, name: true, slug: true } },
+        companies: { select: { legalEntityId: true } },
       },
     });
 
@@ -199,6 +284,7 @@ export async function POST(request: Request) {
       meta: { role: body.role },
     });
 
+    const allowed = item.companies.map((c) => c.legalEntityId);
     return NextResponse.json({
       item: {
         id: item.id,
@@ -206,6 +292,7 @@ export async function POST(request: Request) {
         role: item.role,
         tenant: item.tenant,
         canManage: true,
+        allowedCompanyIds: allowed.length ? allowed : null,
       },
     });
   } catch (error) {

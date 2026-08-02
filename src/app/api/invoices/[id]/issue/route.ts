@@ -23,7 +23,13 @@ export async function POST(
 
     const { id } = await context.params;
     const invoice = await prisma.invoice.findFirst({
-      where: { id, tenantId: session.tenantId },
+      where: {
+        id,
+        tenantId: session.tenantId,
+        ...(session.legalEntityId
+          ? { legalEntityId: session.legalEntityId }
+          : {}),
+      },
       include: {
         series: {
           select: {
@@ -107,6 +113,7 @@ export async function POST(
         glCreditAccount: invoice.series?.glCreditAccount,
         glVatAccount: invoice.series?.glVatAccount,
         userId: session.sub,
+        legalEntityId: invoice.legalEntityId ?? session.legalEntityId,
       });
       journalId = journal?.id ?? null;
     } catch {

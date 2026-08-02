@@ -480,7 +480,9 @@ async function resolveSeries(
   targetKind: string,
   seriesId?: string | null,
   defaultSeriesId?: string | null,
+  legalEntityId?: string | null,
 ) {
+  const companyFilter = legalEntityId ? { legalEntityId } : {};
   if (seriesId) {
     const s = await db.documentSeries.findFirst({
       where: {
@@ -488,6 +490,7 @@ async function resolveSeries(
         tenantId,
         kind: targetKind as never,
         isActive: true,
+        ...companyFilter,
       },
     });
     if (s) return s;
@@ -499,11 +502,18 @@ async function resolveSeries(
         tenantId,
         kind: targetKind as never,
         isActive: true,
+        ...companyFilter,
       },
     });
     if (s) return s;
   }
-  return resolveDefaultSeries(db, tenantId, targetKind as never);
+  return resolveDefaultSeries(
+    db,
+    tenantId,
+    targetKind as never,
+    null,
+    legalEntityId,
+  );
 }
 
 export async function executeTransform(
@@ -537,12 +547,20 @@ export async function executeTransform(
   }
 
   const issueMode = ctx.issueMode ?? rule.issueMode;
+  const sourceLegalEntityId =
+    cov.raw &&
+    typeof cov.raw === "object" &&
+    "legalEntityId" in cov.raw &&
+    typeof (cov.raw as { legalEntityId?: unknown }).legalEntityId === "string"
+      ? (cov.raw as { legalEntityId: string }).legalEntityId
+      : null;
   const series = await resolveSeries(
     db,
     ctx.tenantId,
     rule.targetKind,
     ctx.seriesId,
     rule.defaultSeriesId,
+    sourceLegalEntityId,
   );
   if (!series && handlerKey !== "quote_to_order") {
     // quote_to_order also needs series
@@ -597,6 +615,7 @@ async function execQuoteToOrder(
   quote: {
     id: string;
     number: string;
+    legalEntityId: string;
     customerId: string;
     branchId: string | null;
     spaceId: string | null;
@@ -631,10 +650,12 @@ async function execQuoteToOrder(
       tenantId: ctx.tenantId,
       seriesId: series.id,
       kind: "SALES_ORDER",
+      legalEntityId: quote.legalEntityId,
     });
     const created = await tx.order.create({
       data: {
         tenantId: ctx.tenantId,
+        legalEntityId: quote.legalEntityId,
         customerId: quote.customerId,
         branchId: quote.branchId,
         spaceId: quote.spaceId,
@@ -685,6 +706,7 @@ async function execOrderToInvoice(
   order: {
     id: string;
     number: string;
+    legalEntityId: string;
     customerId: string;
     branchId: string | null;
     spaceId: string | null;
@@ -718,10 +740,12 @@ async function execOrderToInvoice(
       tenantId: ctx.tenantId,
       seriesId: series.id,
       kind: "SALES_INVOICE",
+      legalEntityId: order.legalEntityId,
     });
     const created = await tx.invoice.create({
       data: {
         tenantId: ctx.tenantId,
+        legalEntityId: order.legalEntityId,
         customerId: order.customerId,
         branchId: order.branchId,
         spaceId: order.spaceId,
@@ -786,6 +810,7 @@ async function execOrderToDelivery(
   order: {
     id: string;
     number: string;
+    legalEntityId: string;
     customerId: string;
     siteId: string | null;
     notes: string | null;
@@ -805,10 +830,12 @@ async function execOrderToDelivery(
       tenantId: ctx.tenantId,
       seriesId: series.id,
       kind: "DELIVERY_NOTE",
+      legalEntityId: order.legalEntityId,
     });
     const created = await tx.deliveryNote.create({
       data: {
         tenantId: ctx.tenantId,
+        legalEntityId: order.legalEntityId,
         customerId: order.customerId,
         orderId: order.id,
         seriesId: allocated.seriesId,
@@ -861,6 +888,7 @@ async function execInvoiceToCredit(
   source: {
     id: string;
     number: string;
+    legalEntityId: string;
     customerId: string;
     branchId: string | null;
     spaceId: string | null;
@@ -901,10 +929,12 @@ async function execInvoiceToCredit(
       tenantId: ctx.tenantId,
       seriesId: series.id,
       kind: "SALES_CREDIT",
+      legalEntityId: source.legalEntityId,
     });
     const created = await tx.invoice.create({
       data: {
         tenantId: ctx.tenantId,
+        legalEntityId: source.legalEntityId,
         customerId: source.customerId,
         branchId: source.branchId,
         spaceId: source.spaceId,
@@ -962,6 +992,7 @@ async function execInvoiceToDelivery(
   source: {
     id: string;
     number: string;
+    legalEntityId: string;
     customerId: string;
     siteId: string | null;
     orderId: string | null;
@@ -983,10 +1014,12 @@ async function execInvoiceToDelivery(
       tenantId: ctx.tenantId,
       seriesId: series.id,
       kind: "DELIVERY_NOTE",
+      legalEntityId: source.legalEntityId,
     });
     return tx.deliveryNote.create({
       data: {
         tenantId: ctx.tenantId,
+        legalEntityId: source.legalEntityId,
         customerId: source.customerId,
         invoiceId: source.id,
         orderId: source.orderId,
@@ -1037,6 +1070,7 @@ async function execDeliveryToInvoice(
   note: {
     id: string;
     number: string;
+    legalEntityId: string;
     customerId: string;
     siteId: string | null;
     orderId: string | null;
@@ -1097,10 +1131,12 @@ async function execDeliveryToInvoice(
       tenantId: ctx.tenantId,
       seriesId: series.id,
       kind: "SALES_INVOICE",
+      legalEntityId: note.legalEntityId,
     });
     const created = await tx.invoice.create({
       data: {
         tenantId: ctx.tenantId,
+        legalEntityId: note.legalEntityId,
         customerId: note.customerId,
         branchId: note.order?.branchId ?? null,
         spaceId: note.order?.spaceId ?? null,

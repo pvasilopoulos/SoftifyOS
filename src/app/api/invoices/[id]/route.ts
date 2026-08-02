@@ -1,6 +1,10 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/server/db";
 import { getSession } from "@/platform/auth/session";
+import {
+  isCompanyScopeError,
+  requireCompanyId,
+} from "@/platform/tenancy/company-scope";
 import { writeAuditEvent } from "@/platform/tenancy/audit";
 import { buildChangeMeta } from "@/platform/tenancy/audit-diff";
 import { getErrorMessage } from "@/shared/lib/safe";
@@ -27,10 +31,11 @@ export async function GET(
     if (!session) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
+    const legalEntityId = requireCompanyId(session);
 
     const { id } = await context.params;
     const invoice = await prisma.invoice.findFirst({
-      where: { id, tenantId: session.tenantId },
+      where: { id, tenantId: session.tenantId, legalEntityId },
       include: {
         customer: true,
         branch: true,
@@ -76,6 +81,9 @@ export async function GET(
       },
     });
   } catch (error) {
+    if (isCompanyScopeError(error)) {
+      return NextResponse.json({ error: error.message }, { status: error.status });
+    }
     return NextResponse.json(
       { error: getErrorMessage(error, "Load failed") },
       { status: 500 },
@@ -96,10 +104,11 @@ export async function PATCH(
     if (session.role === "VIEWER") {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
+    const legalEntityId = requireCompanyId(session);
 
     const { id } = await context.params;
     const invoice = await prisma.invoice.findFirst({
-      where: { id, tenantId: session.tenantId },
+      where: { id, tenantId: session.tenantId, legalEntityId },
       include: { series: true },
     });
     if (!invoice) {
@@ -285,6 +294,9 @@ export async function PATCH(
 
     return NextResponse.json({ item });
   } catch (error) {
+    if (isCompanyScopeError(error)) {
+      return NextResponse.json({ error: error.message }, { status: error.status });
+    }
     return NextResponse.json(
       { error: getErrorMessage(error, "Update failed") },
       { status: 400 },

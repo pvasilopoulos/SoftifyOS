@@ -56,6 +56,9 @@ export default async function DashboardPage() {
   }
 
   const tenantId = session.tenantId;
+  const companyWhere = session.legalEntityId
+    ? { legalEntityId: session.legalEntityId }
+    : {};
   const startOfMonth = new Date();
   startOfMonth.setDate(1);
   startOfMonth.setHours(0, 0, 0, 0);
@@ -79,7 +82,7 @@ export default async function DashboardPage() {
     }),
     loadArRows(prisma, tenantId),
     prisma.order.count({
-      where: { tenantId, createdAt: { gte: startOfDay } },
+      where: { tenantId, ...companyWhere, createdAt: { gte: startOfDay } },
     }),
     prisma.stockBalance.findMany({
       where: { tenantId },
@@ -89,6 +92,7 @@ export default async function DashboardPage() {
     prisma.invoice.findMany({
       where: {
         tenantId,
+        ...companyWhere,
         status: { in: ["ISSUED", "PARTIAL", "OVERDUE"] },
         dueAt: { lt: new Date() },
       },
@@ -106,10 +110,10 @@ export default async function DashboardPage() {
       },
     }),
     prisma.purchaseOrder.count({
-      where: { tenantId, status: "DRAFT" },
+      where: { tenantId, ...companyWhere, status: "DRAFT" },
     }),
     prisma.invoice.findMany({
-      where: { tenantId, status: { not: "DRAFT" } },
+      where: { tenantId, ...companyWhere, status: { not: "DRAFT" } },
       orderBy: [{ issuedAt: "desc" }, { createdAt: "desc" }],
       take: 5,
       include: { customer: { select: { name: true, code: true } } },

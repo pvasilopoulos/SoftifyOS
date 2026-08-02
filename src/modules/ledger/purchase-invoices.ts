@@ -8,9 +8,16 @@ import {
 
 type Db = PrismaClient | Prisma.TransactionClient;
 
-export async function listPurchaseInvoices(db: Db, tenantId: string) {
+export async function listPurchaseInvoices(
+  db: Db,
+  tenantId: string,
+  opts?: { legalEntityId?: string | null },
+) {
   return db.purchaseInvoice.findMany({
-    where: { tenantId },
+    where: {
+      tenantId,
+      ...(opts?.legalEntityId ? { legalEntityId: opts.legalEntityId } : {}),
+    },
     include: {
       supplier: { select: { id: true, code: true, name: true } },
       legalEntity: { select: { code: true, name: true } },

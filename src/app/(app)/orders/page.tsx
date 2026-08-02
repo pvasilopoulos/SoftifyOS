@@ -2,6 +2,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { Plus } from "lucide-react";
 import { getSession } from "@/platform/auth/session";
+import { requireCompanyId } from "@/platform/tenancy/company-scope";
 import { prisma } from "@/server/db";
 import { encodeCursor } from "@/shared/lib/cursor";
 import { PageHeader } from "@/shared/ui/page-header";
@@ -18,10 +19,10 @@ import { OrdersClient } from "./orders-client";
 export const metadata = { title: "Παραγγελίες" };
 export const dynamic = "force-dynamic";
 
-async function loadOrders(tenantId: string) {
+async function loadOrders(tenantId: string, legalEntityId: string) {
   const started = Date.now();
   const rows = await prisma.order.findMany({
-    where: { tenantId, kind: "SALES_ORDER" },
+    where: { tenantId, legalEntityId, kind: "SALES_ORDER" },
     orderBy: [{ createdAt: "desc" }, { id: "desc" }],
     take: 51,
     include: {
@@ -59,9 +60,10 @@ async function loadOrders(tenantId: string) {
 export default async function OrdersPage() {
   const session = await getSession();
   if (!session) redirect("/login");
+  const legalEntityId = requireCompanyId(session);
 
   const [first, listViews, customFields] = await Promise.all([
-    loadOrders(session.tenantId),
+    loadOrders(session.tenantId, legalEntityId),
     listEntityListViews(prisma, session.tenantId, "ORDERS", true),
     listCustomFields(prisma, session.tenantId, "ORDERS", true),
   ]);

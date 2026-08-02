@@ -2,6 +2,11 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/server/db";
 import { getSession } from "@/platform/auth/session";
+import {
+  companyStamp,
+  isCompanyScopeError,
+  requireCompanyId,
+} from "@/platform/tenancy/company-scope";
 import { writeAuditEvent } from "@/platform/tenancy/audit";
 import { getErrorMessage } from "@/shared/lib/safe";
 import { calcInvoiceTotals, roundMoney, toNumber } from "@/modules/sales/invoice-utils";
@@ -35,6 +40,7 @@ export async function POST(request: Request) {
     if (session.role === "VIEWER") {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
+    const legalEntityId = requireCompanyId(session);
 
     const body = posCheckoutSchema.parse(await request.json());
 
@@ -103,6 +109,7 @@ export async function POST(request: Request) {
             where: {
               id: body.seriesId,
               tenantId: session.tenantId,
+              legalEntityId,
               kind: "RETAIL_RECEIPT",
               isActive: true,
             },
@@ -113,6 +120,7 @@ export async function POST(request: Request) {
         session.tenantId,
         "RETAIL_RECEIPT",
         site.id,
+        legalEntityId,
       ));
 
     if (!series) {
@@ -306,11 +314,13 @@ export async function POST(request: Request) {
         tenantId: session.tenantId,
         seriesId: series.id,
         kind: "RETAIL_RECEIPT",
+        legalEntityId,
       });
 
       const invoice = await tx.invoice.create({
         data: {
           tenantId: session.tenantId,
+          ...companyStamp(session),
           customerId: customer.id,
           seriesId: allocated.seriesId,
           siteId: allocated.siteId ?? site.id,
@@ -454,6 +464,9 @@ export async function POST(request: Request) {
       { status: 201 },
     );
   } catch (error) {
+    if (isCompanyScopeError(error)) {
+      return NextResponse.json({ error: error.message }, { status: error.status });
+    }
     if (error instanceof z.ZodError) {
       return NextResponse.json({ error: "Μη έγκυρα δεδομένα POS" }, { status: 400 });
     }

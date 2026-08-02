@@ -10,6 +10,16 @@ async function main() {
   const tenant = await prisma.tenant.findUnique({ where: { slug: "akropolis" } });
   if (!tenant) throw new Error("Run npm run db:seed first");
 
+  const legalEntity =
+    (await prisma.legalEntity.findFirst({
+      where: { tenantId: tenant.id, code: "MAIN" },
+    })) ??
+    (await prisma.legalEntity.findFirst({
+      where: { tenantId: tenant.id },
+      orderBy: { code: "asc" },
+    }));
+  if (!legalEntity) throw new Error("No LegalEntity for tenant — run migrations/seed");
+
   const hq = await prisma.site.upsert({
     where: { tenantId_code: { tenantId: tenant.id, code: "HQ" } },
     update: { name: "Κεντρικά Αθήνα", kind: "BRANCH", isActive: true },
@@ -351,7 +361,13 @@ async function main() {
 
   for (const def of seriesDefs) {
     await prisma.documentSeries.upsert({
-      where: { tenantId_code: { tenantId: tenant.id, code: def.code } },
+      where: {
+        tenantId_legalEntityId_code: {
+          tenantId: tenant.id,
+          legalEntityId: legalEntity.id,
+          code: def.code,
+        },
+      },
       update: {
         // Do not touch nextNumber / lastYear — preserve live counters
         name: def.name,
@@ -374,6 +390,7 @@ async function main() {
       },
       create: {
         tenantId: tenant.id,
+        legalEntityId: legalEntity.id,
         code: def.code,
         name: def.name,
         kind: def.kind,

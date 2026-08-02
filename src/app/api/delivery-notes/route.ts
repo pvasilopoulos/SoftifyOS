@@ -2,6 +2,11 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/server/db";
 import { getSession } from "@/platform/auth/session";
+import {
+  companyStamp,
+  isCompanyScopeError,
+  requireCompanyId,
+} from "@/platform/tenancy/company-scope";
 import { writeAuditEvent } from "@/platform/tenancy/audit";
 import { getErrorMessage } from "@/shared/lib/safe";
 import { toNumber } from "@/modules/sales/invoice-utils";
@@ -82,10 +87,12 @@ export async function GET(request: NextRequest) {
     if (!session) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
+    const legalEntityId = requireCompanyId(session);
     const status = request.nextUrl.searchParams.get("status") || undefined;
     const items = await prisma.deliveryNote.findMany({
       where: {
         tenantId: session.tenantId,
+        legalEntityId,
         ...(status
           ? { status: status as "DRAFT" | "ISSUED" | "CANCELLED" }
           : {}),
@@ -107,6 +114,9 @@ export async function GET(request: NextRequest) {
     });
     return NextResponse.json({ items: items.map(serialize) });
   } catch (error) {
+    if (isCompanyScopeError(error)) {
+      return NextResponse.json({ error: error.message }, { status: error.status });
+    }
     return NextResponse.json(
       { error: getErrorMessage(error, "Load failed") },
       { status: 500 },
@@ -123,6 +133,7 @@ export async function POST(request: Request) {
     if (session.role === "VIEWER") {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
+    const legalEntityId = requireCompanyId(session);
 
     const body = createSchema.parse(await request.json());
     const customer = await prisma.customer.findFirst({
@@ -137,11 +148,13 @@ export async function POST(request: Request) {
         tx,
         session.tenantId,
         body.siteId,
+        legalEntityId,
       );
 
       const note = await tx.deliveryNote.create({
         data: {
           tenantId: session.tenantId,
+          ...companyStamp(session),
           customerId: body.customerId,
           siteId: body.siteId || allocated.siteId || null,
           seriesId: allocated.seriesId,
@@ -206,6 +219,9 @@ export async function POST(request: Request) {
       { status: 201 },
     );
   } catch (error) {
+    if (isCompanyScopeError(error)) {
+      return NextResponse.json({ error: error.message }, { status: error.status });
+    }
     if (error instanceof z.ZodError) {
       return NextResponse.json({ error: "Μη έγκυρα δεδομένα" }, { status: 400 });
     }

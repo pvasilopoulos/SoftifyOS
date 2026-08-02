@@ -22,6 +22,8 @@ export type MembershipWorkspace = {
   role: string;
   companies: CompanyOpt[];
   suggestedCompanyId: string | null;
+  /** null = όλες οι εταιρείες · αλλιώς περιορισμένο ACL */
+  allowedCompanyIds: string[] | null;
 };
 
 function asPrefs(raw: unknown): WorkspacePrefs {
@@ -35,6 +37,23 @@ export function readWorkspacePrefs(raw: unknown): WorkspacePrefs {
   return asPrefs(raw);
 }
 
+/**
+ * Allowed LegalEntity ids for a membership.
+ * null = unrestricted (όλες οι ενεργές εταιρείες του tenant).
+ */
+export async function getAllowedCompanyIds(
+  db: Db,
+  input: { membershipId: string; role: string },
+): Promise<string[] | null> {
+  // OWNER/ADMIN χωρίς ρητούς περιορισμούς βλέπουν όλες
+  const rows = await db.membershipCompany.findMany({
+    where: { membershipId: input.membershipId },
+    select: { legalEntityId: true },
+  });
+  if (rows.length === 0) return null;
+  return rows.map((r) => r.legalEntityId);
+}
+
 export async function resolveCompanyForTenant(
   db: Db,
   input: {
@@ -42,10 +61,12 @@ export async function resolveCompanyForTenant(
     tenantName: string;
     preferredCompanyId?: string | null;
     prefs?: WorkspacePrefs;
+    /** null/undefined = όλες · αλλιώς φίλτρο ACL */
+    allowedCompanyIds?: string[] | null;
   },
 ) {
   await ensureDefaultLegalEntity(db, input.tenantId, input.tenantName);
-  const companies = await db.legalEntity.findMany({
+  const all = await db.legalEntity.findMany({
     where: { tenantId: input.tenantId, isActive: true },
     orderBy: [{ isDefault: "desc" }, { code: "asc" }],
     select: {
@@ -56,6 +77,12 @@ export async function resolveCompanyForTenant(
       isDefault: true,
     },
   });
+
+  const allowed = input.allowedCompanyIds;
+  const companies =
+    allowed && allowed.length > 0
+      ? all.filter((c) => allowed.includes(c.id))
+      : all;
 
   const preferred =
     input.preferredCompanyId ||
@@ -68,13 +95,14 @@ export async function resolveCompanyForTenant(
     companies[0] ??
     null;
 
-  return { companies, company: chosen };
+  return { companies, company: chosen, allowedCompanyIds: allowed ?? null };
 }
 
 export async function buildMembershipWorkspaces(
   db: Db,
   input: {
     memberships: Array<{
+      id: string;
       tenantId: string;
       role: string;
       tenant: { id: string; slug: string; name: string };
@@ -86,10 +114,15 @@ export async function buildMembershipWorkspaces(
   const prefs = input.prefs ?? {};
   const rows: MembershipWorkspace[] = [];
   for (const m of input.memberships) {
+    const allowedCompanyIds = await getAllowedCompanyIds(db, {
+      membershipId: m.id,
+      role: m.role,
+    });
     const { companies, company } = await resolveCompanyForTenant(db, {
       tenantId: m.tenantId,
       tenantName: m.tenant.name,
       prefs,
+      allowedCompanyIds,
     });
     rows.push({
       tenantId: m.tenantId,
@@ -98,9 +131,9 @@ export async function buildMembershipWorkspaces(
       role: m.role,
       companies,
       suggestedCompanyId: company?.id ?? null,
+      allowedCompanyIds,
     });
   }
-  // Prefer last tenant first in UI
   if (input.lastTenantId) {
     rows.sort((a, b) => {
       if (a.tenantId === input.lastTenantId) return -1;
@@ -132,4 +165,40 @@ export async function persistWorkspaceChoice(
       workspacePrefs: { companies } as Prisma.InputJsonValue,
     },
   });
+}
+
+/** Replace membership company ACL. Empty/null companyIds = unrestricted. */
+export async function setMembershipCompanies(
+  db: Db,
+  input: {
+    membershipId: string;
+    tenantId: string;
+    companyIds: string[] | null;
+  },
+) {
+  await db.membershipCompany.deleteMany({
+    where: { membershipId: input.membershipId },
+  });
+  const ids = (input.companyIds ?? []).filter(Boolean);
+  if (ids.length === 0) return { allowedCompanyIds: null as string[] | null };
+
+  const valid = await db.legalEntity.findMany({
+    where: {
+      tenantId: input.tenantId,
+      id: { in: ids },
+      isActive: true,
+    },
+    select: { id: true },
+  });
+  if (valid.length === 0) {
+    return { allowedCompanyIds: null as string[] | null };
+  }
+  await db.membershipCompany.createMany({
+    data: valid.map((c) => ({
+      membershipId: input.membershipId,
+      legalEntityId: c.id,
+    })),
+    skipDuplicates: true,
+  });
+  return { allowedCompanyIds: valid.map((c) => c.id) };
 }

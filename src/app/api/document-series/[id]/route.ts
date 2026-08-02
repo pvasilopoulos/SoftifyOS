@@ -1,6 +1,10 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/server/db";
 import { getSession } from "@/platform/auth/session";
+import {
+  isCompanyScopeError,
+  requireCompanyId,
+} from "@/platform/tenancy/company-scope";
 import { writeAuditEvent } from "@/platform/tenancy/audit";
 import { getErrorMessage } from "@/shared/lib/safe";
 import { seriesUpdateSchema } from "@/modules/documents/schemas";
@@ -61,10 +65,11 @@ export async function PATCH(
     if (session.role === "VIEWER" || session.role === "MEMBER") {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
+    const legalEntityId = requireCompanyId(session);
 
     const { id } = await context.params;
     const existing = await prisma.documentSeries.findFirst({
-      where: { id, tenantId: session.tenantId },
+      where: { id, tenantId: session.tenantId, legalEntityId },
     });
     if (!existing) {
       return NextResponse.json({ error: "Δεν βρέθηκε" }, { status: 404 });
@@ -82,6 +87,7 @@ export async function PATCH(
         await tx.documentSeries.updateMany({
           where: {
             tenantId: session.tenantId,
+            legalEntityId,
             kind,
             isDefault: true,
             NOT: { id },
@@ -178,6 +184,9 @@ export async function PATCH(
       },
     });
   } catch (error) {
+    if (isCompanyScopeError(error)) {
+      return NextResponse.json({ error: error.message }, { status: error.status });
+    }
     return NextResponse.json(
       { error: getErrorMessage(error, "Update failed") },
       { status: 400 },

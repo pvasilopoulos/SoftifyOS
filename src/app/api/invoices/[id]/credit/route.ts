@@ -1,6 +1,11 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/server/db";
 import { getSession } from "@/platform/auth/session";
+import {
+  companyStamp,
+  isCompanyScopeError,
+  requireCompanyId,
+} from "@/platform/tenancy/company-scope";
 import { writeAuditEvent } from "@/platform/tenancy/audit";
 import { getErrorMessage } from "@/shared/lib/safe";
 import { calcInvoiceTotals, toNumber } from "@/modules/sales/invoice-utils";
@@ -28,6 +33,7 @@ export async function POST(
     if (session.role === "VIEWER") {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
+    const legalEntityId = requireCompanyId(session);
 
     const { id } = await context.params;
     const body = creditFromInvoiceSchema.parse(
@@ -38,6 +44,7 @@ export async function POST(
       where: {
         id,
         tenantId: session.tenantId,
+        legalEntityId,
         kind: { in: ["SALES_INVOICE", "RETAIL_RECEIPT"] },
       },
       include: {
@@ -91,12 +98,19 @@ export async function POST(
             where: {
               id: body.seriesId,
               tenantId: session.tenantId,
+              legalEntityId,
               kind: "SALES_CREDIT",
               isActive: true,
             },
           })
         : null) ??
-      (await resolveDefaultSeries(prisma, session.tenantId, "SALES_CREDIT"));
+      (await resolveDefaultSeries(
+        prisma,
+        session.tenantId,
+        "SALES_CREDIT",
+        null,
+        legalEntityId,
+      ));
 
     if (!series) {
       return NextResponse.json(
@@ -132,11 +146,13 @@ export async function POST(
         tenantId: session.tenantId,
         seriesId: series.id,
         kind: "SALES_CREDIT",
+        legalEntityId,
       });
 
       return tx.invoice.create({
         data: {
           tenantId: session.tenantId,
+          ...companyStamp(session),
           customerId: source.customerId,
           branchId: source.branchId,
           spaceId: source.spaceId,
@@ -203,6 +219,9 @@ export async function POST(
       { status: 201 },
     );
   } catch (error) {
+    if (isCompanyScopeError(error)) {
+      return NextResponse.json({ error: error.message }, { status: error.status });
+    }
     const message = getErrorMessage(error, "Credit create failed");
     const status =
       message.includes("γραμμ") || message.includes("ποσότ") ? 400 : 500;

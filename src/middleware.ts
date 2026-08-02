@@ -58,6 +58,9 @@ export async function middleware(request: NextRequest) {
     response.headers.set("x-softify-tenant", session.tenantId);
     response.headers.set("x-softify-user", session.sub);
     response.headers.set("x-softify-role", session.role);
+    if (session.legalEntityId) {
+      response.headers.set("x-softify-company", session.legalEntityId);
+    }
   }
   return response;
 }

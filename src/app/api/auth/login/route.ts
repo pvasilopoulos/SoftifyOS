@@ -113,6 +113,7 @@ export async function POST(request: Request) {
       role: membership.role,
       legalEntityId: body.legalEntityId,
       existingPrefs: user.workspacePrefs,
+      membershipId: membership.id,
     });
 
     await writeAuditEvent({

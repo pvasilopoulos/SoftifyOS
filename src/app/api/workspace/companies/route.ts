@@ -2,10 +2,11 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/server/db";
 import { getSession } from "@/platform/auth/session";
 import { getErrorMessage } from "@/shared/lib/safe";
+import { ensureDefaultLegalEntity } from "@/modules/ledger/controlling";
 import {
-  ensureDefaultLegalEntity,
-  listLegalEntities,
-} from "@/modules/ledger/controlling";
+  getAllowedCompanyIds,
+  resolveCompanyForTenant,
+} from "@/platform/tenancy/workspace";
 
 export const dynamic = "force-dynamic";
 
@@ -20,18 +21,40 @@ export async function GET() {
       session.tenantId,
       session.tenantName,
     );
-    const items = await listLegalEntities(prisma, session.tenantId);
+
+    const membership = await prisma.membership.findUnique({
+      where: {
+        tenantId_userId: {
+          tenantId: session.tenantId,
+          userId: session.sub,
+        },
+      },
+      select: { id: true, role: true },
+    });
+
+    const allowedCompanyIds = membership
+      ? await getAllowedCompanyIds(prisma, {
+          membershipId: membership.id,
+          role: membership.role,
+        })
+      : null;
+
+    const { companies } = await resolveCompanyForTenant(prisma, {
+      tenantId: session.tenantId,
+      tenantName: session.tenantName,
+      allowedCompanyIds,
+    });
+
     return NextResponse.json({
-      items: items
-        .filter((c) => c.isActive)
-        .map((c) => ({
-          id: c.id,
-          code: c.code,
-          name: c.name,
-          vatNumber: c.vatNumber,
-          isDefault: c.isDefault,
-        })),
+      items: companies.map((c) => ({
+        id: c.id,
+        code: c.code,
+        name: c.name,
+        vatNumber: c.vatNumber,
+        isDefault: c.isDefault,
+      })),
       currentCompanyId: session.legalEntityId,
+      restricted: allowedCompanyIds !== null,
     });
   } catch (error) {
     return NextResponse.json(

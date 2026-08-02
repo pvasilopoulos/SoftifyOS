@@ -109,6 +109,13 @@ export function UsersSettingsClient({
       role: SystemRole;
       tenant: { id: string; name: string; slug: string };
       canManage: boolean;
+      allowedCompanyIds: string[] | null;
+      companies: Array<{
+        id: string;
+        code: string;
+        name: string;
+        isDefault: boolean;
+      }>;
     }>;
   } | null>(null);
   const [addTenantId, setAddTenantId] = useState("");
@@ -596,92 +603,168 @@ export function UsersSettingsClient({
                   <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">
                     A · Πρόσβαση σε οργανισμούς (Tenants)
                   </p>
-                  <ul className="space-y-1.5">
+                  <ul className="space-y-2">
                     {orgAccess.memberships.map((m) => (
                       <li
                         key={m.id}
-                        className="flex items-center justify-between gap-2 rounded-lg bg-slate-50 px-2.5 py-2 text-xs"
+                        className="space-y-2 rounded-lg bg-slate-50 px-2.5 py-2 text-xs"
                       >
-                        <span className="min-w-0">
-                          <span className="block truncate font-medium text-ink-900">
-                            {m.tenant.name}
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="min-w-0">
+                            <span className="block truncate font-medium text-ink-900">
+                              {m.tenant.name}
+                            </span>
+                            <span className="text-slate-500">
+                              {m.tenant.slug} · {m.role}
+                            </span>
                           </span>
-                          <span className="text-slate-500">
-                            {m.tenant.slug} · {m.role}
-                          </span>
-                        </span>
-                        {m.canManage && m.tenantId !== undefined ? (
-                          <div className="flex items-center gap-1">
-                            <select
-                              className="h-7 rounded-md border border-slate-200 bg-white px-1 text-[11px]"
-                              value={m.role}
-                              disabled={pending}
-                              onChange={(e) => {
-                                const role = e.target.value as SystemRole;
-                                startTransition(async () => {
-                                  const res = await fetch(
-                                    "/api/settings/users/memberships",
-                                    {
-                                      method: "POST",
-                                      headers: {
-                                        "Content-Type": "application/json",
+                          {m.canManage ? (
+                            <div className="flex items-center gap-1">
+                              <select
+                                className="h-7 rounded-md border border-slate-200 bg-white px-1 text-[11px]"
+                                value={m.role}
+                                disabled={pending}
+                                onChange={(e) => {
+                                  const role = e.target.value as SystemRole;
+                                  startTransition(async () => {
+                                    const res = await fetch(
+                                      "/api/settings/users/memberships",
+                                      {
+                                        method: "POST",
+                                        headers: {
+                                          "Content-Type": "application/json",
+                                        },
+                                        body: JSON.stringify({
+                                          userId: editingRow.user.id,
+                                          tenantId: m.tenantId,
+                                          role,
+                                        }),
                                       },
-                                      body: JSON.stringify({
-                                        userId: editingRow.user.id,
-                                        tenantId: m.tenantId,
-                                        role,
-                                      }),
-                                    },
-                                  );
-                                  if (!res.ok) {
-                                    const data = await res.json();
-                                    setError(data.error || "Αποτυχία");
-                                    return;
-                                  }
-                                  await loadOrgAccess(editingRow.user.id);
-                                  await refresh();
-                                });
-                              }}
-                            >
-                              {SYSTEM_ROLES.map((r) => (
-                                <option key={r} value={r}>
-                                  {r}
-                                </option>
-                              ))}
-                            </select>
-                            <button
-                              type="button"
-                              className="rounded-md px-1.5 py-1 text-rose-600 hover:bg-rose-50"
-                              disabled={pending}
-                              title="Αφαίρεση από tenant"
-                              onClick={() => {
-                                startTransition(async () => {
-                                  const res = await fetch(
-                                    "/api/settings/users/memberships",
-                                    {
-                                      method: "POST",
-                                      headers: {
-                                        "Content-Type": "application/json",
+                                    );
+                                    if (!res.ok) {
+                                      const data = await res.json();
+                                      setError(data.error || "Αποτυχία");
+                                      return;
+                                    }
+                                    await loadOrgAccess(editingRow.user.id);
+                                    await refresh();
+                                  });
+                                }}
+                              >
+                                {SYSTEM_ROLES.map((r) => (
+                                  <option key={r} value={r}>
+                                    {r}
+                                  </option>
+                                ))}
+                              </select>
+                              <button
+                                type="button"
+                                className="rounded-md px-1.5 py-1 text-rose-600 hover:bg-rose-50"
+                                disabled={pending}
+                                title="Αφαίρεση από tenant"
+                                onClick={() => {
+                                  startTransition(async () => {
+                                    const res = await fetch(
+                                      "/api/settings/users/memberships",
+                                      {
+                                        method: "POST",
+                                        headers: {
+                                          "Content-Type": "application/json",
+                                        },
+                                        body: JSON.stringify({
+                                          action: "remove",
+                                          userId: editingRow.user.id,
+                                          tenantId: m.tenantId,
+                                        }),
                                       },
-                                      body: JSON.stringify({
-                                        action: "remove",
-                                        userId: editingRow.user.id,
-                                        tenantId: m.tenantId,
-                                      }),
-                                    },
-                                  );
-                                  if (!res.ok) {
-                                    const data = await res.json();
-                                    setError(data.error || "Αποτυχία");
-                                    return;
-                                  }
-                                  await loadOrgAccess(editingRow.user.id);
-                                  await refresh();
-                                });
-                              }}
-                            >
-                              <X size={14} />
-                            </button>
+                                    );
+                                    if (!res.ok) {
+                                      const data = await res.json();
+                                      setError(data.error || "Αποτυχία");
+                                      return;
+                                    }
+                                    await loadOrgAccess(editingRow.user.id);
+                                    await refresh();
+                                  });
+                                }}
+                              >
+                                <X size={14} />
+                              </button>
+                            </div>
+                          ) : null}
+                        </div>
+                        {m.canManage && m.companies.length > 0 ? (
+                          <div className="rounded-md border border-slate-200 bg-white px-2 py-1.5">
+                            <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+                              B · Εταιρείες (κενό = όλες)
+                            </p>
+                            <div className="flex flex-wrap gap-x-3 gap-y-1">
+                              {m.companies.map((c) => {
+                                const checked =
+                                  m.allowedCompanyIds === null
+                                    ? false
+                                    : m.allowedCompanyIds.includes(c.id);
+                                return (
+                                  <label
+                                    key={c.id}
+                                    className="inline-flex items-center gap-1 text-[11px] text-slate-700"
+                                  >
+                                    <input
+                                      type="checkbox"
+                                      className="rounded border-slate-300"
+                                      checked={checked}
+                                      disabled={pending}
+                                      onChange={(e) => {
+                                        const next = new Set(
+                                          m.allowedCompanyIds ?? [],
+                                        );
+                                        if (e.target.checked) next.add(c.id);
+                                        else next.delete(c.id);
+                                        const companyIds =
+                                          next.size === 0
+                                            ? null
+                                            : [...next];
+                                        startTransition(async () => {
+                                          const res = await fetch(
+                                            "/api/settings/users/memberships",
+                                            {
+                                              method: "POST",
+                                              headers: {
+                                                "Content-Type":
+                                                  "application/json",
+                                              },
+                                              body: JSON.stringify({
+                                                action: "setCompanies",
+                                                userId: editingRow.user.id,
+                                                tenantId: m.tenantId,
+                                                companyIds,
+                                              }),
+                                            },
+                                          );
+                                          if (!res.ok) {
+                                            const data = await res.json();
+                                            setError(data.error || "Αποτυχία");
+                                            return;
+                                          }
+                                          await loadOrgAccess(
+                                            editingRow.user.id,
+                                          );
+                                        });
+                                      }}
+                                    />
+                                    <span>
+                                      {c.code}
+                                      {c.isDefault ? " ★" : ""}
+                                    </span>
+                                  </label>
+                                );
+                              })}
+                            </div>
+                            <p className="mt-1 text-[10px] text-slate-400">
+                              {m.allowedCompanyIds === null
+                                ? "Πρόσβαση σε όλες τις εταιρείες"
+                                : `Περιορισμός σε ${m.allowedCompanyIds.length} εταιρείες`}
+                            </p>
                           </div>
                         ) : null}
                       </li>

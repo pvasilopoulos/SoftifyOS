@@ -46,23 +46,31 @@ export async function allocatePurchaseOrderNumber(
   db: Db,
   tenantId: string,
   siteId?: string | null,
+  legalEntityId?: string | null,
 ) {
   const series = await resolveDefaultSeries(
     db,
     tenantId,
     "PURCHASE_ORDER",
     siteId,
+    legalEntityId,
   );
   if (series) {
     return allocateFromSeries(db, {
       tenantId,
       seriesId: series.id,
       kind: "PURCHASE_ORDER",
+      legalEntityId,
     });
   }
   // Fallback without series
   const year = new Date().getFullYear();
-  const count = await db.purchaseOrder.count({ where: { tenantId } });
+  const count = await db.purchaseOrder.count({
+    where: {
+      tenantId,
+      ...(legalEntityId ? { legalEntityId } : {}),
+    },
+  });
   const number = `PO-${year}-${String(count + 1).padStart(5, "0")}`;
   return { number, seriesId: null as string | null, siteId: siteId ?? null };
 }

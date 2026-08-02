@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
 import { getSession } from "@/platform/auth/session";
+import { requireCompanyId } from "@/platform/tenancy/company-scope";
 import { prisma } from "@/server/db";
 import { previewNextNumber } from "@/modules/documents/series";
 import { mapSeriesPaymentLinks } from "@/modules/documents/series-payments";
@@ -17,6 +18,7 @@ export const dynamic = "force-dynamic";
 export default async function SeriesSettingsPage() {
   const session = await getSession();
   if (!session) redirect("/login");
+  const legalEntityId = requireCompanyId(session);
 
   await Promise.all([
     ensurePaymentMethods(prisma, session.tenantId),
@@ -29,7 +31,7 @@ export default async function SeriesSettingsPage() {
       orderBy: [{ kind: "asc" }, { code: "asc" }],
     }),
     prisma.documentSeries.findMany({
-      where: { tenantId: session.tenantId },
+      where: { tenantId: session.tenantId, legalEntityId },
       orderBy: [{ kind: "asc" }, { code: "asc" }],
       include: {
         site: { select: { id: true, code: true, name: true, kind: true } },

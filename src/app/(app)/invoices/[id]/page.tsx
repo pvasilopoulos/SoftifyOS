@@ -1,5 +1,6 @@
 import { notFound, redirect } from "next/navigation";
 import { getSession } from "@/platform/auth/session";
+import { requireCompanyId } from "@/platform/tenancy/company-scope";
 import { prisma } from "@/server/db";
 import { invoiceKindLabel } from "@/modules/documents/series";
 import { toNumber } from "@/modules/sales/invoice-utils";
@@ -30,10 +31,11 @@ export default async function InvoiceDetailPage({
 }) {
   const session = await getSession();
   if (!session) redirect("/login");
+  const legalEntityId = requireCompanyId(session);
 
   const { id } = await params;
   const invoice = await prisma.invoice.findFirst({
-    where: { id, tenantId: session.tenantId },
+    where: { id, tenantId: session.tenantId, legalEntityId },
     include: {
       customer: {
         select: {

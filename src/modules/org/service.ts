@@ -250,12 +250,16 @@ export async function deleteLegalEntity(
     throw new LedgerError("Η προεπιλεγμένη εταιρεία δεν διαγράφεται", 409);
   }
 
-  const [journalLines, assets, purchases] = await Promise.all([
-    db.journalLine.count({ where: { legalEntityId: existing.id } }),
-    db.fixedAsset.count({ where: { legalEntityId: existing.id } }),
-    db.purchaseInvoice.count({ where: { legalEntityId: existing.id } }),
-  ]);
-  if (journalLines + assets + purchases > 0) {
+  const [journalLines, assets, purchases, invoices, orders, series] =
+    await Promise.all([
+      db.journalLine.count({ where: { legalEntityId: existing.id } }),
+      db.fixedAsset.count({ where: { legalEntityId: existing.id } }),
+      db.purchaseInvoice.count({ where: { legalEntityId: existing.id } }),
+      db.invoice.count({ where: { legalEntityId: existing.id } }),
+      db.order.count({ where: { legalEntityId: existing.id } }),
+      db.documentSeries.count({ where: { legalEntityId: existing.id } }),
+    ]);
+  if (journalLines + assets + purchases + invoices + orders + series > 0) {
     return db.legalEntity.update({
       where: { id: existing.id },
       data: { isActive: false },

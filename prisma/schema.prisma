@@ -184,12 +184,29 @@ model Membership {
   user    User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   appRole AppRole? @relation(fields: [appRoleId], references: [id], onDelete: SetNull)
   groups  UserGroupMember[]
+  /// Κενό = όλες οι εταιρείες του tenant · αλλιώς μόνο αυτές
+  companies MembershipCompany[]
 
   @@unique([tenantId, userId])
   @@index([userId])
   @@index([tenantId, role])
   @@index([tenantId, appRoleId])
   @@map("memberships")
+}
+
+/// B — προαιρετικός περιορισμός membership σε συγκεκριμένες LegalEntities
+model MembershipCompany {
+  id            String   @id @default(cuid())
+  membershipId  String
+  legalEntityId String
+  createdAt     DateTime @default(now())
+
+  membership  Membership  @relation(fields: [membershipId], references: [id], onDelete: Cascade)
+  legalEntity LegalEntity @relation(fields: [legalEntityId], references: [id], onDelete: Cascade)
+
+  @@unique([membershipId, legalEntityId])
+  @@index([legalEntityId])
+  @@map("membership_companies")
 }
 
 model AuditEvent {
@@ -594,31 +611,33 @@ model Supplier {
 
 /// Παραγγελία αγοράς
 model PurchaseOrder {
-  id         String              @id @default(cuid())
-  tenantId   String
-  supplierId String
-  siteId     String?
-  seriesId   String?
-  number     String
-  status     PurchaseOrderStatus @default(DRAFT)
-  orderedAt  DateTime            @default(now())
-  currency   String              @default("EUR")
-  subtotal   Decimal             @default(0) @db.Decimal(14, 2)
-  vatAmount  Decimal             @default(0) @db.Decimal(14, 2)
-  total      Decimal             @default(0) @db.Decimal(14, 2)
-  notes      String?
-  createdAt  DateTime            @default(now())
-  updatedAt  DateTime            @updatedAt
+  id            String              @id @default(cuid())
+  tenantId      String
+  legalEntityId String
+  supplierId    String
+  siteId        String?
+  seriesId      String?
+  number        String
+  status        PurchaseOrderStatus @default(DRAFT)
+  orderedAt     DateTime            @default(now())
+  currency      String              @default("EUR")
+  subtotal      Decimal             @default(0) @db.Decimal(14, 2)
+  vatAmount     Decimal             @default(0) @db.Decimal(14, 2)
+  total         Decimal             @default(0) @db.Decimal(14, 2)
+  notes         String?
+  createdAt     DateTime            @default(now())
+  updatedAt     DateTime            @updatedAt
 
-  tenant   Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  supplier Supplier            @relation(fields: [supplierId], references: [id], onDelete: Restrict)
-  site     Site?               @relation(fields: [siteId], references: [id], onDelete: SetNull)
-  series   DocumentSeries?     @relation(fields: [seriesId], references: [id], onDelete: SetNull)
-  lines    PurchaseOrderLine[]
-  payments PurchasePayment[]
+  tenant      Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  legalEntity LegalEntity         @relation(fields: [legalEntityId], references: [id], onDelete: Restrict)
+  supplier    Supplier            @relation(fields: [supplierId], references: [id], onDelete: Restrict)
+  site        Site?               @relation(fields: [siteId], references: [id], onDelete: SetNull)
+  series      DocumentSeries?     @relation(fields: [seriesId], references: [id], onDelete: SetNull)
+  lines       PurchaseOrderLine[]
+  payments    PurchasePayment[]
 
-  @@unique([tenantId, number])
-  @@index([tenantId, status, orderedAt(sort: Desc)])
+  @@unique([tenantId, legalEntityId, number])
+  @@index([tenantId, legalEntityId, status, orderedAt(sort: Desc)])
   @@index([tenantId, supplierId, orderedAt(sort: Desc)])
   @@index([tenantId, createdAt(sort: Desc), id(sort: Desc)])
   @@map("purchase_orders")
@@ -655,6 +674,7 @@ enum DeliveryNoteStatus {
 model DeliveryNote {
   id              String             @id @default(cuid())
   tenantId        String
+  legalEntityId   String
   customerId      String
   siteId          String?
   seriesId        String?
@@ -668,16 +688,17 @@ model DeliveryNote {
   createdAt       DateTime           @default(now())
   updatedAt       DateTime           @updatedAt
 
-  tenant   Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  customer Customer           @relation(fields: [customerId], references: [id], onDelete: Restrict)
-  site     Site?              @relation(fields: [siteId], references: [id], onDelete: SetNull)
-  series   DocumentSeries?    @relation(fields: [seriesId], references: [id], onDelete: SetNull)
-  invoice  Invoice?           @relation(fields: [invoiceId], references: [id], onDelete: SetNull)
-  order    Order?             @relation(fields: [orderId], references: [id], onDelete: SetNull)
-  lines    DeliveryNoteLine[]
+  tenant      Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  legalEntity LegalEntity        @relation(fields: [legalEntityId], references: [id], onDelete: Restrict)
+  customer    Customer           @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  site        Site?              @relation(fields: [siteId], references: [id], onDelete: SetNull)
+  series      DocumentSeries?    @relation(fields: [seriesId], references: [id], onDelete: SetNull)
+  invoice     Invoice?           @relation(fields: [invoiceId], references: [id], onDelete: SetNull)
+  order       Order?             @relation(fields: [orderId], references: [id], onDelete: SetNull)
+  lines       DeliveryNoteLine[]
 
-  @@unique([tenantId, number])
-  @@index([tenantId, status, issuedAt(sort: Desc)])
+  @@unique([tenantId, legalEntityId, number])
+  @@index([tenantId, legalEntityId, status, issuedAt(sort: Desc)])
   @@index([tenantId, customerId, createdAt(sort: Desc)])
   @@index([tenantId, createdAt(sort: Desc), id(sort: Desc)])
   @@index([tenantId, orderId])
@@ -1660,6 +1681,7 @@ enum InvoiceKind {
 model Invoice {
   id                String        @id @default(cuid())
   tenantId          String
+  legalEntityId     String
   customerId        String
   branchId          String?
   spaceId           String?
@@ -1684,6 +1706,7 @@ model Invoice {
   updatedAt         DateTime      @updatedAt
 
   tenant          Tenant               @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  legalEntity     LegalEntity          @relation(fields: [legalEntityId], references: [id], onDelete: Restrict)
   statusOption    InvoiceStatusOption? @relation(fields: [statusOptionId], references: [id], onDelete: SetNull)
   customer        Customer             @relation(fields: [customerId], references: [id], onDelete: Restrict)
   branch          Branch?              @relation(fields: [branchId], references: [id], onDelete: SetNull)
@@ -1697,8 +1720,8 @@ model Invoice {
   payments        InvoicePayment[]
   deliveryNotes   DeliveryNote[]
 
-  @@unique([tenantId, number])
-  @@index([tenantId, status, issuedAt(sort: Desc)])
+  @@unique([tenantId, legalEntityId, number])
+  @@index([tenantId, legalEntityId, status, issuedAt(sort: Desc)])
   @@index([tenantId, customerId, issuedAt(sort: Desc)])
   @@index([tenantId, createdAt(sort: Desc), id(sort: Desc)])
   @@index([tenantId, dueAt, status])
@@ -1812,6 +1835,7 @@ enum OrderKind {
 model Order {
   id            String      @id @default(cuid())
   tenantId      String
+  legalEntityId String
   customerId    String
   branchId      String?
   spaceId       String?
@@ -1833,6 +1857,7 @@ model Order {
   updatedAt     DateTime    @updatedAt
 
   tenant       Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  legalEntity  LegalEntity        @relation(fields: [legalEntityId], references: [id], onDelete: Restrict)
   statusOption OrderStatusOption? @relation(fields: [statusOptionId], references: [id], onDelete: SetNull)
   customer     Customer           @relation(fields: [customerId], references: [id], onDelete: Restrict)
   branch       Branch?            @relation(fields: [branchId], references: [id], onDelete: SetNull)
@@ -1845,8 +1870,8 @@ model Order {
   invoices      Invoice[]
   deliveryNotes DeliveryNote[]
 
-  @@unique([tenantId, number])
-  @@index([tenantId, status, orderedAt(sort: Desc)])
+  @@unique([tenantId, legalEntityId, number])
+  @@index([tenantId, legalEntityId, status, orderedAt(sort: Desc)])
   @@index([tenantId, customerId, orderedAt(sort: Desc)])
   @@index([tenantId, createdAt(sort: Desc), id(sort: Desc)])
   @@index([tenantId, seriesId])
@@ -1968,6 +1993,7 @@ enum InventoryEffect {
 model DocumentSeries {
   id                   String            @id @default(cuid())
   tenantId             String
+  legalEntityId        String
   code                 String
   name                 String
   kind                 DocumentKind
@@ -1993,6 +2019,7 @@ model DocumentSeries {
   updatedAt            DateTime          @updatedAt
 
   tenant         Tenant                        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  legalEntity    LegalEntity                   @relation(fields: [legalEntityId], references: [id], onDelete: Restrict)
   site           Site?                         @relation(fields: [siteId], references: [id], onDelete: SetNull)
   invoices       Invoice[]
   orders         Order[]
@@ -2002,8 +2029,8 @@ model DocumentSeries {
   printForms     DocumentSeriesPrintForm[]
   transformRules DocumentTransformRule[]
 
-  @@unique([tenantId, code])
-  @@index([tenantId, kind, isActive])
+  @@unique([tenantId, legalEntityId, code])
+  @@index([tenantId, legalEntityId, kind, isActive])
   @@index([tenantId, siteId, kind])
   @@map("document_series")
 }
@@ -2558,12 +2585,19 @@ model LegalEntity {
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
 
-  tenant  Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  lines   JournalLine[]
-  assets  FixedAsset[]
+  tenant           Tenant               @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  lines            JournalLine[]
+  journals         JournalEntry[]
+  assets           FixedAsset[]
   purchaseInvoices PurchaseInvoice[]
-  icMatchesA IntercompanyMatch[] @relation("IcEntityA")
-  icMatchesB IntercompanyMatch[] @relation("IcEntityB")
+  invoices         Invoice[]
+  orders           Order[]
+  deliveryNotes    DeliveryNote[]
+  purchaseOrders   PurchaseOrder[]
+  documentSeries   DocumentSeries[]
+  membershipAccess MembershipCompany[]
+  icMatchesA       IntercompanyMatch[]  @relation("IcEntityA")
+  icMatchesB       IntercompanyMatch[]  @relation("IcEntityB")
 
   @@unique([tenantId, code])
   @@index([tenantId, isActive])
@@ -2617,6 +2651,7 @@ model ParallelLedger {
 model JournalEntry {
   id               String        @id @default(cuid())
   tenantId         String
+  legalEntityId    String?
   number           String
   status           JournalStatus @default(DRAFT)
   description      String?
@@ -2634,6 +2669,7 @@ model JournalEntry {
   updatedAt        DateTime      @updatedAt
 
   tenant         Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  legalEntity    LegalEntity?    @relation(fields: [legalEntityId], references: [id], onDelete: SetNull)
   fiscalPeriod   FiscalPeriod?   @relation(fields: [fiscalPeriodId], references: [id], onDelete: SetNull)
   parallelLedger ParallelLedger? @relation(fields: [parallelLedgerId], references: [id], onDelete: SetNull)
   reverses       JournalEntry?   @relation("JournalReversal", fields: [reversesId], references: [id], onDelete: SetNull)
@@ -2648,6 +2684,7 @@ model JournalEntry {
   @@index([tenantId, sourceType, sourceId])
   @@index([tenantId, entryDate])
   @@index([tenantId, parallelLedgerId])
+  @@index([tenantId, legalEntityId])
   @@map("journal_entries")
 }
 

@@ -164,7 +164,10 @@ async function resolveParallelLedgerId(
   return def?.id ?? null;
 }
 
-function normalizeLines(lines: JournalLineInput[]) {
+function normalizeLines(
+  lines: JournalLineInput[],
+  defaultLegalEntityId?: string | null,
+) {
   const normalized = lines
     .map((l) => ({
       glAccountId: l.glAccountId,
@@ -172,7 +175,7 @@ function normalizeLines(lines: JournalLineInput[]) {
       credit: round2(Math.max(0, l.credit ?? 0)),
       memo: l.memo ?? null,
       costCenterId: l.costCenterId ?? null,
-      legalEntityId: l.legalEntityId ?? null,
+      legalEntityId: l.legalEntityId ?? defaultLegalEntityId ?? null,
     }))
     .filter((l) => l.debit > 0 || l.credit > 0);
 
@@ -238,10 +241,11 @@ export async function createJournal(
     isOpening?: boolean;
     post?: boolean;
     parallelLedgerId?: string | null;
+    legalEntityId?: string | null;
     lines: JournalLineInput[];
   },
 ) {
-  const lines = normalizeLines(input.lines);
+  const lines = normalizeLines(input.lines, input.legalEntityId);
   await assertPostableAccounts(db, input.tenantId, lines);
 
   const entryDate = input.entryDate ?? new Date();
@@ -258,6 +262,7 @@ export async function createJournal(
   return db.journalEntry.create({
     data: {
       tenantId: input.tenantId,
+      legalEntityId: input.legalEntityId ?? null,
       number,
       status: post ? "POSTED" : "DRAFT",
       description: input.description ?? null,
@@ -298,6 +303,7 @@ export async function createAndPostJournal(
     entryDate?: Date | null;
     isOpening?: boolean;
     parallelLedgerId?: string | null;
+    legalEntityId?: string | null;
     lines: JournalLineInput[];
   },
 ) {
@@ -382,13 +388,14 @@ export async function reverseJournal(
     sourceType: "journal.reverse",
     sourceId: original.id,
     createdByUserId: input.createdByUserId,
+    legalEntityId: original.legalEntityId,
     lines: original.lines.map((l) => ({
       glAccountId: l.glAccountId,
       debit: Number(l.credit),
       credit: Number(l.debit),
       memo: l.memo,
       costCenterId: l.costCenterId,
-      legalEntityId: l.legalEntityId,
+      legalEntityId: l.legalEntityId ?? original.legalEntityId,
     })),
   });
 
@@ -447,6 +454,7 @@ export async function tryPostInvoiceIssue(
     glCreditAccount?: string | null;
     glVatAccount?: string | null;
     userId?: string | null;
+    legalEntityId?: string | null;
   },
 ) {
   const existing = await findPostedBySource(
@@ -468,14 +476,25 @@ export async function tryPostInvoiceIssue(
 
   const net = round2(input.total - input.vatAmount);
   const lines: JournalLineInput[] = [
-    { glAccountId: debit.id, debit: input.total, memo: "Πελάτες" },
-    { glAccountId: credit.id, credit: net, memo: "Πωλήσεις" },
+    {
+      glAccountId: debit.id,
+      debit: input.total,
+      memo: "Πελάτες",
+      legalEntityId: input.legalEntityId,
+    },
+    {
+      glAccountId: credit.id,
+      credit: net,
+      memo: "Πωλήσεις",
+      legalEntityId: input.legalEntityId,
+    },
   ];
   if (vat && input.vatAmount > 0) {
     lines.push({
       glAccountId: vat.id,
       credit: input.vatAmount,
       memo: "ΦΠΑ",
+      legalEntityId: input.legalEntityId,
     });
   } else if (input.vatAmount > 0) {
     lines[1]!.credit = input.total;
@@ -487,6 +506,7 @@ export async function tryPostInvoiceIssue(
     sourceType: "invoice.issue",
     sourceId: input.invoiceId,
     createdByUserId: input.userId,
+    legalEntityId: input.legalEntityId,
     lines,
   });
 }
@@ -503,6 +523,7 @@ export async function tryPostInvoiceCollect(
     glCashAccount?: string | null;
     glArAccount?: string | null;
     userId?: string | null;
+    legalEntityId?: string | null;
   },
 ) {
   if (input.amount <= 0) return null;
@@ -536,9 +557,20 @@ export async function tryPostInvoiceCollect(
     sourceType,
     sourceId,
     createdByUserId: input.userId,
+    legalEntityId: input.legalEntityId,
     lines: [
-      { glAccountId: cash.id, debit: input.amount, memo: "Ταμείο / Τράπεζα" },
-      { glAccountId: ar.id, credit: input.amount, memo: "Πελάτες" },
+      {
+        glAccountId: cash.id,
+        debit: input.amount,
+        memo: "Ταμείο / Τράπεζα",
+        legalEntityId: input.legalEntityId,
+      },
+      {
+        glAccountId: ar.id,
+        credit: input.amount,
+        memo: "Πελάτες",
+        legalEntityId: input.legalEntityId,
+      },
     ],
   });
 }
@@ -615,6 +647,7 @@ export async function tryPostPurchaseInvoice(
     sourceType: "purchase_invoice.post",
     sourceId: input.purchaseInvoiceId,
     createdByUserId: input.userId,
+    legalEntityId: input.legalEntityId,
     lines,
   });
 }

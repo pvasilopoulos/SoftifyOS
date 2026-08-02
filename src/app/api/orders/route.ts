@@ -22,6 +22,12 @@ import {
   allocateFromSeries,
   resolveDefaultSeries,
 } from "@/modules/documents/series";
+import {
+  companySqlAnd,
+  companyStamp,
+  isCompanyScopeError,
+  requireCompanyId,
+} from "@/platform/tenancy/company-scope";
 
 export const dynamic = "force-dynamic";
 
@@ -33,12 +39,16 @@ const listSchema = listQuerySchema.extend({
   kind: z.enum(["SALES_ORDER", "SALES_QUOTE"]).optional().default("SALES_ORDER"),
 });
 
-async function nextOrderNumberFallback(tenantId: string, kind: string) {
+async function nextOrderNumberFallback(
+  tenantId: string,
+  legalEntityId: string,
+  kind: string,
+) {
   const year = new Date().getFullYear();
   const code = kind === "SALES_QUOTE" ? "ΠΡΟΣ" : "ΠΑΡ";
   const prefix = `${code}-${year}-`;
   const latest = await prisma.order.findFirst({
-    where: { tenantId, number: { startsWith: prefix } },
+    where: { tenantId, legalEntityId, number: { startsWith: prefix } },
     orderBy: { number: "desc" },
     select: { number: true },
   });
@@ -94,6 +104,7 @@ export async function GET(request: NextRequest) {
     if (!session) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
+    requireCompanyId(session);
 
     const parsed = listSchema.safeParse(
       Object.fromEntries(request.nextUrl.searchParams),
@@ -107,6 +118,8 @@ export async function GET(request: NextRequest) {
     if (cursorParam && !cursor) {
       return NextResponse.json({ error: "Invalid cursor" }, { status: 400 });
     }
+
+    const companyFilter = companySqlAnd(session, Prisma.sql`o."legalEntityId"`);
 
     const rows = await prisma.$queryRaw<
       Array<{
@@ -135,6 +148,7 @@ export async function GET(request: NextRequest) {
       LEFT JOIN branches b ON b.id = o."branchId"
       WHERE o."tenantId" = ${session.tenantId}
         AND o.kind = ${kind}::"OrderKind"
+        ${companyFilter}
         ${status ? Prisma.sql`AND o.status = ${status}::"OrderStatus"` : Prisma.empty}
         ${
           q
@@ -185,6 +199,9 @@ export async function GET(request: NextRequest) {
       meta: { ms: Date.now() - started, count: items.length, hasMore },
     });
   } catch (error) {
+    if (isCompanyScopeError(error)) {
+      return NextResponse.json({ error: error.message }, { status: error.status });
+    }
     return NextResponse.json(
       { error: getErrorMessage(error, "List failed") },
       { status: 500 },
@@ -201,6 +218,7 @@ export async function POST(request: Request) {
     if (session.role === "VIEWER") {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
+    const legalEntityId = requireCompanyId(session);
 
     const body = orderCreateSchema.parse(await request.json());
     let statusOption;
@@ -268,12 +286,19 @@ export async function POST(request: Request) {
             where: {
               id: body.seriesId,
               tenantId: session.tenantId,
+              legalEntityId,
               kind: docKind,
               isActive: true,
             },
           })
         : null) ??
-      (await resolveDefaultSeries(prisma, session.tenantId, docKind));
+      (await resolveDefaultSeries(
+        prisma,
+        session.tenantId,
+        docKind,
+        null,
+        legalEntityId,
+      ));
 
     if (!series && !body.number?.trim()) {
       return NextResponse.json(
@@ -331,18 +356,24 @@ export async function POST(request: Request) {
             tenantId: session.tenantId,
             seriesId: series.id,
             kind: docKind,
+            legalEntityId,
           });
           number = allocated.number;
           seriesId = allocated.seriesId;
           siteId = allocated.siteId;
         } else {
-          number = await nextOrderNumberFallback(session.tenantId, docKind);
+          number = await nextOrderNumberFallback(
+            session.tenantId,
+            legalEntityId,
+            docKind,
+          );
         }
       }
 
       return tx.order.create({
         data: {
           tenantId: session.tenantId,
+          ...companyStamp(session),
           customerId: hierarchy.customerId,
           branchId: hierarchy.branchId,
           spaceId: hierarchy.spaceId,
@@ -440,6 +471,9 @@ export async function POST(request: Request) {
 
     return NextResponse.json({ item }, { status: 201 });
   } catch (error) {
+    if (isCompanyScopeError(error)) {
+      return NextResponse.json({ error: error.message }, { status: error.status });
+    }
     if (error instanceof z.ZodError) {
       return NextResponse.json(
         { error: "Μη έγκυρα δεδομένα παραγγελίας" },

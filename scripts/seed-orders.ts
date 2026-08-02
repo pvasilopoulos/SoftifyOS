@@ -10,6 +10,16 @@ async function main() {
   const tenant = await prisma.tenant.findUnique({ where: { slug: "akropolis" } });
   if (!tenant) throw new Error("Run npm run db:seed first");
 
+  const legalEntity =
+    (await prisma.legalEntity.findFirst({
+      where: { tenantId: tenant.id, code: "MAIN" },
+    })) ??
+    (await prisma.legalEntity.findFirst({
+      where: { tenantId: tenant.id },
+      orderBy: { code: "asc" },
+    }));
+  if (!legalEntity) throw new Error("No LegalEntity for tenant — run migrations/seed");
+
   const nireas = await prisma.customer.findFirst({
     where: { tenantId: tenant.id, code: "CUS-NIREAS" },
     include: { branches: { include: { spaces: true } } },
@@ -97,7 +107,11 @@ async function main() {
 
     await prisma.order.upsert({
       where: {
-        tenantId_number: { tenantId: tenant.id, number: doc.number },
+        tenantId_legalEntityId_number: {
+          tenantId: tenant.id,
+          legalEntityId: legalEntity.id,
+          number: doc.number,
+        },
       },
       update: {
         status: doc.status,
@@ -114,6 +128,7 @@ async function main() {
       },
       create: {
         tenantId: tenant.id,
+        legalEntityId: legalEntity.id,
         number: doc.number,
         status: doc.status,
         customerId: doc.customerId,

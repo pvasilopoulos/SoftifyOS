@@ -2,6 +2,11 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/server/db";
 import { getSession } from "@/platform/auth/session";
+import {
+  companyStamp,
+  isCompanyScopeError,
+  requireCompanyId,
+} from "@/platform/tenancy/company-scope";
 import { writeAuditEvent } from "@/platform/tenancy/audit";
 import { buildChangeMeta } from "@/platform/tenancy/audit-diff";
 import { getErrorMessage } from "@/shared/lib/safe";
@@ -27,6 +32,7 @@ export async function POST(
     if (session.role === "VIEWER") {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
+    const legalEntityId = requireCompanyId(session);
 
     const { id } = await context.params;
     const body = quoteConvertSchema.parse(
@@ -37,6 +43,7 @@ export async function POST(
       where: {
         id,
         tenantId: session.tenantId,
+        legalEntityId,
         kind: "SALES_QUOTE",
       },
       include: {
@@ -73,12 +80,19 @@ export async function POST(
             where: {
               id: body.seriesId,
               tenantId: session.tenantId,
+              legalEntityId,
               kind: "SALES_ORDER",
               isActive: true,
             },
           })
         : null) ??
-      (await resolveDefaultSeries(prisma, session.tenantId, "SALES_ORDER"));
+      (await resolveDefaultSeries(
+        prisma,
+        session.tenantId,
+        "SALES_ORDER",
+        null,
+        legalEntityId,
+      ));
 
     if (!series) {
       return NextResponse.json(
@@ -97,11 +111,13 @@ export async function POST(
         tenantId: session.tenantId,
         seriesId: series.id,
         kind: "SALES_ORDER",
+        legalEntityId,
       });
 
       const created = await tx.order.create({
         data: {
           tenantId: session.tenantId,
+          ...companyStamp(session),
           customerId: quote.customerId,
           branchId: quote.branchId,
           spaceId: quote.spaceId,
@@ -192,6 +208,9 @@ export async function POST(
       { status: 201 },
     );
   } catch (error) {
+    if (isCompanyScopeError(error)) {
+      return NextResponse.json({ error: error.message }, { status: error.status });
+    }
     if (error instanceof z.ZodError) {
       return NextResponse.json({ error: "Μη έγκυρα δεδομένα" }, { status: 400 });
     }

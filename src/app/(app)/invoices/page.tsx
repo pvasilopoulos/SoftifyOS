@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import Link from "next/link";
 import { Plus } from "lucide-react";
 import { getSession } from "@/platform/auth/session";
+import { requireCompanyId } from "@/platform/tenancy/company-scope";
 import { prisma } from "@/server/db";
 import { encodeCursor } from "@/shared/lib/cursor";
 import { PageHeader } from "@/shared/ui/page-header";
@@ -16,10 +17,10 @@ import { InvoicesWorkspace } from "./invoices-workspace";
 export const metadata = { title: "Τιμολόγια" };
 export const dynamic = "force-dynamic";
 
-async function loadFirstPage(tenantId: string) {
+async function loadFirstPage(tenantId: string, legalEntityId: string) {
   const started = Date.now();
   const rows = await prisma.invoice.findMany({
-    where: { tenantId },
+    where: { tenantId, legalEntityId },
     orderBy: [{ createdAt: "desc" }, { id: "desc" }],
     take: 51,
     include: {
@@ -31,7 +32,7 @@ async function loadFirstPage(tenantId: string) {
 
   const countsRaw = await prisma.invoice.groupBy({
     by: ["status"],
-    where: { tenantId },
+    where: { tenantId, legalEntityId },
     _count: { _all: true },
   });
 
@@ -86,8 +87,9 @@ async function loadFirstPage(tenantId: string) {
 export default async function InvoicesPage() {
   const session = await getSession();
   if (!session) redirect("/login");
+  const legalEntityId = requireCompanyId(session);
 
-  const first = await loadFirstPage(session.tenantId);
+  const first = await loadFirstPage(session.tenantId, legalEntityId);
   const [listViews, customFields] = await Promise.all([
     listEntityListViews(prisma, session.tenantId, "INVOICES", true),
     listCustomFields(prisma, session.tenantId, "INVOICES", true),

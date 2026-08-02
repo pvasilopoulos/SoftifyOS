@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
 import { getSession } from "@/platform/auth/session";
+import { requireCompanyId } from "@/platform/tenancy/company-scope";
 import { prisma } from "@/server/db";
 import { listTransformRules } from "@/modules/document-transforms";
 import { documentKindLabel } from "@/modules/documents/series";
@@ -12,11 +13,12 @@ export default async function DocumentTransformsSettingsPage() {
   const session = await getSession();
   if (!session) redirect("/login");
   if (session.role !== "OWNER" && session.role !== "ADMIN") redirect("/settings");
+  const legalEntityId = requireCompanyId(session);
 
   const [items, series] = await Promise.all([
     listTransformRules(prisma, session.tenantId),
     prisma.documentSeries.findMany({
-      where: { tenantId: session.tenantId, isActive: true },
+      where: { tenantId: session.tenantId, legalEntityId, isActive: true },
       orderBy: [{ kind: "asc" }, { code: "asc" }],
       select: { id: true, code: true, name: true, kind: true },
     }),

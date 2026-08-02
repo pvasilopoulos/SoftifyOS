@@ -104,6 +104,7 @@ export async function allocateFromSeries(
     tenantId: string;
     seriesId: string;
     kind: DocumentKind;
+    legalEntityId?: string | null;
   },
 ) {
   const series = await db.documentSeries.findFirst({
@@ -112,6 +113,9 @@ export async function allocateFromSeries(
       tenantId: input.tenantId,
       kind: input.kind,
       isActive: true,
+      ...(input.legalEntityId
+        ? { legalEntityId: input.legalEntityId }
+        : {}),
     },
   });
   if (!series) {
@@ -145,16 +149,20 @@ export async function resolveDefaultSeries(
   tenantId: string,
   kind: DocumentKind,
   siteId?: string | null,
+  legalEntityId?: string | null,
 ) {
+  const companyFilter = legalEntityId
+    ? { legalEntityId }
+    : ({} as { legalEntityId?: string });
   if (siteId) {
     const siteSeries = await db.documentSeries.findFirst({
-      where: { tenantId, kind, siteId, isActive: true },
+      where: { tenantId, kind, siteId, isActive: true, ...companyFilter },
       orderBy: [{ isDefault: "desc" }, { code: "asc" }],
     });
     if (siteSeries) return siteSeries;
   }
   return db.documentSeries.findFirst({
-    where: { tenantId, kind, isActive: true },
+    where: { tenantId, kind, isActive: true, ...companyFilter },
     orderBy: [{ isDefault: "desc" }, { code: "asc" }],
   });
 }

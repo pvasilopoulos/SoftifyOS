@@ -17,7 +17,12 @@
 - POS, gift cards, loyalty
 - Integrations (webhooks, ΑΑΔΕ, API tokens, Script Hooks)
 
-Κάθε tenant έχει απομονωμένα δεδομένα (`tenantId` + Postgres RLS). Ρόλοι: OWNER, ADMIN, MEMBER, VIEWER.
+**Workspace A+B**
+
+- **A · Tenant** — οργανισμός / απομόνωση δεδομένων (`tenantId` + Postgres RLS)
+- **B · Company (LegalEntity)** — νομική οντότητα μέσα στον tenant· παραστατικά, σειρές και FI σφραγίζονται με `legalEntityId`
+
+Στο login επιλέγεις οργανισμό + εταιρεία· στο header τα εναλλάσσεις. Στις Ρυθμίσεις → Χρήστες μπορείς να περιορίσεις ποιες εταιρείες βλέπει κάθε μέλος. Ρόλοι: OWNER, ADMIN, MEMBER, VIEWER.
 
 ## Ενότητες
 

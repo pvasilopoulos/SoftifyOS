@@ -35,9 +35,12 @@ export default async function InvoicePrintPage({
   if (!session) redirect("/login");
 
   const { id } = await params;
+  const companyFilter = session.legalEntityId
+    ? { legalEntityId: session.legalEntityId }
+    : {};
   const [invoice, company] = await Promise.all([
     prisma.invoice.findFirst({
-      where: { id, tenantId: session.tenantId },
+      where: { id, tenantId: session.tenantId, ...companyFilter },
       include: {
         customer: true,
         branch: true,
