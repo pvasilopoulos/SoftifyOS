@@ -13,6 +13,17 @@ export default function AppError({
 }) {
   useEffect(() => {
     console.error("[SoftifyOS]", error);
+    // After deploy/rebuild, stale HTML may request missing chunks — one hard reload fixes it.
+    const msg = `${error.name} ${error.message}`;
+    if (/ChunkLoadError|Loading chunk|Failed to load chunk/i.test(msg)) {
+      const key = "softify:chunk-reload";
+      if (!sessionStorage.getItem(key)) {
+        sessionStorage.setItem(key, "1");
+        window.location.reload();
+      } else {
+        sessionStorage.removeItem(key);
+      }
+    }
   }, [error]);
 
   return (
@@ -22,8 +33,8 @@ export default function AppError({
       </span>
       <h1 className="text-xl font-semibold text-ink-950">Κάτι πήγε στραβά</h1>
       <p className="mt-2 text-sm text-slate-500">
-        Η οθόνη δεν φορτώθηκε σωστά. Μπορείτε να δοκιμάσετε ξανά χωρίς να χάσετε
-        τη συνεδρία σας.
+        Η οθόνη δεν φορτώθηκε σωστά. Μετά από deploy δοκίμασε hard refresh
+        (Ctrl+Shift+R) — συχνά είναι παλιά chunks.
       </p>
       {error.digest ? (
         <p className="mt-2 font-mono text-[11px] text-slate-400">
