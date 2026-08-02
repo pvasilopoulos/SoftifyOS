@@ -75,6 +75,10 @@ export default async function DashboardPage() {
     draftPos,
     recentInvoices,
     recentAudits,
+    pendingMyData,
+    unmatchedBank,
+    pendingLeave,
+    crmDue,
   ] = await Promise.all([
     prisma.invoicePayment.aggregate({
       where: { tenantId, paidAt: { gte: startOfMonth } },
@@ -123,6 +127,22 @@ export default async function DashboardPage() {
       orderBy: { createdAt: "desc" },
       take: 5,
     }),
+    prisma.myDataSubmission.count({
+      where: { tenantId, status: { in: ["PENDING", "SENT", "REJECTED"] } },
+    }),
+    prisma.bankStatementLine.count({
+      where: { tenantId, status: "UNMATCHED" },
+    }),
+    prisma.leaveRequest.count({
+      where: { tenantId, status: "PENDING" },
+    }),
+    prisma.crmActivity.count({
+      where: {
+        tenantId,
+        dueAt: { lte: new Date() },
+        doneAt: null,
+      },
+    }),
   ]);
 
   const collections = toNumber(monthPayments._sum.amount ?? 0);
@@ -166,13 +186,54 @@ export default async function DashboardPage() {
   }> = [];
 
   if (overdueInvoices.length) {
+    const firstOverdue = overdueInvoices[0]!;
     workQueue.push({
       id: "overdue",
-      title: `${overdueInvoices.length} ληξιπρόθεσμα τιμολόγια`,
+      title: `${overdueInvoices.length}+ ληξιπρόθεσμα τιμολόγια`,
       meta: overdueInvoices.map((i) => i.customer.name).slice(0, 2).join(" · "),
       tone: "rose",
       icon: Receipt,
-      href: "/finance",
+      href: `/invoices/${firstOverdue.id}`,
+    });
+  }
+  if (pendingMyData > 0) {
+    workQueue.push({
+      id: "mydata",
+      title: `${pendingMyData} εκκρεμείς myDATA`,
+      meta: "Ουρά διαβίβασης ΑΑΔΕ",
+      tone: "amber",
+      icon: AlertTriangle,
+      href: "/finance?section=ops",
+    });
+  }
+  if (unmatchedBank > 0) {
+    workQueue.push({
+      id: "bank",
+      title: `${unmatchedBank} ασυμφώνιστες τραπεζικές`,
+      meta: "Banking reconciliation",
+      tone: "amber",
+      icon: Clock3,
+      href: "/finance?section=banking",
+    });
+  }
+  if (pendingLeave > 0) {
+    workQueue.push({
+      id: "leave",
+      title: `${pendingLeave} άδειες σε αναμονή`,
+      meta: "HR εγκρίσεις",
+      tone: "teal",
+      icon: Clock3,
+      href: "/hr",
+    });
+  }
+  if (crmDue > 0) {
+    workQueue.push({
+      id: "crm",
+      title: `${crmDue} CRM εργασίες ληξιπρόθεσμες`,
+      meta: "Leads / follow-ups",
+      tone: "teal",
+      icon: Clock3,
+      href: "/crm",
     });
   }
   if (lowStock.length) {
@@ -366,7 +427,7 @@ export default async function DashboardPage() {
         </div>
         <div className="flex items-center gap-2 text-xs text-slate-500">
           <AlertTriangle size={14} className="text-amber-500" />
-          myDATA σε simulator mode · χωρίς live AADE ακόμη
+          Ουρά εργασίας: myDATA · banking · HR · CRM — έλεγχος Integrations για live ΑΑΔΕ
         </div>
       </section>
     </div>

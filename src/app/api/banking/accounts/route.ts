@@ -10,6 +10,7 @@ const createSchema = z.object({
   code: z.string().trim().min(1).max(40),
   name: z.string().trim().min(1).max(120),
   iban: z.string().trim().max(40).optional().nullable(),
+  legalEntityId: z.string().trim().min(1).optional().nullable(),
 });
 
 export async function GET() {
@@ -19,13 +20,25 @@ export async function GET() {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
     let accounts = await prisma.bankAccount.findMany({
-      where: { tenantId: session.tenantId, isActive: true },
+      where: {
+        tenantId: session.tenantId,
+        isActive: true,
+        ...(session.legalEntityId
+          ? {
+              OR: [
+                { legalEntityId: session.legalEntityId },
+                { legalEntityId: null },
+              ],
+            }
+          : {}),
+      },
       orderBy: { code: "asc" },
     });
     if (accounts.length === 0) {
       const created = await prisma.bankAccount.create({
         data: {
           tenantId: session.tenantId,
+          legalEntityId: session.legalEntityId ?? null,
           code: "MAIN",
           name: "Κύριος λογαριασμός",
           currency: "EUR",
@@ -58,6 +71,7 @@ export async function POST(request: Request) {
         code: body.code,
         name: body.name,
         iban: body.iban || null,
+        legalEntityId: body.legalEntityId || session.legalEntityId || null,
       },
     });
     return NextResponse.json({ item }, { status: 201 });

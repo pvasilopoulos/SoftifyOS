@@ -27,6 +27,11 @@ const ENDPOINTS: Record<Exclude<MyDataEnv, "simulator">, string> = {
   prod: "https://mydatapi.aade.gr/myDATA/SendInvoices",
 };
 
+const CANCEL_ENDPOINTS: Record<Exclude<MyDataEnv, "simulator">, string> = {
+  test: "https://mydataapidev.aade.gr/CancelInvoice",
+  prod: "https://mydatapi.aade.gr/myDATA/CancelInvoice",
+};
+
 function escapeXml(value: string) {
   return value
     .replace(/&/g, "&amp;")
@@ -125,6 +130,70 @@ export async function sendInvoicesXml(
         ? parsed.errors
         : res.ok
           ? []
+          : [{ message: `HTTP ${res.status}` }],
+      rawXml,
+      endpoint,
+    };
+  } catch (error) {
+    const message =
+      error instanceof Error ? error.message : "Σφάλμα σύνδεσης ΑΑΔΕ";
+    return {
+      ok: false,
+      status: 0,
+      mark: null,
+      uid: null,
+      errors: [{ message }],
+      rawXml: "",
+      endpoint,
+    };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/** Cancel a previously accepted invoice by MARK (AADE CancelInvoice). */
+export async function cancelInvoiceMark(
+  env: Exclude<MyDataEnv, "simulator">,
+  credentials: MyDataCredentials,
+  mark: string,
+  opts?: { timeoutMs?: number },
+): Promise<MyDataSendResult> {
+  const endpoint = CANCEL_ENDPOINTS[env];
+  const controller = new AbortController();
+  const timer = setTimeout(
+    () => controller.abort(),
+    opts?.timeoutMs ?? 45_000,
+  );
+  const body = `<?xml version="1.0" encoding="utf-8"?>\n<cancelInvoice mark="${escapeXml(mark)}"/>`;
+
+  try {
+    const res = await fetch(endpoint, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/xml; charset=utf-8",
+        Accept: "application/xml",
+        "aade-user-id": credentials.userId,
+        "ocp-apim-subscription-key": credentials.subscriptionKey,
+      },
+      body,
+      signal: controller.signal,
+    });
+    const rawXml = await res.text();
+    const parsed = parseSendInvoicesResponse(rawXml);
+    const cancelled =
+      res.ok &&
+      (parsed.accepted ||
+        /success|ok|cancelled|canceled/i.test(rawXml) ||
+        Boolean(extractXmlTag(rawXml, "cancellationMark")));
+    return {
+      ok: cancelled,
+      status: res.status,
+      mark: parsed.mark ?? mark,
+      uid: parsed.uid,
+      errors: cancelled
+        ? []
+        : parsed.errors.length
+          ? parsed.errors
           : [{ message: `HTTP ${res.status}` }],
       rawXml,
       endpoint,

@@ -1,7 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useSearchParams } from "next/navigation";
+import { useEffect, useMemo, useState } from "react";
 import {
   BookOpen,
   Boxes,
@@ -325,11 +326,37 @@ export function FinanceHubClient({
   initialLegalEntityId?: string;
 }) {
   const year = new Date().getFullYear();
+  const searchParams = useSearchParams();
   const [section, setSection] = useState<Section>("overview");
   const [filters, setFilters] = useState<FinanceFilters>(() => ({
     ...defaultFinanceFilters(year),
     legalEntityId: initialLegalEntityId || "",
   }));
+
+  useEffect(() => {
+    const raw = searchParams.get("section");
+    if (!raw) return;
+    const allowed: Section[] = [
+      "overview",
+      "journals",
+      "gl",
+      "periods",
+      "ar",
+      "ap",
+      "settlements",
+      "vat",
+      "books",
+      "banking",
+      "mydata",
+      "controlling",
+      "dimensions",
+      "assets",
+      "purchases",
+    ];
+    if (allowed.includes(raw as Section)) {
+      setSection(raw as Section);
+    }
+  }, [searchParams]);
 
   const openMonths = useMemo(
     () => periods.filter((p) => p.kind === "MONTH" && p.status === "OPEN").length,

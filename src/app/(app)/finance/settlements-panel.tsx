@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { Button } from "@/shared/ui/button";
 import { Badge } from "@/shared/ui/badge";
@@ -20,10 +21,13 @@ type SettlementRow = {
   supplier: { id: string; name: string; code: string } | null;
   methods: Array<{ methodCode: string; amount: number }>;
   allocations: Array<{
+    id: string;
     targetType: string;
     invoiceId: string | null;
     purchaseInvoiceId: string | null;
     amount: number;
+    invoice?: { id: string; number: string } | null;
+    purchaseInvoice?: { id: string; number: string } | null;
   }>;
 };
 
@@ -49,6 +53,14 @@ const KIND_LABEL: Record<string, string> = {
   CLEARING: "Εκκαθάριση",
 };
 
+type CashbookRow = {
+  methodCode: string;
+  receipts: number;
+  payments: number;
+  net: number;
+  count: number;
+};
+
 export function SettlementsPanel({ canWrite }: { canWrite: boolean }) {
   const [items, setItems] = useState<SettlementRow[]>([]);
   const [pending, setPending] = useState<PendingClearing[]>([]);
@@ -58,14 +70,24 @@ export function SettlementsPanel({ canWrite }: { canWrite: boolean }) {
   const [loading, setLoading] = useState(true);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [cashbook, setCashbook] = useState<{
+    receiptTotal: number;
+    paymentTotal: number;
+    netTotal: number;
+    rows: CashbookRow[];
+  } | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
       const qs = kind === "ALL" ? "" : `?kind=${kind}`;
-      const [res, clrRes] = await Promise.all([
+      const year = new Date().getFullYear();
+      const [res, clrRes, cashRes] = await Promise.all([
         fetch(`/api/settlements${qs}`),
         fetch("/api/settlements?pendingClearing=1"),
+        fetch(
+          `/api/finance/reports?kind=cashbook&from=${year}-01-01&to=${year}-12-31`,
+        ),
       ]);
       const data = (await res.json()) as {
         items?: SettlementRow[];
@@ -74,12 +96,26 @@ export function SettlementsPanel({ canWrite }: { canWrite: boolean }) {
       const clr = (await clrRes.json()) as {
         items?: PendingClearing[];
       };
+      const cash = (await cashRes.json()) as {
+        receiptTotal?: number;
+        paymentTotal?: number;
+        netTotal?: number;
+        rows?: CashbookRow[];
+      };
       if (!res.ok) {
         toast.error(data.error || "Αποτυχία φόρτωσης");
         return;
       }
       setItems(data.items ?? []);
       setPending(clr.items ?? []);
+      if (cashRes.ok) {
+        setCashbook({
+          receiptTotal: cash.receiptTotal ?? 0,
+          paymentTotal: cash.paymentTotal ?? 0,
+          netTotal: cash.netTotal ?? 0,
+          rows: cash.rows ?? [],
+        });
+      }
       setSelected(new Set());
     } finally {
       setLoading(false);
@@ -219,6 +255,45 @@ export function SettlementsPanel({ canWrite }: { canWrite: boolean }) {
         </div>
       ) : null}
 
+      {cashbook ? (
+        <div className="soft-panel space-y-3 p-4">
+          <div className="flex flex-wrap items-baseline justify-between gap-2">
+            <h3 className="text-sm font-semibold text-ink-950">
+              Ταμείο (YTD) · ανά τρόπο
+            </h3>
+            <p className="text-xs text-slate-500">
+              Εισπράξεις {money(cashbook.receiptTotal)} · Πληρωμές{" "}
+              {money(cashbook.paymentTotal)} · Καθαρό{" "}
+              <span className="font-semibold text-ink-900">
+                {money(cashbook.netTotal)}
+              </span>
+            </p>
+          </div>
+          {cashbook.rows.length === 0 ? (
+            <p className="text-xs text-slate-500">Δεν υπάρχουν κινήσεις ακόμα.</p>
+          ) : (
+            <div className="flex flex-wrap gap-2">
+              {cashbook.rows.map((r) => (
+                <div
+                  key={r.methodCode}
+                  className="min-w-[8.5rem] rounded-xl border border-slate-200 bg-white px-3 py-2"
+                >
+                  <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                    {r.methodCode}
+                  </p>
+                  <p className="mt-0.5 text-sm font-semibold tabular-nums text-ink-950">
+                    {money(r.net)}
+                  </p>
+                  <p className="text-[10px] text-slate-500">
+                    +{money(r.receipts)} / −{money(r.payments)} · {r.count}
+                  </p>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      ) : null}
+
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex gap-1 rounded-xl bg-slate-100 p-1">
           {(
@@ -282,11 +357,39 @@ export function SettlementsPanel({ canWrite }: { canWrite: boolean }) {
                   </td>
                   <td className="px-3 py-3">
                     <p className="text-sm font-medium text-ink-900">{party}</p>
-                    {s.allocations.length > 1 ? (
-                      <p className="mt-0.5 text-[11px] text-slate-400">
-                        {s.allocations.length} παραστατικά
-                      </p>
-                    ) : null}
+                    <div className="mt-1 flex flex-wrap gap-1">
+                      {s.allocations.slice(0, 4).map((a) => {
+                        if (a.invoice?.number) {
+                          return (
+                            <Link
+                              key={a.id}
+                              href={`/invoices/${a.invoice.id}`}
+                              className="rounded-md bg-teal-50 px-1.5 py-0.5 font-mono text-[10px] font-semibold text-teal-800 hover:bg-teal-100"
+                            >
+                              {a.invoice.number}
+                            </Link>
+                          );
+                        }
+                        if (a.purchaseInvoice?.number) {
+                          return (
+                            <Link
+                              key={a.id}
+                              href="/finance?section=purchases"
+                              className="rounded-md bg-amber-50 px-1.5 py-0.5 font-mono text-[10px] font-semibold text-amber-900 hover:bg-amber-100"
+                              title="Άνοιγμα αγορών"
+                            >
+                              {a.purchaseInvoice.number}
+                            </Link>
+                          );
+                        }
+                        return null;
+                      })}
+                      {s.allocations.length > 4 ? (
+                        <span className="text-[10px] text-slate-400">
+                          +{s.allocations.length - 4}
+                        </span>
+                      ) : null}
+                    </div>
                   </td>
                   <td className="px-3 py-3">
                     <SettlementTenders

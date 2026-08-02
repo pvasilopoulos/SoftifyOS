@@ -79,6 +79,14 @@ export function AccountingHubClient({
     netIncome: number;
     balanced: boolean;
   } | null>(null);
+  const [consolEntities, setConsolEntities] = useState<
+    Array<{
+      entity: { id: string; code: string; name: string; isDefault: boolean };
+      debit: number;
+      credit: number;
+      rowCount: number;
+    }>
+  >([]);
   const [periods, setPeriods] = useState(initialPeriods);
   const [costCenters, setCostCenters] = useState<
     Array<{ id: string; code: string; name: string }>
@@ -201,6 +209,7 @@ export function AccountingHubClient({
       }
       setReportKind(kind);
       const q = filters?.q?.trim() ?? "";
+      if (kind !== "consolidation") setConsolEntities([]);
       if (kind === "trial-balance" || kind === "cost-centers") {
         const next = (data.rows ?? []) as TrialRow[];
         setRows(
@@ -268,6 +277,23 @@ export function AccountingHubClient({
                 (r) => matchesText(r.code, q) || matchesText(r.name, q),
               )
             : cons,
+        );
+        const byEntity = (data.entities ?? []) as Array<{
+          entity: {
+            id: string;
+            code: string;
+            name: string;
+            isDefault: boolean;
+          };
+          rows: TrialRow[];
+        }>;
+        setConsolEntities(
+          byEntity.map((e) => ({
+            entity: e.entity,
+            debit: e.rows.reduce((s, r) => s + (r.debit || 0), 0),
+            credit: e.rows.reduce((s, r) => s + (r.credit || 0), 0),
+            rowCount: e.rows.length,
+          })),
         );
         setPnl(null);
         setBs(null);
@@ -760,6 +786,35 @@ export function AccountingHubClient({
                 <Badge tone={bs.balanced ? "emerald" : "rose"}>
                   {bs.balanced ? "OK" : "Απόκλιση"}
                 </Badge>
+              </div>
+            </div>
+          ) : null}
+          {reportKind === "consolidation" && consolEntities.length > 0 ? (
+            <div className="space-y-2">
+              <p className="text-xs font-medium text-slate-500">
+                Ανά νομική οντότητα (πριν από IC eliminations)
+              </p>
+              <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                {consolEntities.map((e) => (
+                  <div
+                    key={e.entity.id}
+                    className="rounded-xl border border-slate-100 px-3 py-2"
+                  >
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="text-sm font-semibold text-ink-950">
+                        {e.entity.code}
+                      </p>
+                      {e.entity.isDefault ? (
+                        <Badge tone="teal">Default</Badge>
+                      ) : null}
+                    </div>
+                    <p className="text-xs text-slate-500">{e.entity.name}</p>
+                    <p className="mt-1 text-xs tabular-nums text-slate-600">
+                      Χρ. {formatEUR(e.debit)} · Πιστ. {formatEUR(e.credit)} ·{" "}
+                      {e.rowCount} λογ.
+                    </p>
+                  </div>
+                ))}
               </div>
             </div>
           ) : null}

@@ -6,6 +6,7 @@ import { writeAuditEvent } from "@/platform/tenancy/audit";
 import { getErrorMessage } from "@/shared/lib/safe";
 import { toNumber } from "@/modules/sales/invoice-utils";
 import {
+  createPaymentSettlement,
   createReceiptSettlement,
   SettlementError,
 } from "@/modules/settlements/service";
@@ -14,10 +15,11 @@ export const dynamic = "force-dynamic";
 
 const schema = z.object({
   invoiceId: z.string().trim().min(1).optional().nullable(),
+  purchaseInvoiceId: z.string().trim().min(1).optional().nullable(),
   ignore: z.boolean().optional(),
 });
 
-/** Bank match → Settlement Engine (Φ1) */
+/** Bank match → Settlement Engine (AR credit / AP debit) */
 export async function POST(
   request: Request,
   context: { params: Promise<{ id: string }> },
@@ -34,6 +36,7 @@ export async function POST(
     const body = schema.parse(await request.json().catch(() => ({})));
     const line = await prisma.bankStatementLine.findFirst({
       where: { id, tenantId: session.tenantId },
+      include: { bankAccount: { select: { legalEntityId: true } } },
     });
     if (!line) {
       return NextResponse.json({ error: "Δεν βρέθηκε" }, { status: 404 });
@@ -50,11 +53,125 @@ export async function POST(
       return NextResponse.json({ item: { id: updated.id, status: updated.status } });
     }
 
+    const amount = toNumber(line.amount);
+
+    // AP: debit / outflow → purchase payment
+    if (body.purchaseInvoiceId || (amount < 0 && !body.invoiceId)) {
+      const purchaseInvoiceId = body.purchaseInvoiceId;
+      if (!purchaseInvoiceId) {
+        return NextResponse.json(
+          { error: "Επίλεξε τιμολόγιο αγοράς" },
+          { status: 400 },
+        );
+      }
+      if (amount >= 0) {
+        return NextResponse.json(
+          { error: "Χρεωστικές κινήσεις αντιστοιχίζονται σε πληρωμή αγοράς" },
+          { status: 400 },
+        );
+      }
+
+      const pi = await prisma.purchaseInvoice.findFirst({
+        where: {
+          id: purchaseInvoiceId,
+          tenantId: session.tenantId,
+          status: { in: ["POSTED", "PARTIAL"] },
+        },
+      });
+      if (!pi) {
+        return NextResponse.json(
+          { error: "Τιμολόγιο αγοράς δεν βρέθηκε" },
+          { status: 404 },
+        );
+      }
+
+      const balance = Math.max(
+        0,
+        toNumber(pi.total) - toNumber(pi.paidAmount),
+      );
+      const payAmount = Math.min(Math.abs(amount), balance);
+      if (payAmount <= 0) {
+        return NextResponse.json(
+          { error: "Το τιμολόγιο αγοράς είναι εξοφλημένο" },
+          { status: 400 },
+        );
+      }
+
+      const { settlement, journalId } = await createPaymentSettlement(prisma, {
+        tenantId: session.tenantId,
+        userId: session.sub,
+        legalEntityId:
+          session.legalEntityId ??
+          line.bankAccount.legalEntityId ??
+          pi.legalEntityId,
+        data: {
+          purchaseInvoiceId: pi.id,
+          supplierId: pi.supplierId,
+          settledAt: line.bookedAt.toISOString(),
+          reference: line.reference || line.id,
+          notes: `Bank match · ${line.description}`,
+          methods: [
+            {
+              method: "TRANSFER",
+              amount: payAmount,
+              changeAmount: 0,
+              externalRef: line.reference || line.id,
+            },
+          ],
+        },
+      });
+
+      await prisma.bankStatementLine.update({
+        where: { id: line.id },
+        data: {
+          status: "MATCHED",
+          matchedInvoiceId: null,
+          matchedPurchaseInvoiceId: pi.id,
+          matchNote: `Πληρωμή ${payAmount} · ${settlement.number}`,
+        },
+      });
+
+      if (settlement.id) {
+        await prisma.settlement
+          .update({
+            where: { id: settlement.id },
+            data: { bankStatementLineId: line.id },
+          })
+          .catch(() => null);
+      }
+
+      await writeAuditEvent({
+        tenantId: session.tenantId,
+        userId: session.sub,
+        action: "banking.match.ap",
+        entity: "bank_statement_line",
+        entityId: line.id,
+        meta: {
+          purchaseInvoiceId: pi.id,
+          amount: payAmount,
+          settlementId: settlement.id,
+          journalId,
+        },
+      });
+
+      return NextResponse.json({
+        item: {
+          id: line.id,
+          status: "MATCHED",
+          purchaseInvoiceId: pi.id,
+          amount: payAmount,
+          settlementId: settlement.id,
+          settlementNumber: settlement.number,
+          journalId,
+          kind: "AP",
+        },
+      });
+    }
+
+    // AR: credit / inflow → customer receipt
     if (!body.invoiceId) {
       return NextResponse.json({ error: "Επίλεξε τιμολόγιο" }, { status: 400 });
     }
-
-    const amount = toNumber(line.amount);
     if (amount <= 0) {
       return NextResponse.json(
         { error: "Μόνο πιστωτικές κινήσεις αντιστοιχίζονται σε είσπραξη" },
@@ -94,7 +211,10 @@ export async function POST(
     const { settlement, journalId } = await createReceiptSettlement(prisma, {
       tenantId: session.tenantId,
       userId: session.sub,
-      legalEntityId: session.legalEntityId ?? invoice.legalEntityId,
+      legalEntityId:
+        session.legalEntityId ??
+        line.bankAccount.legalEntityId ??
+        invoice.legalEntityId,
       data: {
         invoiceId: invoice.id,
         customerId: invoice.customerId,
@@ -117,15 +237,18 @@ export async function POST(
       data: {
         status: "MATCHED",
         matchedInvoiceId: invoice.id,
+        matchedPurchaseInvoiceId: null,
         matchNote: `Είσπραξη ${payAmount} · ${settlement.number}`,
       },
     });
 
     if (settlement.id) {
-      await prisma.settlement.update({
-        where: { id: settlement.id },
-        data: { bankStatementLineId: line.id },
-      }).catch(() => null);
+      await prisma.settlement
+        .update({
+          where: { id: settlement.id },
+          data: { bankStatementLineId: line.id },
+        })
+        .catch(() => null);
     }
 
     await writeAuditEvent({
@@ -151,6 +274,7 @@ export async function POST(
         settlementId: settlement.id,
         settlementNumber: settlement.number,
         journalId,
+        kind: "AR",
       },
     });
   } catch (error) {

@@ -20,6 +20,7 @@ const patchSchema = z.object({
     .optional(),
   value: z.coerce.number().nonnegative().max(10_000_000).optional(),
   notes: z.string().trim().max(2000).optional().nullable(),
+  customerId: z.string().trim().min(1).optional().nullable(),
 });
 
 export async function PATCH(
@@ -52,6 +53,43 @@ export async function PATCH(
       value: toNumber(existing.value),
       notes: existing.notes,
     };
+
+    let customerId =
+      body.customerId !== undefined
+        ? body.customerId || null
+        : existing.customerId;
+
+    // Server-side WON → customer conversion (atomic with status update)
+    if (
+      body.status === "WON" &&
+      !customerId &&
+      existing.status !== "WON"
+    ) {
+      const name =
+        existing.company?.trim() ||
+        existing.contactName?.trim() ||
+        existing.title;
+      const code = `L-${existing.id.slice(-8).toUpperCase()}`;
+      const found = await prisma.customer.findFirst({
+        where: { tenantId: session.tenantId, code },
+        select: { id: true },
+      });
+      if (found) {
+        customerId = found.id;
+      } else {
+        const created = await prisma.customer.create({
+          data: {
+            tenantId: session.tenantId,
+            code,
+            name,
+            email: existing.email || null,
+            phone: existing.phone || null,
+          },
+        });
+        customerId = created.id;
+      }
+    }
+
     const item = await prisma.crmLead.update({
       where: { id },
       data: {
@@ -65,6 +103,7 @@ export async function PATCH(
         ...(body.status !== undefined ? { status: body.status } : {}),
         ...(body.value !== undefined ? { value: body.value } : {}),
         ...(body.notes !== undefined ? { notes: body.notes || null } : {}),
+        customerId,
       },
     });
     const after = {

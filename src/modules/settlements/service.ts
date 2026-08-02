@@ -961,6 +961,26 @@ export async function voidSettlement(
     }
   }
 
+  // Reverse GL first so we never leave VOIDED AR without matching books.
+  if (settlement.journalEntryId) {
+    try {
+      const { reverseJournal } = await import("@/modules/ledger/service");
+      await reverseJournal(db, {
+        tenantId: input.tenantId,
+        journalId: settlement.journalEntryId,
+        createdByUserId: input.userId,
+        description: `Ακύρωση εξόφλησης ${settlement.number}`,
+      });
+    } catch (error) {
+      const msg =
+        error instanceof Error ? error.message : "Αποτυχία αντιστροφής άρθρου";
+      throw new SettlementError(
+        `Δεν ακυρώθηκε η εξόφληση — απέτυχε η αντιστροφή GL: ${msg}`,
+        400,
+      );
+    }
+  }
+
   await db.$transaction(async (tx) => {
     // Φ4 — void CLEARING: ξεκλείδωμα πηγών (clearingJournalId)
     if (settlement.kind === "CLEARING" && settlement.journalEntryId) {
@@ -1029,21 +1049,6 @@ export async function voidSettlement(
       },
     });
   });
-
-  // Reverse GL if present
-  if (settlement.journalEntryId) {
-    try {
-      const { reverseJournal } = await import("@/modules/ledger/service");
-      await reverseJournal(db, {
-        tenantId: input.tenantId,
-        journalId: settlement.journalEntryId,
-        createdByUserId: input.userId,
-        description: `Ακύρωση εξόφλησης ${settlement.number}`,
-      });
-    } catch {
-      // best-effort
-    }
-  }
 
   return db.settlement.findFirstOrThrow({
     where: { id: settlement.id },
@@ -1291,7 +1296,12 @@ export async function listSettlements(
     include: {
       customer: { select: { id: true, name: true, code: true } },
       supplier: { select: { id: true, name: true, code: true } },
-      allocations: true,
+      allocations: {
+        include: {
+          invoice: { select: { id: true, number: true } },
+          purchaseInvoice: { select: { id: true, number: true } },
+        },
+      },
       methods: true,
     },
     orderBy: [{ settledAt: "desc" }, { createdAt: "desc" }],
@@ -1299,9 +1309,45 @@ export async function listSettlements(
   });
 }
 
-export function serializeSettlement(
-  s: Awaited<ReturnType<typeof listSettlements>>[number],
-) {
+type SerializableSettlement = {
+  id: string;
+  number: string;
+  kind: string;
+  status: string;
+  partyType: string;
+  customerId: string | null;
+  supplierId: string | null;
+  customer: { id: string; name: string; code: string } | null;
+  supplier: { id: string; name: string; code: string } | null;
+  legalEntityId: string | null;
+  totalAmount: unknown;
+  settledAt: Date;
+  reference: string | null;
+  notes: string | null;
+  journalEntryId: string | null;
+  voidedAt: Date | null;
+  createdAt: Date;
+  allocations: Array<{
+    id: string;
+    targetType: string;
+    invoiceId: string | null;
+    purchaseInvoiceId: string | null;
+    amount: unknown;
+    invoice?: { id: string; number: string } | null;
+    purchaseInvoice?: { id: string; number: string } | null;
+  }>;
+  methods: Array<{
+    id: string;
+    paymentMethodId: string | null;
+    methodCode: string;
+    amount: unknown;
+    changeAmount: unknown;
+    usesClearing: boolean;
+    externalRef: string | null;
+  }>;
+};
+
+export function serializeSettlement(s: SerializableSettlement) {
   return {
     id: s.id,
     number: s.number,
@@ -1325,6 +1371,8 @@ export function serializeSettlement(
       invoiceId: a.invoiceId,
       purchaseInvoiceId: a.purchaseInvoiceId,
       amount: toNumber(a.amount),
+      invoice: a.invoice ?? null,
+      purchaseInvoice: a.purchaseInvoice ?? null,
     })),
     methods: s.methods.map((m) => ({
       id: m.id,

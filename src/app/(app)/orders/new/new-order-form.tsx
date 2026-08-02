@@ -57,7 +57,15 @@ function newLine(): LineDraft {
   };
 }
 
-export function NewOrderForm({ kind = "SALES_ORDER" }: { kind?: OrderDocKind }) {
+export function NewOrderForm({
+  kind = "SALES_ORDER",
+  initialCustomerId,
+  initialNotes,
+}: {
+  kind?: OrderDocKind;
+  initialCustomerId?: string;
+  initialNotes?: string;
+}) {
   const router = useRouter();
   const isQuote = kind === "SALES_QUOTE";
   const title = orderKindLabel[kind];
@@ -67,13 +75,13 @@ export function NewOrderForm({ kind = "SALES_ORDER" }: { kind?: OrderDocKind }) 
   const [customers, setCustomers] = useState<CustomerOption[]>([]);
   const [products, setProducts] = useState<ProductOption[]>([]);
   const [branches, setBranches] = useState<BranchOption[]>([]);
-  const [customerId, setCustomerId] = useState("");
+  const [customerId, setCustomerId] = useState(initialCustomerId || "");
   const [branchId, setBranchId] = useState("");
   const [spaceId, setSpaceId] = useState("");
   const [seriesId, setSeriesId] = useState("");
   const [statusOptionId, setStatusOptionId] = useState("");
   const [statusOptions, setStatusOptions] = useState<StatusOption[]>([]);
-  const [notes, setNotes] = useState("");
+  const [notes, setNotes] = useState(initialNotes || "");
   const [lines, setLines] = useState<LineDraft[]>([newLine()]);
   const [loadingCustomers, setLoadingCustomers] = useState(true);
   const [loadingHierarchy, setLoadingHierarchy] = useState(false);

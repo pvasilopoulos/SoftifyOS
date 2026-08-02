@@ -30,6 +30,7 @@ export default async function CrmPage() {
         status: l.status,
         value: toNumber(l.value),
         notes: l.notes,
+        customerId: l.customerId,
         activityCount: l._count.activities,
       }))}
     />

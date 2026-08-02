@@ -5,23 +5,23 @@ import { getSession } from "@/platform/auth/session";
 import { writeAuditEvent } from "@/platform/tenancy/audit";
 import { getErrorMessage } from "@/shared/lib/safe";
 import { toNumber } from "@/modules/sales/invoice-utils";
+import { parseOfxTransactions } from "@/modules/banking/ofx";
 
 export const dynamic = "force-dynamic";
 
+const lineSchema = z.object({
+  bookedAt: z.string().min(8),
+  amount: z.coerce.number(),
+  description: z.string().trim().min(1).max(300),
+  reference: z.string().trim().max(120).optional().nullable(),
+  counterparty: z.string().trim().max(200).optional().nullable(),
+});
+
 const importSchema = z.object({
   bankAccountId: z.string().trim().min(1),
-  lines: z
-    .array(
-      z.object({
-        bookedAt: z.string().min(8),
-        amount: z.coerce.number(),
-        description: z.string().trim().min(1).max(300),
-        reference: z.string().trim().max(120).optional().nullable(),
-        counterparty: z.string().trim().max(200).optional().nullable(),
-      }),
-    )
-    .min(1)
-    .max(500),
+  lines: z.array(lineSchema).max(500).optional(),
+  /** Raw OFX/QFX body — parsed server-side when lines omitted */
+  ofxText: z.string().trim().min(20).max(2_000_000).optional(),
 });
 
 export async function GET(request: Request) {
@@ -52,6 +52,8 @@ export async function GET(request: Request) {
         counterparty: l.counterparty,
         status: l.status,
         matchedInvoiceId: l.matchedInvoiceId,
+        matchedPurchaseInvoiceId: l.matchedPurchaseInvoiceId,
+        matchNote: l.matchNote,
         bankAccount: l.bankAccount,
       })),
     });
@@ -80,8 +82,25 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Λογαριασμός δεν βρέθηκε" }, { status: 404 });
     }
 
+    let lines = body.lines ?? [];
+    if (body.ofxText) {
+      lines = parseOfxTransactions(body.ofxText);
+    }
+    if (lines.length === 0) {
+      return NextResponse.json(
+        { error: "Καμία έγκυρη γραμμή (CSV/OFX)" },
+        { status: 400 },
+      );
+    }
+    if (lines.length > 500) {
+      return NextResponse.json(
+        { error: "Μέγιστο 500 κινήσεις ανά import" },
+        { status: 400 },
+      );
+    }
+
     const created = await prisma.$transaction(
-      body.lines.map((line) =>
+      lines.map((line) =>
         prisma.bankStatementLine.create({
           data: {
             tenantId: session.tenantId,
@@ -102,7 +121,10 @@ export async function POST(request: Request) {
       action: "banking.import",
       entity: "bank_account",
       entityId: account.id,
-      meta: { lines: created.length },
+      meta: {
+        lines: created.length,
+        format: body.ofxText ? "ofx" : "csv",
+      },
     });
 
     return NextResponse.json({ imported: created.length }, { status: 201 });

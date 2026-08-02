@@ -1,0 +1,26 @@
+{
+  "name": "SoftifyOS",
+  "short_name": "SoftifyOS",
+  "description": "SoftifyOS — επιχειρησιακή πλατφόρμα ERP",
+  "start_url": "/",
+  "display": "standalone",
+  "theme_color": "#0f172a",
+  "background_color": "#F1F4F7",
+  "lang": "el",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "maskable"
+    }
+  ],
+  "categories": ["business", "finance", "productivity"],
+  "orientation": "any"
+}

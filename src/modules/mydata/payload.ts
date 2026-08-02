@@ -11,7 +11,52 @@ function round2(n: number) {
   return Math.round(n * 100) / 100;
 }
 
-/** Build AADE InvoicesDoc XML from SoftifyOS invoice (+ company settings). */
+async function resolveIssuer(
+  db: Db,
+  input: { tenantId: string; legalEntityId?: string | null },
+) {
+  const [settings, legalEntity] = await Promise.all([
+    db.tenantSettings.findUnique({
+      where: { tenantId: input.tenantId },
+      select: {
+        legalName: true,
+        vatNumber: true,
+        country: true,
+      },
+    }),
+    input.legalEntityId
+      ? db.legalEntity.findFirst({
+          where: { id: input.legalEntityId, tenantId: input.tenantId },
+          select: { vatNumber: true, name: true },
+        })
+      : Promise.resolve(null),
+  ]);
+
+  const issuerVat = (
+    legalEntity?.vatNumber ||
+    settings?.vatNumber ||
+    ""
+  ).replace(/\s/g, "");
+  if (!issuerVat) {
+    throw new Error(
+      "Λείπει ΑΦΜ επιχείρησης (νομική οντότητα ή Ρυθμίσεις) για myDATA",
+    );
+  }
+
+  return {
+    issuerVat,
+    country: settings?.country || "GR",
+    legalName: legalEntity?.name || settings?.legalName || "",
+  };
+}
+
+function defaultSalesInvoiceType(kind: string | null | undefined) {
+  if (kind === "SALES_CREDIT") return "5.1";
+  if (kind === "RETAIL_RECEIPT") return "11.1";
+  return "1.1";
+}
+
+/** Build AADE InvoicesDoc XML from SoftifyOS invoice (+ LE / company settings). */
 export async function buildInvoiceInvoicesDocXml(
   db: Db,
   input: {
@@ -21,58 +66,48 @@ export async function buildInvoiceInvoicesDocXml(
     vatCategory?: string | null;
   },
 ): Promise<string> {
-  const [invoice, settings] = await Promise.all([
-    db.invoice.findFirst({
-      where: { id: input.invoiceId, tenantId: input.tenantId },
-      include: {
-        customer: {
-          select: {
-            name: true,
-            vatNumber: true,
-            country: true,
-          },
-        },
-        series: {
-          select: {
-            code: true,
-            myDataInvoiceType: true,
-            myDataVatCategory: true,
-          },
-        },
-        lines: {
-          orderBy: { position: "asc" },
-          select: {
-            quantity: true,
-            unitPrice: true,
-            vatRate: true,
-            lineTotal: true,
-          },
+  const invoice = await db.invoice.findFirst({
+    where: { id: input.invoiceId, tenantId: input.tenantId },
+    include: {
+      customer: {
+        select: {
+          name: true,
+          vatNumber: true,
+          country: true,
         },
       },
-    }),
-    db.tenantSettings.findUnique({
-      where: { tenantId: input.tenantId },
-      select: {
-        legalName: true,
-        vatNumber: true,
-        country: true,
+      series: {
+        select: {
+          code: true,
+          myDataInvoiceType: true,
+          myDataVatCategory: true,
+        },
       },
-    }),
-  ]);
+      lines: {
+        orderBy: { position: "asc" },
+        select: {
+          quantity: true,
+          unitPrice: true,
+          vatRate: true,
+          lineTotal: true,
+        },
+      },
+    },
+  });
 
   if (!invoice) {
     throw new Error("Τιμολόγιο δεν βρέθηκε για myDATA payload");
   }
 
-  const issuerVat = (settings?.vatNumber || "").replace(/\s/g, "");
-  if (!issuerVat) {
-    throw new Error("Λείπει ΑΦΜ επιχείρησης (Ρυθμίσεις εταιρείας) για myDATA");
-  }
+  const issuer = await resolveIssuer(db, {
+    tenantId: input.tenantId,
+    legalEntityId: invoice.legalEntityId,
+  });
 
   const invoiceType =
     input.invoiceType ||
     invoice.series?.myDataInvoiceType ||
-    (invoice.kind === "SALES_CREDIT" ? "5.1" : "1.1");
+    defaultSalesInvoiceType(invoice.kind);
   const vatCategory =
     input.vatCategory || invoice.series?.myDataVatCategory || "1";
 
@@ -119,13 +154,213 @@ export async function buildInvoiceInvoicesDocXml(
 <InvoicesDoc xmlns="http://www.aade.gr/myDATA/invoice/v1.0">
   <invoice>
     <issuer>
-      <vatNumber>${escapeXml(issuerVat)}</vatNumber>
-      <country>${escapeXml(settings?.country || "GR")}</country>
+      <vatNumber>${escapeXml(issuer.issuerVat)}</vatNumber>
+      <country>${escapeXml(issuer.country)}</country>
       <branch>0</branch>
     </issuer>
     ${counterpart}
     <invoiceHeader>
       <series>${escapeXml(seriesCode)}</series>
+      <aa>${aa}</aa>
+      <issueDate>${issueDate}</issueDate>
+      <invoiceType>${escapeXml(invoiceType)}</invoiceType>
+      <currency>EUR</currency>
+    </invoiceHeader>
+    ${lineXml}
+    <invoiceSummary>
+      <totalNetValue>${net.toFixed(2)}</totalNetValue>
+      <totalVatAmount>${vat.toFixed(2)}</totalVatAmount>
+      <totalWithheldAmount>0.00</totalWithheldAmount>
+      <totalFeesAmount>0.00</totalFeesAmount>
+      <totalStampDutyAmount>0.00</totalStampDutyAmount>
+      <totalOtherTaxesAmount>0.00</totalOtherTaxesAmount>
+      <totalDeductionsAmount>0.00</totalDeductionsAmount>
+      <totalGrossValue>${total.toFixed(2)}</totalGrossValue>
+    </invoiceSummary>
+  </invoice>
+</InvoicesDoc>`;
+}
+
+/** Delivery note → myDATA type 9.3 (goods movement). */
+export async function buildDeliveryNoteInvoicesDocXml(
+  db: Db,
+  input: {
+    tenantId: string;
+    deliveryNoteId: string;
+    invoiceType?: string | null;
+  },
+): Promise<string> {
+  const note = await db.deliveryNote.findFirst({
+    where: { id: input.deliveryNoteId, tenantId: input.tenantId },
+    include: {
+      customer: {
+        select: { name: true, vatNumber: true, country: true },
+      },
+      series: {
+        select: { code: true, myDataInvoiceType: true },
+      },
+      lines: {
+        orderBy: { position: "asc" },
+        select: { description: true, quantity: true },
+      },
+    },
+  });
+  if (!note) throw new Error("Δελτίο αποστολής δεν βρέθηκε για myDATA");
+
+  const issuer = await resolveIssuer(db, {
+    tenantId: input.tenantId,
+    legalEntityId: note.legalEntityId,
+  });
+
+  const invoiceType =
+    input.invoiceType || note.series?.myDataInvoiceType || "9.3";
+  const seriesCode = note.series?.code || "ΔΑ";
+  const aaMatch = note.number.match(/(\d+)\s*$/);
+  const aa = aaMatch ? Number(aaMatch[1]) : 1;
+  const issueDate = fmtDate(note.issuedAt ?? note.createdAt);
+  const counterVat = (note.customer?.vatNumber || "").replace(/\s/g, "");
+
+  const lineXml = (note.lines.length ? note.lines : [{ description: "Μεταφορά", quantity: 1 }])
+    .map((l, idx) => {
+      return `<invoiceDetails>
+  <lineNumber>${idx + 1}</lineNumber>
+  <netValue>0.00</netValue>
+  <vatCategory>8</vatCategory>
+  <vatAmount>0.00</vatAmount>
+  <quantity>${Number(l.quantity).toFixed(3)}</quantity>
+  <incomeClassification>
+    <classificationType>E3_561_001</classificationType>
+    <classificationCategory>category1_1</classificationCategory>
+    <amount>0.00</amount>
+  </incomeClassification>
+</invoiceDetails>`;
+    })
+    .join("\n");
+
+  const counterpart =
+    counterVat.length >= 9
+      ? `<counterpart>
+  <vatNumber>${escapeXml(counterVat)}</vatNumber>
+  <country>${escapeXml(note.customer?.country || "GR")}</country>
+  <branch>0</branch>
+  <name>${escapeXml(note.customer?.name || "")}</name>
+</counterpart>`
+      : "";
+
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<InvoicesDoc xmlns="http://www.aade.gr/myDATA/invoice/v1.0">
+  <invoice>
+    <issuer>
+      <vatNumber>${escapeXml(issuer.issuerVat)}</vatNumber>
+      <country>${escapeXml(issuer.country)}</country>
+      <branch>0</branch>
+    </issuer>
+    ${counterpart}
+    <invoiceHeader>
+      <series>${escapeXml(seriesCode)}</series>
+      <aa>${aa}</aa>
+      <issueDate>${issueDate}</issueDate>
+      <invoiceType>${escapeXml(invoiceType)}</invoiceType>
+      <currency>EUR</currency>
+    </invoiceHeader>
+    ${lineXml}
+    <invoiceSummary>
+      <totalNetValue>0.00</totalNetValue>
+      <totalVatAmount>0.00</totalVatAmount>
+      <totalWithheldAmount>0.00</totalWithheldAmount>
+      <totalFeesAmount>0.00</totalFeesAmount>
+      <totalStampDutyAmount>0.00</totalStampDutyAmount>
+      <totalOtherTaxesAmount>0.00</totalOtherTaxesAmount>
+      <totalDeductionsAmount>0.00</totalDeductionsAmount>
+      <totalGrossValue>0.00</totalGrossValue>
+    </invoiceSummary>
+  </invoice>
+</InvoicesDoc>`;
+}
+
+/** Purchase invoice → expense classification for AADE. */
+export async function buildPurchaseInvoiceInvoicesDocXml(
+  db: Db,
+  input: {
+    tenantId: string;
+    purchaseInvoiceId: string;
+    invoiceType?: string | null;
+    vatCategory?: string | null;
+  },
+): Promise<string> {
+  const pi = await db.purchaseInvoice.findFirst({
+    where: { id: input.purchaseInvoiceId, tenantId: input.tenantId },
+    include: {
+      supplier: {
+        select: { name: true, vatNumber: true },
+      },
+      lines: {
+        orderBy: { lineNo: "asc" },
+        select: {
+          description: true,
+          netAmount: true,
+          vatAmount: true,
+          vatRate: true,
+        },
+      },
+    },
+  });
+  if (!pi) throw new Error("Τιμολόγιο αγοράς δεν βρέθηκε για myDATA");
+
+  const issuer = await resolveIssuer(db, {
+    tenantId: input.tenantId,
+    legalEntityId: pi.legalEntityId,
+  });
+
+  const invoiceType = input.invoiceType || "1.1";
+  const vatCategory = input.vatCategory || "1";
+  const aaMatch = pi.number.match(/(\d+)\s*$/);
+  const aa = aaMatch ? Number(aaMatch[1]) : 1;
+  const issueDate = fmtDate(pi.issueDate);
+  const counterVat = (pi.supplier?.vatNumber || "").replace(/\s/g, "");
+  const net = round2(Number(pi.netAmount));
+  const vat = round2(Number(pi.vatAmount));
+  const total = round2(Number(pi.total));
+
+  const lineXml = pi.lines
+    .map((l, idx) => {
+      const lineNet = round2(Number(l.netAmount));
+      const lineVat = round2(Number(l.vatAmount));
+      return `<invoiceDetails>
+  <lineNumber>${idx + 1}</lineNumber>
+  <netValue>${lineNet.toFixed(2)}</netValue>
+  <vatCategory>${escapeXml(vatCategory)}</vatCategory>
+  <vatAmount>${lineVat.toFixed(2)}</vatAmount>
+  <expensesClassification>
+    <classificationType>E3_102_001</classificationType>
+    <classificationCategory>category2_1</classificationCategory>
+    <amount>${lineNet.toFixed(2)}</amount>
+  </expensesClassification>
+</invoiceDetails>`;
+    })
+    .join("\n");
+
+  const counterpart =
+    counterVat.length >= 9
+      ? `<counterpart>
+  <vatNumber>${escapeXml(counterVat)}</vatNumber>
+  <country>GR</country>
+  <branch>0</branch>
+  <name>${escapeXml(pi.supplier?.name || "")}</name>
+</counterpart>`
+      : "";
+
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<InvoicesDoc xmlns="http://www.aade.gr/myDATA/invoice/v1.0">
+  <invoice>
+    <issuer>
+      <vatNumber>${escapeXml(issuer.issuerVat)}</vatNumber>
+      <country>${escapeXml(issuer.country)}</country>
+      <branch>0</branch>
+    </issuer>
+    ${counterpart}
+    <invoiceHeader>
+      <series>ΑΓ</series>
       <aa>${aa}</aa>
       <issueDate>${issueDate}</issueDate>
       <invoiceType>${escapeXml(invoiceType)}</invoiceType>

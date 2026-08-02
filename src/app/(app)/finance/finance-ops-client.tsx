@@ -327,6 +327,31 @@ export function FinanceOpsClient({
     }
   }
 
+  async function cancelMyData(id: string) {
+    if (!window.confirm("Ακύρωση δήλωσης στην ΑΑΔΕ (CancelInvoice);")) return;
+    setBusyId(id);
+    setError(null);
+    try {
+      const res = await fetch(`/api/mydata/submissions/${id}/cancel`, {
+        method: "POST",
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || "Αποτυχία ακύρωσης");
+      setRows((prev) =>
+        prev.map((r) =>
+          r.id === id
+            ? { ...r, status: data.item?.status ?? "CANCELLED" }
+            : r,
+        ),
+      );
+      toast.success("Ακυρώθηκε στην ΑΑΔΕ / ουρά");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Σφάλμα");
+    } finally {
+      setBusyId(null);
+    }
+  }
+
   async function processBatch() {
     setBusyId("batch");
     setError(null);
@@ -722,6 +747,23 @@ export function FinanceOpsClient({
             balance: r.balance,
             customer: r.customer.name,
           }))}
+          openPurchases={(purchaseInvoices.length
+            ? purchaseInvoices
+                .filter((p) => p.status === "POSTED" || p.status === "PARTIAL")
+                .map((p) => ({
+                  id: p.id,
+                  number: p.number,
+                  balance: Math.max(0, p.total - p.paidAmount),
+                  supplier: p.supplierName,
+                }))
+                .filter((p) => p.balance > 0)
+            : apRows.map((r) => ({
+                id: r.id,
+                number: r.number,
+                balance: r.balance,
+                supplier: r.supplier.name,
+              }))
+          ).filter((p) => p.balance > 0)}
         />
       ) : null}
 
@@ -783,19 +825,31 @@ export function FinanceOpsClient({
                     {r.mark || "—"}
                   </td>
                   <td className="px-3 py-2 text-right">
-                    {canWrite &&
-                    (r.status === "PENDING" ||
-                      r.status === "SENT" ||
-                      r.status === "REJECTED") ? (
-                      <button
-                        type="button"
-                        disabled={busyId === r.id}
-                        onClick={() => processMyData(r.id)}
-                        className="rounded-md bg-teal-700 px-2 py-1 text-xs font-medium text-white disabled:opacity-50"
-                      >
-                        Διαβίβαση
-                      </button>
-                    ) : null}
+                    <div className="flex justify-end gap-1">
+                      {canWrite &&
+                      (r.status === "PENDING" ||
+                        r.status === "SENT" ||
+                        r.status === "REJECTED") ? (
+                        <button
+                          type="button"
+                          disabled={busyId === r.id}
+                          onClick={() => processMyData(r.id)}
+                          className="rounded-md bg-teal-700 px-2 py-1 text-xs font-medium text-white disabled:opacity-50"
+                        >
+                          Διαβίβαση
+                        </button>
+                      ) : null}
+                      {canWrite && r.status === "ACCEPTED" && r.mark ? (
+                        <button
+                          type="button"
+                          disabled={busyId === r.id}
+                          onClick={() => void cancelMyData(r.id)}
+                          className="rounded-md border border-rose-200 bg-rose-50 px-2 py-1 text-xs font-medium text-rose-700 disabled:opacity-50"
+                        >
+                          Ακύρωση ΑΑΔΕ
+                        </button>
+                      ) : null}
+                    </div>
                   </td>
                 </tr>
               ))}

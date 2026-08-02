@@ -95,6 +95,8 @@ export type InvoiceDetailPayload = {
     note: string | null;
     paidAt: string;
     changeAmount: number;
+    settlementId?: string | null;
+    settlement?: { id: string; number: string; status: string } | null;
   }>;
   creditNotes: Array<{
     id: string;
@@ -351,6 +353,23 @@ export function InvoiceDetailClient({
         return;
       }
       setMessage(`myDATA ${data.item?.mark ?? "OK"}`);
+      router.refresh();
+    });
+  }
+
+  async function cancelMyData(id: string) {
+    if (!window.confirm("Ακύρωση δήλωσης στην ΑΑΔΕ / myDATA;")) return;
+    startTransition(async () => {
+      setError(null);
+      const res = await fetch(`/api/mydata/submissions/${id}/cancel`, {
+        method: "POST",
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setError(data.error || "Αποτυχία ακύρωσης myDATA");
+        return;
+      }
+      setMessage("Η δήλωση myDATA ακυρώθηκε");
       router.refresh();
     });
   }
@@ -929,6 +948,21 @@ export function InvoiceDetailClient({
                               ? ` · ρέστα ${formatEUR(p.changeAmount)}`
                               : ""}
                           </p>
+                          {p.settlement?.number ? (
+                            <p className="mt-1 text-xs">
+                              <Link
+                                href="/finance?section=settlements"
+                                className="font-medium text-teal-700 hover:underline"
+                              >
+                                Εξόφληση {p.settlement.number}
+                              </Link>
+                              {p.settlement.status === "VOIDED" ? (
+                                <span className="ml-1 text-rose-600">
+                                  (ακυρωμένη)
+                                </span>
+                              ) : null}
+                            </p>
+                          ) : null}
                           {p.note ? (
                             <p className="mt-1 text-xs text-slate-600">{p.note}</p>
                           ) : null}
@@ -1074,16 +1108,28 @@ export function InvoiceDetailClient({
                             {m.mark ? ` · ${m.mark}` : ""}
                           </p>
                         </div>
-                        {invoice.canWrite && m.status === "PENDING" ? (
-                          <button
-                            type="button"
-                            disabled={pending}
-                            onClick={() => processMyData(m.id)}
-                            className="rounded-lg bg-teal-700 px-2.5 py-1 text-xs font-medium text-white disabled:opacity-50"
-                          >
-                            Διαβίβαση
-                          </button>
-                        ) : null}
+                        <div className="flex flex-wrap gap-1.5">
+                          {invoice.canWrite && m.status === "PENDING" ? (
+                            <button
+                              type="button"
+                              disabled={pending}
+                              onClick={() => processMyData(m.id)}
+                              className="rounded-lg bg-teal-700 px-2.5 py-1 text-xs font-medium text-white disabled:opacity-50"
+                            >
+                              Διαβίβαση
+                            </button>
+                          ) : null}
+                          {invoice.canWrite && m.status === "ACCEPTED" ? (
+                            <button
+                              type="button"
+                              disabled={pending}
+                              onClick={() => cancelMyData(m.id)}
+                              className="rounded-lg border border-rose-200 bg-rose-50 px-2.5 py-1 text-xs font-medium text-rose-800 disabled:opacity-50"
+                            >
+                              Ακύρωση ΑΑΔΕ
+                            </button>
+                          ) : null}
+                        </div>
                       </li>
                     ))}
                   </ul>

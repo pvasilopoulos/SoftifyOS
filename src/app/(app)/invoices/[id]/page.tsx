@@ -96,6 +96,8 @@ export default async function InvoiceDetailPage({
           note: true,
           paidAt: true,
           changeAmount: true,
+          settlementId: true,
+          settlement: { select: { id: true, number: true, status: true } },
         },
       },
       lines: {
@@ -247,6 +249,8 @@ export default async function InvoiceDetailPage({
       note: p.note,
       paidAt: p.paidAt.toISOString(),
       changeAmount: toNumber(p.changeAmount),
+      settlementId: p.settlementId,
+      settlement: p.settlement,
     })),
     creditNotes: invoice.creditNotes.map((c) => ({
       id: c.id,

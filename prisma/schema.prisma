@@ -1397,38 +1397,42 @@ enum BankLineStatus {
 }
 
 model BankAccount {
-  id        String   @id @default(cuid())
-  tenantId  String
-  code      String
-  name      String
-  iban      String?
-  currency  String   @default("EUR")
-  isActive  Boolean  @default(true)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id            String   @id @default(cuid())
+  tenantId      String
+  legalEntityId String?
+  code          String
+  name          String
+  iban          String?
+  currency      String   @default("EUR")
+  isActive      Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
 
-  tenant Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  lines  BankStatementLine[]
+  tenant      Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  legalEntity LegalEntity?        @relation(fields: [legalEntityId], references: [id], onDelete: SetNull)
+  lines       BankStatementLine[]
 
   @@unique([tenantId, code])
   @@index([tenantId, isActive])
+  @@index([tenantId, legalEntityId])
   @@map("bank_accounts")
 }
 
 model BankStatementLine {
-  id              String         @id @default(cuid())
-  tenantId        String
-  bankAccountId   String
-  bookedAt        DateTime
-  amount          Decimal        @db.Decimal(14, 2)
-  description     String
-  reference       String?
-  counterparty    String?
-  status          BankLineStatus @default(UNMATCHED)
-  matchedInvoiceId String?
-  matchNote       String?
-  createdAt       DateTime       @default(now())
-  updatedAt       DateTime       @updatedAt
+  id                       String         @id @default(cuid())
+  tenantId                 String
+  bankAccountId            String
+  bookedAt                 DateTime
+  amount                   Decimal        @db.Decimal(14, 2)
+  description              String
+  reference                String?
+  counterparty             String?
+  status                   BankLineStatus @default(UNMATCHED)
+  matchedInvoiceId         String?
+  matchedPurchaseInvoiceId String?
+  matchNote                String?
+  createdAt                DateTime       @default(now())
+  updatedAt                DateTime       @updatedAt
 
   tenant      Tenant      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   bankAccount BankAccount @relation(fields: [bankAccountId], references: [id], onDelete: Cascade)
@@ -1436,6 +1440,7 @@ model BankStatementLine {
   @@index([tenantId, status, bookedAt(sort: Desc)])
   @@index([tenantId, bankAccountId, bookedAt(sort: Desc)])
   @@index([tenantId, matchedInvoiceId])
+  @@index([tenantId, matchedPurchaseInvoiceId])
   @@map("bank_statement_lines")
 }
 
@@ -2947,6 +2952,7 @@ model LegalEntity {
   documentSeries   DocumentSeries[]
   membershipAccess MembershipCompany[]
   settlements      Settlement[]
+  bankAccounts     BankAccount[]
   icMatchesA       IntercompanyMatch[]  @relation("IcEntityA")
   icMatchesB       IntercompanyMatch[]  @relation("IcEntityB")
 

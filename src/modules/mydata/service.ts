@@ -1,6 +1,11 @@
 import type { Prisma, PrismaClient } from "@/generated/prisma/client";
-import { sendInvoicesXml, type MyDataEnv } from "./client";
-import { buildInvoiceInvoicesDocXml, readMyDataConfig } from "./payload";
+import { cancelInvoiceMark, sendInvoicesXml, type MyDataEnv } from "./client";
+import {
+  buildDeliveryNoteInvoicesDocXml,
+  buildInvoiceInvoicesDocXml,
+  buildPurchaseInvoiceInvoicesDocXml,
+  readMyDataConfig,
+} from "./payload";
 
 type Db = PrismaClient | Prisma.TransactionClient;
 
@@ -142,9 +147,28 @@ export async function processMyDataSubmission(
           invoiceType: row.invoiceType,
           vatCategory: row.vatCategory,
         });
+      } else if (
+        row.entityType === "delivery_note" ||
+        row.entityType === "deliveryNote"
+      ) {
+        xml = await buildDeliveryNoteInvoicesDocXml(db, {
+          tenantId: input.tenantId,
+          deliveryNoteId: row.entityId,
+          invoiceType: row.invoiceType,
+        });
+      } else if (
+        row.entityType === "purchase_invoice" ||
+        row.entityType === "purchaseInvoice"
+      ) {
+        xml = await buildPurchaseInvoiceInvoicesDocXml(db, {
+          tenantId: input.tenantId,
+          purchaseInvoiceId: row.entityId,
+          invoiceType: row.invoiceType,
+          vatCategory: row.vatCategory,
+        });
       } else {
         throw new Error(
-          `Live myDATA υποστηρίζει entityType=invoice (λήφθηκε ${row.entityType})`,
+          `Live myDATA: μη υποστηριζόμενο entityType=${row.entityType}`,
         );
       }
 
@@ -246,6 +270,76 @@ export async function processMyDataSubmission(
         uid,
         note: "Local simulator",
         processedAt: now.toISOString(),
+      },
+    },
+  });
+}
+
+/** Cancel an ACCEPTED myDATA submission via AADE CancelInvoice (or simulator). */
+export async function cancelMyDataSubmission(
+  db: Db,
+  input: { tenantId: string; id: string },
+) {
+  const row = await db.myDataSubmission.findFirst({
+    where: { id: input.id, tenantId: input.tenantId },
+  });
+  if (!row) throw new Error("Η εγγραφή myDATA δεν βρέθηκε");
+  if (row.status === "CANCELLED") return row;
+  if (row.status !== "ACCEPTED" || !row.mark) {
+    throw new Error("Ακύρωση μόνο για αποδεκτές δηλώσεις με MARK");
+  }
+
+  const config = await resolveMyDataConfig(db, input.tenantId);
+  const env: MyDataEnv = config.myDataEnv;
+  const now = new Date();
+
+  if (env === "simulator") {
+    return db.myDataSubmission.update({
+      where: { id: row.id },
+      data: {
+        status: "CANCELLED",
+        errorMessage: null,
+        response: {
+          ...((row.response as object) || {}),
+          cancelledAt: now.toISOString(),
+          mode: env,
+          note: "Local simulator cancel",
+        },
+      },
+    });
+  }
+
+  const userId = config.myDataUserId?.trim();
+  const subscriptionKey = config.myDataSubscriptionKey?.trim();
+  if (!userId || !subscriptionKey) {
+    throw new Error("Λείπουν credentials ΑΑΔΕ στις Integrations");
+  }
+
+  const result = await cancelInvoiceMark(
+    env,
+    { userId, subscriptionKey },
+    row.mark,
+  );
+  if (!result.ok) {
+    throw new Error(
+      result.errors.map((e) => e.message).join("; ") ||
+        `Απόρριψη ακύρωσης ΑΑΔΕ HTTP ${result.status}`,
+    );
+  }
+
+  return db.myDataSubmission.update({
+    where: { id: row.id },
+    data: {
+      status: "CANCELLED",
+      errorMessage: null,
+      response: {
+        ...((row.response as object) || {}),
+        cancelledAt: now.toISOString(),
+        mode: env,
+        live: true,
+        endpoint: result.endpoint,
+        httpStatus: result.status,
+        rawXml: result.rawXml.slice(0, 8000),
       },
     },
   });

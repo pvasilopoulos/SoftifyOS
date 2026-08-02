@@ -22,6 +22,12 @@ export const metadata: Metadata = {
   description:
     "SoftifyOS — επιχειρησιακή πλατφόρμα ERP. Template v2 Desktop + Mobile.",
   applicationName: "SoftifyOS",
+  manifest: "/manifest.webmanifest",
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: "default",
+    title: "SoftifyOS",
+  },
 };
 
 export const viewport: Viewport = {

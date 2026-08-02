@@ -11,6 +11,7 @@ import {
 } from "@/modules/ledger/reports";
 import { loadCostCenterReport } from "@/modules/ledger/controlling";
 import {
+  loadCashbook,
   loadCustomerCard,
   loadSupplierCard,
   loadVatBooks,
@@ -142,6 +143,18 @@ export async function GET(request: Request) {
         );
       }
       return NextResponse.json({ kind, ...card });
+    }
+    if (kind === "cashbook") {
+      const fromDate = opts.from ?? new Date(new Date().getFullYear(), 0, 1);
+      const toDate = opts.to ?? new Date();
+      return NextResponse.json({
+        kind,
+        ...(await loadCashbook(prisma, session.tenantId, {
+          from: fromDate,
+          to: toDate,
+          legalEntityId: opts.legalEntityId,
+        })),
+      });
     }
     return NextResponse.json({ error: "Unknown report kind" }, { status: 400 });
   } catch (error) {

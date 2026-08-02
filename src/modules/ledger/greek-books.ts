@@ -406,3 +406,74 @@ export async function postOpeningBalances(
     lines: journalLines,
   });
 }
+
+export type CashbookMethodRow = {
+  methodCode: string;
+  receipts: number;
+  payments: number;
+  net: number;
+  count: number;
+};
+
+/** Ταμείο / τρόποι εξόφλησης από Settlement Method Lines. */
+export async function loadCashbook(
+  db: Db,
+  tenantId: string,
+  opts: { from: Date; to: Date; legalEntityId?: string | null },
+) {
+  const settlements = await db.settlement.findMany({
+    where: {
+      tenantId,
+      status: "POSTED",
+      settledAt: { gte: opts.from, lte: opts.to },
+      ...(opts.legalEntityId ? { legalEntityId: opts.legalEntityId } : {}),
+    },
+    select: {
+      kind: true,
+      methods: { select: { methodCode: true, amount: true } },
+    },
+  });
+
+  const map = new Map<string, CashbookMethodRow>();
+  let receiptTotal = 0;
+  let paymentTotal = 0;
+
+  for (const s of settlements) {
+    const sign = s.kind === "PAYMENT" ? -1 : 1;
+    for (const m of s.methods) {
+      const code = m.methodCode || "OTHER";
+      const amt = toNumber(m.amount);
+      const row = map.get(code) ?? {
+        methodCode: code,
+        receipts: 0,
+        payments: 0,
+        net: 0,
+        count: 0,
+      };
+      if (sign > 0) {
+        row.receipts = round2(row.receipts + amt);
+        receiptTotal = round2(receiptTotal + amt);
+      } else {
+        row.payments = round2(row.payments + amt);
+        paymentTotal = round2(paymentTotal + amt);
+      }
+      row.net = round2(row.receipts - row.payments);
+      row.count += 1;
+      map.set(code, row);
+    }
+  }
+
+  const rows = [...map.values()].sort((a, b) =>
+    a.methodCode.localeCompare(b.methodCode, "el"),
+  );
+
+  return {
+    from: opts.from.toISOString(),
+    to: opts.to.toISOString(),
+    receiptTotal,
+    paymentTotal,
+    netTotal: round2(receiptTotal - paymentTotal),
+    settlementCount: settlements.length,
+    rows,
+  };
+}

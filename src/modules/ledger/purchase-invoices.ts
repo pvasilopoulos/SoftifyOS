@@ -130,5 +130,19 @@ export async function createPurchaseInvoice(
     },
   });
 
+  try {
+    const { enqueueMyDataSubmission } = await import("@/modules/mydata/service");
+    await enqueueMyDataSubmission(db, {
+      tenantId: input.tenantId,
+      entityType: "purchase_invoice",
+      entityId: updated.id,
+      entityNumber: updated.number,
+      invoiceType: "1.1",
+      vatCategory: "1",
+    });
+  } catch {
+    // myDATA enqueue is best-effort on purchase post
+  }
+
   return { invoice: updated, journalId: journal?.id ?? null };
 }
