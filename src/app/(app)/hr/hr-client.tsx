@@ -36,6 +36,7 @@ import {
 } from "@/modules/hr/labels";
 import { PageHeader } from "@/shared/ui/page-header";
 import { Badge } from "@/shared/ui/badge";
+import { WorkCardPanel } from "./work-card-panel";
 import { Button } from "@/shared/ui/button";
 import { cn } from "@/shared/lib/cn";
 
@@ -116,6 +117,7 @@ type LeaveBalanceRow = {
 type WorkCard = {
   id: string;
   cardNumber: string;
+  qrToken?: string | null;
   status: string;
   issuedAt: string;
   employee: { id: string; code: string; firstName: string; lastName: string };
@@ -127,6 +129,8 @@ type WorkCardEvent = {
   source: string;
   occurredAt: string;
   erganiStatus: string;
+  isLate?: boolean;
+  isEarly?: boolean;
   employee: { id: string; code: string; firstName: string; lastName: string };
   workCard: { id: string; cardNumber: string } | null;
   site: SiteOpt | null;
@@ -291,7 +295,7 @@ const NAV: Array<{
       {
         id: "workcard",
         label: "Κάρτα εργασίας",
-        hint: "Έκδοση · χτυπήματα",
+        hint: "QR · live · kiosk",
         icon: IdCard,
       },
       {
@@ -343,7 +347,7 @@ const SECTION_HELP: Record<Section, { title: string; body: string }> = {
   },
   workcard: {
     title: "Ψηφιακή κάρτα εργασίας",
-    body: "Έκδοση κάρτας, αλλαγή κατάστασης (ACTIVE/INACTIVE/LOST) και χτύπημα παρουσίας με εγκατάσταση.",
+    body: "QR scanner check-in/out, live board παρουσίας, kiosk mode, έκδοση κάρτας με QR badge, καθυστερήσεις vs ωράριο και ουρά Εργάνη.",
   },
   ergani: {
     title: "Ουρά Εργάνη",
@@ -1680,16 +1684,9 @@ export function HrClient({
               activeEmployees={activeEmployees}
               sites={sites}
               canWrite={canWrite}
-              busy={busy}
-              cardForm={cardForm}
-              setCardForm={setCardForm}
-              punchForm={punchForm}
-              setPunchForm={setPunchForm}
-              onIssue={issueCard}
-              onPatchStatus={patchCardStatus}
-              onPunch={punch}
-              inputCls={inputCls}
-              labelCls={labelCls}
+              onRefresh={async () => {
+                router.refresh();
+              }}
             />
           ) : null}
 
@@ -3061,278 +3058,6 @@ function SchedulesPanel({
           </table>
         </div>
       </section>
-    </div>
-  );
-}
-
-function WorkCardPanel({
-  workCards,
-  events,
-  activeEmployees,
-  sites,
-  canWrite,
-  busy,
-  cardForm,
-  setCardForm,
-  punchForm,
-  setPunchForm,
-  onIssue,
-  onPatchStatus,
-  onPunch,
-  inputCls,
-  labelCls,
-}: {
-  workCards: WorkCard[];
-  events: WorkCardEvent[];
-  activeEmployees: Employee[];
-  sites: SiteOpt[];
-  canWrite: boolean;
-  busy: boolean;
-  cardForm: { employeeId: string; cardNumber: string; notes: string };
-  setCardForm: Dispatch<
-    SetStateAction<{
-      employeeId: string;
-      cardNumber: string;
-      notes: string;
-    }>
-  >;
-  punchForm: {
-    employeeId: string;
-    type: string;
-    siteId: string;
-    note: string;
-  };
-  setPunchForm: Dispatch<
-    SetStateAction<{
-      employeeId: string;
-      type: string;
-      siteId: string;
-      note: string;
-    }>
-  >;
-  onIssue: (e: FormEvent) => void;
-  onPatchStatus: (id: string, status: "ACTIVE" | "INACTIVE" | "LOST") => void;
-  onPunch: (e: FormEvent) => void;
-  inputCls: string;
-  labelCls: string;
-}) {
-  return (
-    <div className="grid gap-4 xl:grid-cols-2">
-      <div className="space-y-3">
-        {canWrite ? (
-          <form onSubmit={onIssue} className="soft-panel space-y-3 p-4">
-            <h3 className="text-sm font-semibold">
-              Έκδοση ψηφιακής κάρτας εργασίας
-            </h3>
-            <label className={labelCls}>
-              Εργαζόμενος
-              <select
-                required
-                value={cardForm.employeeId}
-                onChange={(ev) =>
-                  setCardForm((f) => ({ ...f, employeeId: ev.target.value }))
-                }
-                className={inputCls}
-              >
-                <option value="">—</option>
-                {activeEmployees.map((e) => (
-                  <option key={e.id} value={e.id}>
-                    {empName(e)}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className={labelCls}>
-              Αριθμός κάρτας
-              <input
-                required
-                value={cardForm.cardNumber}
-                onChange={(ev) =>
-                  setCardForm((f) => ({ ...f, cardNumber: ev.target.value }))
-                }
-                className={cn(inputCls, "font-mono")}
-                placeholder="π.χ. WC-0001"
-              />
-            </label>
-            <Button type="submit" size="sm" disabled={busy}>
-              Έκδοση
-            </Button>
-          </form>
-        ) : null}
-
-        <section className="soft-panel overflow-hidden">
-          <table className="w-full text-left text-sm">
-            <thead className="bg-slate-50 text-xs uppercase text-slate-500">
-              <tr>
-                <th className="px-3 py-2">Κάρτα</th>
-                <th className="px-3 py-2">Εργαζόμενος</th>
-                <th className="px-3 py-2">Κατάσταση</th>
-                <th className="px-3 py-2" />
-              </tr>
-            </thead>
-            <tbody>
-              {workCards.map((c) => (
-                <tr key={c.id} className="border-t border-slate-100">
-                  <td className="px-3 py-2 font-mono text-xs">
-                    {c.cardNumber}
-                  </td>
-                  <td className="px-3 py-2">{empName(c.employee)}</td>
-                  <td className="px-3 py-2">
-                    {workCardStatusLabel[
-                      c.status as keyof typeof workCardStatusLabel
-                    ] || c.status}
-                  </td>
-                  <td className="px-3 py-2 text-right">
-                    {canWrite ? (
-                      <select
-                        className="h-8 rounded-lg border border-slate-200 bg-white px-2 text-xs"
-                        value={c.status}
-                        disabled={busy}
-                        onChange={(ev) =>
-                          onPatchStatus(
-                            c.id,
-                            ev.target.value as "ACTIVE" | "INACTIVE" | "LOST",
-                          )
-                        }
-                      >
-                        {Object.entries(workCardStatusLabel).map(([k, v]) => (
-                          <option key={k} value={k}>
-                            {v}
-                          </option>
-                        ))}
-                      </select>
-                    ) : null}
-                  </td>
-                </tr>
-              ))}
-              {workCards.length === 0 ? (
-                <tr>
-                  <td
-                    colSpan={4}
-                    className="px-3 py-8 text-center text-slate-500"
-                  >
-                    Δεν έχουν εκδοθεί κάρτες.
-                  </td>
-                </tr>
-              ) : null}
-            </tbody>
-          </table>
-        </section>
-      </div>
-
-      <div className="space-y-3">
-        {canWrite ? (
-          <form onSubmit={onPunch} className="soft-panel space-y-3 p-4">
-            <h3 className="text-sm font-semibold">Χτύπημα παρουσίας</h3>
-            <label className={labelCls}>
-              Εργαζόμενος
-              <select
-                required
-                value={punchForm.employeeId}
-                onChange={(ev) =>
-                  setPunchForm((f) => ({
-                    ...f,
-                    employeeId: ev.target.value,
-                  }))
-                }
-                className={inputCls}
-              >
-                <option value="">—</option>
-                {activeEmployees.map((e) => (
-                  <option key={e.id} value={e.id}>
-                    {empName(e)}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className={labelCls}>
-              Τύπος
-              <select
-                value={punchForm.type}
-                onChange={(ev) =>
-                  setPunchForm((f) => ({ ...f, type: ev.target.value }))
-                }
-                className={inputCls}
-              >
-                {Object.entries(workCardEventTypeLabel).map(([k, v]) => (
-                  <option key={k} value={k}>
-                    {v}
-                  </option>
-                ))}
-              </select>
-            </label>
-            {sites.length ? (
-              <label className={labelCls}>
-                Εγκατάσταση
-                <select
-                  value={punchForm.siteId}
-                  onChange={(ev) =>
-                    setPunchForm((f) => ({ ...f, siteId: ev.target.value }))
-                  }
-                  className={inputCls}
-                >
-                  <option value="">—</option>
-                  {sites.map((s) => (
-                    <option key={s.id} value={s.id}>
-                      {s.code} · {s.name}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            ) : null}
-            <Button type="submit" size="sm" disabled={busy}>
-              Καταχώρηση χτυπήματος
-            </Button>
-          </form>
-        ) : null}
-
-        <section className="soft-panel overflow-hidden">
-          <table className="w-full text-left text-sm">
-            <thead className="bg-slate-50 text-xs uppercase text-slate-500">
-              <tr>
-                <th className="px-3 py-2">Ώρα</th>
-                <th className="px-3 py-2">Εργαζόμενος</th>
-                <th className="px-3 py-2">Τύπος</th>
-                <th className="px-3 py-2">Site</th>
-                <th className="px-3 py-2">Εργάνη</th>
-              </tr>
-            </thead>
-            <tbody>
-              {events.map((ev) => (
-                <tr key={ev.id} className="border-t border-slate-100">
-                  <td className="px-3 py-2 text-xs text-slate-600">
-                    {dt(ev.occurredAt)}
-                  </td>
-                  <td className="px-3 py-2">{empName(ev.employee)}</td>
-                  <td className="px-3 py-2">
-                    {workCardEventTypeLabel[
-                      ev.type as keyof typeof workCardEventTypeLabel
-                    ] || ev.type}
-                  </td>
-                  <td className="px-3 py-2 text-xs text-slate-600">
-                    {ev.site?.code || "—"}
-                  </td>
-                  <td className="px-3 py-2 text-xs">
-                    {erganiStatusLabel[
-                      ev.erganiStatus as keyof typeof erganiStatusLabel
-                    ] || ev.erganiStatus}
-                  </td>
-                </tr>
-              ))}
-              {events.length === 0 ? (
-                <tr>
-                  <td
-                    colSpan={5}
-                    className="px-3 py-8 text-center text-slate-500"
-                  >
-                    Δεν υπάρχουν χτυπήματα.
-                  </td>
-                </tr>
-              ) : null}
-            </tbody>
-          </table>
-        </section>
-      </div>
     </div>
   );
 }

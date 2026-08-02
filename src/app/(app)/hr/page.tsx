@@ -89,6 +89,7 @@ export default async function HrPage() {
       initialWorkCards={workCards.map((c) => ({
         id: c.id,
         cardNumber: c.cardNumber,
+        qrToken: c.qrToken,
         status: c.status,
         issuedAt: c.issuedAt.toISOString(),
         employee: c.employee,
@@ -99,6 +100,8 @@ export default async function HrPage() {
         source: e.source,
         occurredAt: e.occurredAt.toISOString(),
         erganiStatus: e.erganiStatus,
+        isLate: e.isLate,
+        isEarly: e.isEarly,
         employee: e.employee,
         workCard: e.workCard,
         site: e.site,

@@ -977,6 +977,8 @@ model WorkCard {
   tenantId   String
   employeeId String
   cardNumber String
+  /// Μυστικό token για QR check-in/out (SOFTIFYOS:WC:{qrToken})
+  qrToken    String?
   status     WorkCardStatus @default(ACTIVE)
   issuedAt   DateTime       @default(now())
   notes      String?
@@ -988,6 +990,7 @@ model WorkCard {
   events   WorkCardEvent[]
 
   @@unique([tenantId, cardNumber])
+  @@unique([tenantId, qrToken])
   @@index([tenantId, employeeId, status])
   @@map("work_cards")
 }
@@ -1003,6 +1006,13 @@ model WorkCardEvent {
   occurredAt   DateTime            @default(now())
   siteId       String?
   note         String?
+  /// Geo stub από kiosk / app
+  lat          Float?
+  lng          Float?
+  accuracyM    Float?
+  withinGeofence Boolean?
+  isLate       Boolean             @default(false)
+  isEarly      Boolean             @default(false)
   erganiStatus ErganiSubmissionStatus @default(PENDING)
   createdAt    DateTime            @default(now())
 
@@ -1933,6 +1943,10 @@ model Site {
   kind         SiteKind @default(BRANCH)
   parentId     String?
   isActive     Boolean  @default(true)
+  /// Geofence stub για παρουσία / kiosk
+  lat          Float?
+  lng          Float?
+  geoRadiusM   Int?
   customFields Json?
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt

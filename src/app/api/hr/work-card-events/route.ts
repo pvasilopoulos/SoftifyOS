@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/server/db";
 import { getSession } from "@/platform/auth/session";
@@ -13,13 +13,17 @@ import {
 
 export const dynamic = "force-dynamic";
 
-export async function GET() {
+export async function GET(request: NextRequest) {
   try {
     const session = await getSession();
     if (!session) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
-    const items = await listWorkCardEvents(prisma, session.tenantId);
+    const day = request.nextUrl.searchParams.get("day");
+    const items = await listWorkCardEvents(prisma, session.tenantId, {
+      day: day === "today" ? "today" : "all",
+      take: day === "today" ? 500 : 200,
+    });
     return NextResponse.json({
       items: items.map((e) => ({
         ...e,

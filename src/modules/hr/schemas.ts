@@ -113,6 +113,27 @@ export const workCardEventCreateSchema = z.object({
   occurredAt: z.string().datetime().optional().nullable(),
   siteId: optStr(40),
   note: optStr(500),
+  lat: z.coerce.number().min(-90).max(90).optional().nullable(),
+  lng: z.coerce.number().min(-180).max(180).optional().nullable(),
+  accuracyM: z.coerce.number().min(0).max(50_000).optional().nullable(),
+  enqueueErgani: z.boolean().optional().default(true),
+  /** Enforce open-shift state machine (default true for CARD/APP) */
+  enforceState: z.boolean().optional(),
+});
+
+/** QR / κάρτα scan → check-in/out */
+export const workCardScanSchema = z.object({
+  /** SOFTIFYOS:WC:{token} ή raw qrToken ή cardNumber */
+  qr: z.string().trim().min(4).max(200),
+  type: z
+    .enum(["CLOCK_IN", "CLOCK_OUT", "BREAK_START", "BREAK_END", "AUTO"])
+    .optional()
+    .default("AUTO"),
+  siteId: optStr(40),
+  note: optStr(500),
+  lat: z.coerce.number().min(-90).max(90).optional().nullable(),
+  lng: z.coerce.number().min(-180).max(180).optional().nullable(),
+  accuracyM: z.coerce.number().min(0).max(50_000).optional().nullable(),
   enqueueErgani: z.boolean().optional().default(true),
 });
 
@@ -189,6 +210,7 @@ export type LeaveTypeUpsertInput = z.infer<typeof leaveTypeUpsertSchema>;
 export type LeaveRequestCreateInput = z.infer<typeof leaveRequestCreateSchema>;
 export type WorkCardCreateInput = z.infer<typeof workCardCreateSchema>;
 export type WorkCardEventCreateInput = z.infer<typeof workCardEventCreateSchema>;
+export type WorkCardScanInput = z.infer<typeof workCardScanSchema>;
 export type PayrollPeriodCreateInput = z.infer<typeof payrollPeriodCreateSchema>;
 export type WorkScheduleUpsertInput = z.infer<typeof workScheduleUpsertSchema>;
 export type WorkScheduleAssignInput = z.infer<typeof workScheduleAssignSchema>;

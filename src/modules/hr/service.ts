@@ -1,6 +1,8 @@
 import { Prisma } from "@/generated/prisma/client";
 import type { PrismaClient } from "@/generated/prisma/client";
 import { DEFAULT_LEAVE_TYPES } from "./labels";
+import { randomBytes } from "crypto";
+import { parseWorkCardQr, workCardQrPayload } from "./work-card-qr";
 import type {
   EmployeeUpsertInput,
   LeaveRequestCreateInput,
@@ -8,6 +10,7 @@ import type {
   PayrollPeriodCreateInput,
   WorkCardCreateInput,
   WorkCardEventCreateInput,
+  WorkCardScanInput,
   WorkScheduleAssignInput,
   WorkScheduleUpsertInput,
   WorkShiftCreateInput,
@@ -527,8 +530,114 @@ export async function loadLeaveBalances(
   }));
 }
 
+
+function newQrToken() {
+  return randomBytes(16).toString("hex");
+}
+
+export { parseWorkCardQr, workCardQrPayload } from "./work-card-qr";
+
+type PunchType = "CLOCK_IN" | "CLOCK_OUT" | "BREAK_START" | "BREAK_END";
+
+export function suggestNextPunchType(
+  lastType: PunchType | null | undefined,
+): PunchType {
+  if (!lastType || lastType === "CLOCK_OUT") return "CLOCK_IN";
+  if (lastType === "CLOCK_IN") return "CLOCK_OUT";
+  if (lastType === "BREAK_START") return "BREAK_END";
+  return "CLOCK_OUT"; // BREAK_END
+}
+
+export function assertPunchTransition(
+  lastType: PunchType | null | undefined,
+  next: PunchType,
+) {
+  const allowed: PunchType[] =
+    !lastType || lastType === "CLOCK_OUT"
+      ? ["CLOCK_IN"]
+      : lastType === "CLOCK_IN"
+        ? ["CLOCK_OUT", "BREAK_START"]
+        : lastType === "BREAK_START"
+          ? ["BREAK_END"]
+          : ["CLOCK_OUT", "BREAK_START"]; // BREAK_END
+  if (!allowed.includes(next)) {
+    throw new HrError(
+      `Μη έγκυρη μετάβαση παρουσίας: ${lastType ?? "—"} → ${next}`,
+      400,
+    );
+  }
+}
+
+function haversineM(
+  lat1: number,
+  lng1: number,
+  lat2: number,
+  lng2: number,
+) {
+  const R = 6371000;
+  const toRad = (d: number) => (d * Math.PI) / 180;
+  const dLat = toRad(lat2 - lat1);
+  const dLng = toRad(lng2 - lng1);
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(a));
+}
+
+function dayBounds(d = new Date()) {
+  const from = new Date(d);
+  from.setHours(0, 0, 0, 0);
+  const to = new Date(d);
+  to.setHours(23, 59, 59, 999);
+  return { from, to };
+}
+
+function parseHmToMinutes(hm: string) {
+  const [h, m] = hm.split(":").map(Number);
+  return (h ?? 0) * 60 + (m ?? 0);
+}
+
+async function resolveScheduleTimes(
+  db: Db,
+  tenantId: string,
+  employeeId: string,
+  at: Date,
+) {
+  const dayStart = new Date(at);
+  dayStart.setHours(0, 0, 0, 0);
+  const assignment = await db.workScheduleAssignment.findFirst({
+    where: {
+      tenantId,
+      employeeId,
+      fromDate: { lte: dayStart },
+      OR: [{ toDate: null }, { toDate: { gte: dayStart } }],
+    },
+    include: { schedule: true },
+    orderBy: { fromDate: "desc" },
+  });
+  if (!assignment?.schedule) return null;
+  return {
+    startTime: assignment.schedule.startTime,
+    endTime: assignment.schedule.endTime,
+    workDays: assignment.schedule.workDays,
+  };
+}
+
+async function ensureCardQrToken(
+  db: Db,
+  card: { id: string; qrToken: string | null },
+) {
+  if (card.qrToken) return card.qrToken;
+  const qrToken = newQrToken();
+  await db.workCard.update({
+    where: { id: card.id },
+    data: { qrToken },
+  });
+  return qrToken;
+}
+
 export async function listWorkCards(db: Db, tenantId: string) {
-  return db.workCard.findMany({
+  const cards = await db.workCard.findMany({
     where: { tenantId },
     include: {
       employee: {
@@ -538,6 +647,13 @@ export async function listWorkCards(db: Db, tenantId: string) {
     orderBy: { issuedAt: "desc" },
     take: 200,
   });
+  // Backfill QR tokens for older cards
+  for (const c of cards) {
+    if (!c.qrToken) {
+      c.qrToken = await ensureCardQrToken(db, c);
+    }
+  }
+  return cards;
 }
 
 export async function updateWorkCardStatus(
@@ -618,6 +734,7 @@ export async function createWorkCard(
       tenantId: input.tenantId,
       employeeId: employee.id,
       cardNumber: input.data.cardNumber.trim(),
+      qrToken: newQrToken(),
       status: input.data.status ?? "ACTIVE",
       notes: emptyToNull(input.data.notes),
     },
@@ -637,6 +754,7 @@ export async function createWorkCard(
       cardNumber: card.cardNumber,
       employeeId: employee.id,
       employeeCode: employee.code,
+      qr: workCardQrPayload(card.qrToken!),
     },
   });
 
@@ -646,20 +764,112 @@ export async function createWorkCard(
 export async function listWorkCardEvents(
   db: Db,
   tenantId: string,
-  opts?: { take?: number },
+  opts?: { take?: number; day?: "today" | "all"; from?: Date; to?: Date },
 ) {
+  const range =
+    opts?.day === "today"
+      ? dayBounds()
+      : opts?.from && opts?.to
+        ? { from: opts.from, to: opts.to }
+        : null;
   return db.workCardEvent.findMany({
-    where: { tenantId },
+    where: {
+      tenantId,
+      ...(range
+        ? { occurredAt: { gte: range.from, lte: range.to } }
+        : {}),
+    },
     include: {
       employee: {
-        select: { id: true, code: true, firstName: true, lastName: true },
+        select: {
+          id: true,
+          code: true,
+          firstName: true,
+          lastName: true,
+          department: true,
+          title: true,
+        },
       },
-      workCard: { select: { id: true, cardNumber: true } },
+      workCard: { select: { id: true, cardNumber: true, qrToken: true } },
       site: { select: { id: true, code: true, name: true } },
     },
     orderBy: { occurredAt: "desc" },
     take: opts?.take ?? 200,
   });
+}
+
+export async function loadLiveAttendance(db: Db, tenantId: string) {
+  const { from, to } = dayBounds();
+  const employees = await db.employee.findMany({
+    where: { tenantId, status: "ACTIVE" },
+    select: {
+      id: true,
+      code: true,
+      firstName: true,
+      lastName: true,
+      department: true,
+      title: true,
+      siteId: true,
+    },
+    orderBy: [{ lastName: "asc" }, { firstName: "asc" }],
+    take: 500,
+  });
+  const events = await db.workCardEvent.findMany({
+    where: { tenantId, occurredAt: { gte: from, lte: to } },
+    orderBy: { occurredAt: "asc" },
+    select: {
+      id: true,
+      employeeId: true,
+      type: true,
+      occurredAt: true,
+      isLate: true,
+      isEarly: true,
+      siteId: true,
+      source: true,
+    },
+  });
+  const byEmp = new Map<string, typeof events>();
+  for (const e of events) {
+    const list = byEmp.get(e.employeeId) ?? [];
+    list.push(e);
+    byEmp.set(e.employeeId, list);
+  }
+
+  const rows = employees.map((emp) => {
+    const todays = byEmp.get(emp.id) ?? [];
+    const last = todays[todays.length - 1] ?? null;
+    let presence: "OUT" | "IN" | "BREAK" = "OUT";
+    if (last?.type === "CLOCK_IN" || last?.type === "BREAK_END") presence = "IN";
+    if (last?.type === "BREAK_START") presence = "BREAK";
+    const clockIn = todays.find((e) => e.type === "CLOCK_IN") ?? null;
+    const clockOut =
+      [...todays].reverse().find((e) => e.type === "CLOCK_OUT") ?? null;
+    return {
+      employee: emp,
+      presence,
+      lastType: last?.type ?? null,
+      lastAt: last?.occurredAt.toISOString() ?? null,
+      clockInAt: clockIn?.occurredAt.toISOString() ?? null,
+      clockOutAt: clockOut?.occurredAt.toISOString() ?? null,
+      isLate: todays.some((e) => e.isLate),
+      isEarly: todays.some((e) => e.isEarly),
+      punchCount: todays.length,
+      suggestedNext: suggestNextPunchType(
+        (last?.type as PunchType | undefined) ?? null,
+      ),
+    };
+  });
+
+  const summary = {
+    total: rows.length,
+    in: rows.filter((r) => r.presence === "IN").length,
+    break: rows.filter((r) => r.presence === "BREAK").length,
+    out: rows.filter((r) => r.presence === "OUT").length,
+    late: rows.filter((r) => r.isLate).length,
+    punchesToday: events.length,
+  };
+
+  return { day: from.toISOString().slice(0, 10), summary, rows };
 }
 
 export async function createWorkCardEvent(
@@ -670,6 +880,9 @@ export async function createWorkCardEvent(
     where: { id: input.data.employeeId, tenantId: input.tenantId },
   });
   if (!employee) throw new HrError("Ο εργαζόμενος δεν βρέθηκε", 404);
+  if (employee.status === "TERMINATED") {
+    throw new HrError("Ο εργαζόμενος έχει αποχωρήσει", 400);
+  }
 
   let workCardId = emptyToNull(input.data.workCardId);
   if (!workCardId) {
@@ -691,11 +904,18 @@ export async function createWorkCardEvent(
       },
     });
     if (!card) throw new HrError("Η κάρτα εργασίας δεν βρέθηκε", 404);
+    if (card.status !== "ACTIVE") {
+      throw new HrError("Η κάρτα δεν είναι ενεργή", 400);
+    }
   }
 
+  let site:
+    | { id: string; lat: number | null; lng: number | null; geoRadiusM: number | null }
+    | null = null;
   if (input.data.siteId) {
-    const site = await db.site.findFirst({
+    site = await db.site.findFirst({
       where: { id: input.data.siteId, tenantId: input.tenantId },
+      select: { id: true, lat: true, lng: true, geoRadiusM: true },
     });
     if (!site) throw new HrError("Η εγκατάσταση δεν βρέθηκε", 404);
   }
@@ -704,23 +924,82 @@ export async function createWorkCardEvent(
     ? parseDate(input.data.occurredAt) ?? new Date()
     : new Date();
 
+  const { from } = dayBounds(occurredAt);
+  const lastToday = await db.workCardEvent.findFirst({
+    where: {
+      tenantId: input.tenantId,
+      employeeId: employee.id,
+      occurredAt: { gte: from, lte: occurredAt },
+    },
+    orderBy: { occurredAt: "desc" },
+    select: { type: true },
+  });
+
+  const source = input.data.source ?? "MANUAL";
+  const enforce =
+    input.data.enforceState ?? (source === "CARD" || source === "APP");
+  if (enforce) {
+    assertPunchTransition(
+      (lastToday?.type as PunchType | undefined) ?? null,
+      input.data.type,
+    );
+  }
+
+  // Late / early vs schedule
+  let isLate = false;
+  let isEarly = false;
+  const sched = await resolveScheduleTimes(
+    db,
+    input.tenantId,
+    employee.id,
+    occurredAt,
+  );
+  if (sched) {
+    const mins = occurredAt.getHours() * 60 + occurredAt.getMinutes();
+    const start = parseHmToMinutes(sched.startTime);
+    const end = parseHmToMinutes(sched.endTime);
+    if (input.data.type === "CLOCK_IN" && mins > start + 5) isLate = true;
+    if (input.data.type === "CLOCK_OUT" && mins < end - 5) isEarly = true;
+  }
+
+  // Geofence stub
+  let withinGeofence: boolean | null = null;
+  const lat = input.data.lat ?? null;
+  const lng = input.data.lng ?? null;
+  if (
+    lat != null &&
+    lng != null &&
+    site?.lat != null &&
+    site?.lng != null &&
+    site.geoRadiusM
+  ) {
+    const dist = haversineM(lat, lng, site.lat, site.lng);
+    withinGeofence = dist <= site.geoRadiusM;
+  }
+
   const event = await db.workCardEvent.create({
     data: {
       tenantId: input.tenantId,
       employeeId: employee.id,
       workCardId,
       type: input.data.type,
-      source: input.data.source ?? "MANUAL",
+      source,
       occurredAt,
-      siteId: emptyToNull(input.data.siteId),
+      siteId: site?.id ?? null,
       note: emptyToNull(input.data.note),
+      lat,
+      lng,
+      accuracyM: input.data.accuracyM ?? null,
+      withinGeofence,
+      isLate,
+      isEarly,
       erganiStatus: "PENDING",
     },
     include: {
       employee: {
         select: { id: true, code: true, firstName: true, lastName: true },
       },
-      workCard: { select: { id: true, cardNumber: true } },
+      workCard: { select: { id: true, cardNumber: true, qrToken: true } },
       site: { select: { id: true, code: true, name: true } },
     },
   });
@@ -738,11 +1017,100 @@ export async function createWorkCardEvent(
         employeeCode: employee.code,
         cardNumber: event.workCard?.cardNumber ?? null,
         siteId: event.siteId,
+        isLate,
+        isEarly,
+        source,
       },
     });
   }
 
   return event;
+}
+
+/** QR / κάρτα scan → punch με auto check-in/out */
+export async function punchByWorkCardQr(
+  db: Db,
+  input: { tenantId: string; data: WorkCardScanInput },
+) {
+  const tokenOrNumber = parseWorkCardQr(input.data.qr);
+  const card =
+    (await db.workCard.findFirst({
+      where: {
+        tenantId: input.tenantId,
+        OR: [{ qrToken: tokenOrNumber }, { cardNumber: tokenOrNumber }],
+      },
+      include: {
+        employee: {
+          select: {
+            id: true,
+            code: true,
+            firstName: true,
+            lastName: true,
+            status: true,
+          },
+        },
+      },
+    })) ?? null;
+  if (!card) throw new HrError("Κάρτα / QR δεν αναγνωρίστηκε", 404);
+  if (card.status !== "ACTIVE") {
+    throw new HrError(`Η κάρτα είναι ${card.status}`, 400);
+  }
+  if (card.employee.status !== "ACTIVE") {
+    throw new HrError("Ο εργαζόμενος δεν είναι ενεργός", 400);
+  }
+  if (!card.qrToken) {
+    await ensureCardQrToken(db, card);
+  }
+
+  const { from } = dayBounds();
+  const lastToday = await db.workCardEvent.findFirst({
+    where: {
+      tenantId: input.tenantId,
+      employeeId: card.employeeId,
+      occurredAt: { gte: from },
+    },
+    orderBy: { occurredAt: "desc" },
+    select: { type: true },
+  });
+
+  const type: PunchType =
+    !input.data.type || input.data.type === "AUTO"
+      ? suggestNextPunchType((lastToday?.type as PunchType | undefined) ?? null)
+      : input.data.type;
+
+  const event = await createWorkCardEvent(db, {
+    tenantId: input.tenantId,
+    data: {
+      employeeId: card.employeeId,
+      workCardId: card.id,
+      type,
+      source: "CARD",
+      siteId: input.data.siteId ?? null,
+      note: input.data.note ?? null,
+      lat: input.data.lat ?? null,
+      lng: input.data.lng ?? null,
+      accuracyM: input.data.accuracyM ?? null,
+      enqueueErgani: input.data.enqueueErgani ?? true,
+      enforceState: true,
+    },
+  });
+
+  return {
+    event,
+    employee: card.employee,
+    card: {
+      id: card.id,
+      cardNumber: card.cardNumber,
+      qrToken: card.qrToken,
+    },
+    suggestedWas: type,
+    presenceAfter:
+      type === "CLOCK_OUT"
+        ? ("OUT" as const)
+        : type === "BREAK_START"
+          ? ("BREAK" as const)
+          : ("IN" as const),
+  };
 }
 
 type ErganiEnv = "simulator" | "test" | "prod";

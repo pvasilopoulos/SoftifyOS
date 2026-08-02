@@ -33,6 +33,18 @@ export const workCardEventTypeLabel = {
   BREAK_END: "Διάλειμμα λήξη",
 } as const;
 
+export const workCardEventSourceLabel = {
+  MANUAL: "Χειροκίνητα",
+  CARD: "QR / κάρτα",
+  APP: "Εφαρμογή",
+} as const;
+
+export const presenceStatusLabel = {
+  OUT: "Εκτός",
+  IN: "Εντός",
+  BREAK: "Διάλειμμα",
+} as const;
+
 export const erganiStatusLabel = {
   PENDING: "Σε ουρά",
   SENT: "Εστάλη",

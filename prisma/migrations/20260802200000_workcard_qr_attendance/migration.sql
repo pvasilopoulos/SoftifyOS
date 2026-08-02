@@ -1,0 +1,20 @@
+-- Ψηφιακή κάρτα: QR token + attendance flags + site geofence stubs
+
+ALTER TABLE "work_cards"
+  ADD COLUMN IF NOT EXISTS "qrToken" TEXT;
+
+CREATE UNIQUE INDEX IF NOT EXISTS "work_cards_tenantId_qrToken_key"
+  ON "work_cards"("tenantId", "qrToken");
+
+ALTER TABLE "work_card_events"
+  ADD COLUMN IF NOT EXISTS "lat" DOUBLE PRECISION,
+  ADD COLUMN IF NOT EXISTS "lng" DOUBLE PRECISION,
+  ADD COLUMN IF NOT EXISTS "accuracyM" DOUBLE PRECISION,
+  ADD COLUMN IF NOT EXISTS "withinGeofence" BOOLEAN,
+  ADD COLUMN IF NOT EXISTS "isLate" BOOLEAN NOT NULL DEFAULT false,
+  ADD COLUMN IF NOT EXISTS "isEarly" BOOLEAN NOT NULL DEFAULT false;
+
+ALTER TABLE "sites"
+  ADD COLUMN IF NOT EXISTS "lat" DOUBLE PRECISION,
+  ADD COLUMN IF NOT EXISTS "lng" DOUBLE PRECISION,
+  ADD COLUMN IF NOT EXISTS "geoRadiusM" INTEGER;
