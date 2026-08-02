@@ -2,35 +2,27 @@
 
 import Link from "next/link";
 import { useEffect, useRef, useState, useTransition } from "react";
-import { Building2, Check, ChevronDown, Loader2, Plus } from "lucide-react";
+import { Check, ChevronDown, Landmark, Loader2 } from "lucide-react";
 import { cn } from "@/shared/lib/cn";
-import { Badge } from "@/shared/ui/badge";
 import type { SessionPayload } from "@/platform/auth/session";
 
-type TenantRow = {
+type CompanyRow = {
   id: string;
-  slug: string;
+  code: string;
   name: string;
-  role: string;
+  vatNumber: string | null;
+  isDefault: boolean;
 };
 
-const ROLE_LABEL: Record<string, string> = {
-  OWNER: "Ιδιοκτήτης",
-  ADMIN: "Διαχειριστής",
-  MEMBER: "Μέλος",
-  VIEWER: "Θεατής",
-};
-
-export function TenantSwitcher({
+export function CompanySwitcher({
   session,
   compact = false,
 }: {
   session: SessionPayload;
-  /** Compact trigger for mobile */
   compact?: boolean;
 }) {
   const [open, setOpen] = useState(false);
-  const [items, setItems] = useState<TenantRow[]>([]);
+  const [items, setItems] = useState<CompanyRow[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
@@ -57,20 +49,13 @@ export function TenantSwitcher({
     if (!open || loaded) return;
     void (async () => {
       try {
-        const res = await fetch("/api/tenants");
+        const res = await fetch("/api/workspace/companies");
         const data = await res.json();
         if (!res.ok) {
           setError(data.error || "Αποτυχία φόρτωσης εταιρειών");
           return;
         }
-        setItems(
-          (data.items as TenantRow[]).map((t) => ({
-            id: t.id,
-            slug: t.slug,
-            name: t.name,
-            role: t.role,
-          })),
-        );
+        setItems(data.items ?? []);
         setLoaded(true);
       } catch {
         setError("Αποτυχία φόρτωσης εταιρειών");
@@ -78,17 +63,26 @@ export function TenantSwitcher({
     })();
   }, [open, loaded]);
 
-  const switchTo = (tenantId: string) => {
-    if (tenantId === session.tenantId || pending) return;
-    setSwitchingId(tenantId);
+  // Reload list when tenant changes
+  useEffect(() => {
+    setLoaded(false);
+    setItems([]);
+  }, [session.tenantId]);
+
+  const switchTo = (legalEntityId: string) => {
+    if (legalEntityId === session.legalEntityId || pending) return;
+    setSwitchingId(legalEntityId);
     setError(null);
     startTransition(() => {
       void (async () => {
         try {
-          const res = await fetch("/api/tenants/switch", {
+          const res = await fetch("/api/auth/select-workspace", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ tenantId }),
+            body: JSON.stringify({
+              tenantId: session.tenantId,
+              legalEntityId,
+            }),
           });
           const data = await res.json();
           if (!res.ok) {
@@ -96,7 +90,6 @@ export function TenantSwitcher({
             setSwitchingId(null);
             return;
           }
-          // Full reload so all server components pick up new tenant session
           window.location.href = "/";
         } catch {
           setError("Αποτυχία εναλλαγής");
@@ -106,6 +99,8 @@ export function TenantSwitcher({
     });
   };
 
+  const label = session.legalEntityName || session.legalEntityCode || "Εταιρεία";
+
   return (
     <div ref={rootRef} className="relative">
       <button
@@ -113,46 +108,39 @@ export function TenantSwitcher({
         onClick={() => setOpen((v) => !v)}
         aria-haspopup="listbox"
         aria-expanded={open}
-        title={`${session.tenantName} · ${session.role} — Εναλλαγή εταιρείας`}
+        title={`Εταιρεία: ${label}`}
         className={cn(
           "flex items-center gap-2 rounded-2xl border border-slate-200 bg-white text-sm shadow-sm transition hover:bg-slate-50",
           compact ? "px-2 py-1.5" : "px-2.5 py-1.5",
         )}
       >
-        <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-teal-50 text-teal-800">
-          <Building2 size={14} />
+        <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-ink-950 text-white">
+          <Landmark size={14} />
         </span>
         {!compact ? (
-          <span className="max-w-[140px] truncate font-medium text-ink-900 lg:max-w-[180px]">
-            {session.tenantName}
+          <span className="max-w-[120px] truncate font-medium text-ink-900 lg:max-w-[160px]">
+            {label}
           </span>
         ) : null}
         <ChevronDown
           size={14}
-          className={cn(
-            "text-slate-400 transition",
-            open && "rotate-180",
-          )}
+          className={cn("text-slate-400 transition", open && "rotate-180")}
         />
       </button>
 
       {open ? (
         <div
           role="listbox"
-          className="absolute right-0 z-50 mt-2 w-[min(100vw-1.5rem,320px)] overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-xl shadow-slate-900/10"
+          className="absolute right-0 z-50 mt-2 w-[min(100vw-1.5rem,300px)] overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-xl shadow-slate-900/10"
         >
           <div className="border-b border-slate-100 px-3 py-2.5">
             <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">
-              A · Οργανισμός (Tenant)
+              B · Εταιρεία (Legal Entity)
             </p>
             <p className="mt-0.5 truncate text-xs text-slate-500">
-              Ενεργός:{" "}
-              <span className="font-medium text-ink-900">
-                {session.tenantName}
-              </span>
+              Μέσα σε {session.tenantName}
             </p>
           </div>
-
           <ul className="max-h-72 overflow-y-auto py-1">
             {!loaded && !error ? (
               <li className="flex items-center gap-2 px-3 py-6 text-sm text-slate-500">
@@ -163,70 +151,61 @@ export function TenantSwitcher({
             {error ? (
               <li className="px-3 py-3 text-sm text-rose-700">{error}</li>
             ) : null}
-            {loaded && items.length === 0 ? (
-              <li className="px-3 py-6 text-center text-sm text-slate-500">
-                Δεν υπάρχουν άλλες εταιρείες
-              </li>
-            ) : null}
-            {items.map((t) => {
-              const active = t.id === session.tenantId;
-              const busy = switchingId === t.id;
+            {items.map((c) => {
+              const active = c.id === session.legalEntityId;
+              const busy = switchingId === c.id;
               return (
-                <li key={t.id}>
+                <li key={c.id}>
                   <button
                     type="button"
                     role="option"
                     aria-selected={active}
                     disabled={pending}
-                    onClick={() => switchTo(t.id)}
+                    onClick={() => switchTo(c.id)}
                     className={cn(
                       "flex w-full items-center gap-2.5 px-3 py-2.5 text-left text-sm transition",
-                      active
-                        ? "bg-teal-50/80"
-                        : "hover:bg-slate-50 disabled:opacity-60",
+                      active ? "bg-slate-50" : "hover:bg-slate-50",
                     )}
                   >
                     <span
                       className={cn(
                         "flex h-8 w-8 shrink-0 items-center justify-center rounded-lg",
                         active
-                          ? "bg-teal-700 text-white"
+                          ? "bg-ink-950 text-white"
                           : "bg-slate-100 text-slate-600",
                       )}
                     >
                       {busy ? (
                         <Loader2 className="h-3.5 w-3.5 animate-spin" />
                       ) : (
-                        <Building2 size={14} />
+                        <Landmark size={14} />
                       )}
                     </span>
                     <span className="min-w-0 flex-1">
-                      <span className="block truncate font-medium text-ink-950">
-                        {t.name}
+                      <span className="block truncate font-medium">
+                        {c.name}
                       </span>
                       <span className="block truncate text-[11px] text-slate-500">
-                        {t.slug} · {ROLE_LABEL[t.role] ?? t.role}
+                        {c.code}
+                        {c.vatNumber ? ` · ${c.vatNumber}` : ""}
+                        {c.isDefault ? " · default" : ""}
                       </span>
                     </span>
                     {active ? (
-                      <Check className="h-4 w-4 shrink-0 text-teal-700" />
-                    ) : (
-                      <Badge tone="slate">Εναλλαγή</Badge>
-                    )}
+                      <Check className="h-4 w-4 text-teal-700" />
+                    ) : null}
                   </button>
                 </li>
               );
             })}
           </ul>
-
           <div className="border-t border-slate-100 p-2">
             <Link
               href="/settings/org-structure"
               onClick={() => setOpen(false)}
-              className="flex items-center gap-2 rounded-xl px-2.5 py-2 text-sm font-medium text-teal-800 hover:bg-teal-50"
+              className="block rounded-xl px-2.5 py-2 text-sm font-medium text-teal-800 hover:bg-teal-50"
             >
-              <Plus className="h-3.5 w-3.5" />
-              Διαχείριση εταιρειών
+              Διαχείριση εταιρειών →
             </Link>
           </div>
         </div>

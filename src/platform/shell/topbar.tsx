@@ -7,6 +7,7 @@ import type { SessionPayload } from "@/platform/auth/session";
 import { NotificationsButton } from "@/platform/shell/notifications-panel";
 import { ThemeToggle } from "@/shared/ui/theme";
 import { TenantSwitcher } from "@/platform/shell/tenant-switcher";
+import { CompanySwitcher } from "@/platform/shell/company-switcher";
 
 function initials(name: string) {
   return name
@@ -41,9 +42,11 @@ export function Topbar({
           S
         </span>
         <div className="min-w-0">
-          <p className="truncate text-sm font-semibold text-ink-950">SoftifyOS</p>
-          <p className="truncate text-[11px] text-slate-500">
+          <p className="truncate text-sm font-semibold text-ink-950">
             {session.tenantName}
+          </p>
+          <p className="truncate text-[11px] text-slate-500">
+            {session.legalEntityName || session.legalEntityCode || "—"}
           </p>
         </div>
       </div>
@@ -73,15 +76,26 @@ export function Topbar({
         </Button>
         <ThemeToggle />
         <NotificationsButton />
+
+        {/* A · Tenant */}
         <div className="hidden md:block">
           <TenantSwitcher session={session} />
         </div>
         <div className="md:hidden">
           <TenantSwitcher session={session} compact />
         </div>
+
+        {/* B · Company */}
+        <div className="hidden sm:block">
+          <CompanySwitcher session={session} />
+        </div>
+        <div className="sm:hidden">
+          <CompanySwitcher session={session} compact />
+        </div>
+
         <div
           className="flex h-9 w-9 items-center justify-center rounded-full bg-ink-950 text-xs font-semibold text-white"
-          title={session.name}
+          title={`${session.name} · ${session.role}`}
         >
           {initials(session.name) || "U"}
         </div>

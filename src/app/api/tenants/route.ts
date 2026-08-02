@@ -1,8 +1,14 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/server/db";
-import { getSession, signSession, SESSION_COOKIE, sessionCookieOptions } from "@/platform/auth/session";
+import {
+  getSession,
+  signSession,
+  SESSION_COOKIE,
+  sessionCookieOptions,
+} from "@/platform/auth/session";
 import { writeAuditEvent } from "@/platform/tenancy/audit";
+import { issueWorkspaceSession } from "@/platform/tenancy/issue-session";
 import { getErrorMessage } from "@/shared/lib/safe";
 import { LedgerError } from "@/modules/ledger/service";
 import {
@@ -72,14 +78,19 @@ export async function POST(request: Request) {
     });
 
     if (body.switchTo) {
-      const token = await signSession({
-        sub: session.sub,
+      const user = await prisma.user.findUnique({
+        where: { id: session.sub },
+        select: { workspacePrefs: true },
+      });
+      const { token } = await issueWorkspaceSession(prisma, {
+        userId: session.sub,
         email: session.email,
         name: session.name,
         tenantId: tenant.id,
         tenantSlug: tenant.slug,
         tenantName: tenant.name,
         role: "OWNER",
+        existingPrefs: user?.workspacePrefs,
       });
       const res = NextResponse.json({ item: tenant, switched: true }, { status: 201 });
       res.cookies.set(SESSION_COOKIE, token, sessionCookieOptions());
@@ -142,6 +153,9 @@ export async function PATCH(request: Request) {
         ...session,
         tenantName: item.name,
         tenantSlug: item.slug,
+        legalEntityId: session.legalEntityId,
+        legalEntityCode: session.legalEntityCode,
+        legalEntityName: session.legalEntityName,
       });
       const res = NextResponse.json({ item });
       res.cookies.set(SESSION_COOKIE, token, sessionCookieOptions());
@@ -201,14 +215,19 @@ export async function DELETE(request: Request) {
           tenantId_userId: { tenantId: next.id, userId: session.sub },
         },
       });
-      const token = await signSession({
-        sub: session.sub,
+      const user = await prisma.user.findUnique({
+        where: { id: session.sub },
+        select: { workspacePrefs: true },
+      });
+      const { token } = await issueWorkspaceSession(prisma, {
+        userId: session.sub,
         email: session.email,
         name: session.name,
         tenantId: next.id,
         tenantSlug: next.slug,
         tenantName: next.name,
         role: membership?.role ?? "OWNER",
+        existingPrefs: user?.workspacePrefs,
       });
       const res = NextResponse.json({ ok: true, switched: true, tenant: next });
       res.cookies.set(SESSION_COOKIE, token, sessionCookieOptions());

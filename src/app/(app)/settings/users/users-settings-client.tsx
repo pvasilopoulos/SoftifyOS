@@ -96,6 +96,23 @@ export function UsersSettingsClient({
   const [editingId, setEditingId] = useState<string | null>(null);
   const [draft, setDraft] = useState<Draft>(emptyDraft);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  const [orgAccess, setOrgAccess] = useState<{
+    manageableTenants: Array<{
+      id: string;
+      name: string;
+      slug: string;
+      myRole: string;
+    }>;
+    memberships: Array<{
+      id: string;
+      tenantId: string;
+      role: SystemRole;
+      tenant: { id: string; name: string; slug: string };
+      canManage: boolean;
+    }>;
+  } | null>(null);
+  const [addTenantId, setAddTenantId] = useState("");
+  const [addRole, setAddRole] = useState<SystemRole>("MEMBER");
 
   useEffect(() => {
     if (!message) return;
@@ -135,12 +152,36 @@ export function UsersSettingsClient({
     setError(null);
   };
 
+  const loadOrgAccess = async (userId: string) => {
+    const res = await fetch(
+      `/api/settings/users/memberships?userId=${encodeURIComponent(userId)}`,
+    );
+    const data = await res.json();
+    if (res.ok) {
+      setOrgAccess({
+        manageableTenants: data.manageableTenants ?? [],
+        memberships: data.memberships ?? [],
+      });
+      const missing = (data.manageableTenants as Array<{ id: string }>).find(
+        (t) =>
+          !(data.memberships as Array<{ tenantId: string }>).some(
+            (m) => m.tenantId === t.id,
+          ),
+      );
+      setAddTenantId(missing?.id ?? "");
+    } else {
+      setOrgAccess(null);
+    }
+  };
+
   const openEdit = (row: UserRow) => {
     setMode("edit");
     setEditingId(row.membershipId);
     setDraft(fromRow(row));
     setConfirmDeleteId(null);
     setError(null);
+    setOrgAccess(null);
+    void loadOrgAccess(row.user.id);
   };
 
   const closePanel = () => {
@@ -547,6 +588,178 @@ export function UsersSettingsClient({
                   {editingRow.groups.length
                     ? editingRow.groups.map((g) => g.name).join(", ")
                     : "καμία — ορίστε από Ρυθμίσεις → Ομάδες"}
+                </div>
+              ) : null}
+
+              {mode === "edit" && editingRow && orgAccess ? (
+                <div className="space-y-2 rounded-xl border border-slate-100 p-3">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">
+                    A · Πρόσβαση σε οργανισμούς (Tenants)
+                  </p>
+                  <ul className="space-y-1.5">
+                    {orgAccess.memberships.map((m) => (
+                      <li
+                        key={m.id}
+                        className="flex items-center justify-between gap-2 rounded-lg bg-slate-50 px-2.5 py-2 text-xs"
+                      >
+                        <span className="min-w-0">
+                          <span className="block truncate font-medium text-ink-900">
+                            {m.tenant.name}
+                          </span>
+                          <span className="text-slate-500">
+                            {m.tenant.slug} · {m.role}
+                          </span>
+                        </span>
+                        {m.canManage && m.tenantId !== undefined ? (
+                          <div className="flex items-center gap-1">
+                            <select
+                              className="h-7 rounded-md border border-slate-200 bg-white px-1 text-[11px]"
+                              value={m.role}
+                              disabled={pending}
+                              onChange={(e) => {
+                                const role = e.target.value as SystemRole;
+                                startTransition(async () => {
+                                  const res = await fetch(
+                                    "/api/settings/users/memberships",
+                                    {
+                                      method: "POST",
+                                      headers: {
+                                        "Content-Type": "application/json",
+                                      },
+                                      body: JSON.stringify({
+                                        userId: editingRow.user.id,
+                                        tenantId: m.tenantId,
+                                        role,
+                                      }),
+                                    },
+                                  );
+                                  if (!res.ok) {
+                                    const data = await res.json();
+                                    setError(data.error || "Αποτυχία");
+                                    return;
+                                  }
+                                  await loadOrgAccess(editingRow.user.id);
+                                  await refresh();
+                                });
+                              }}
+                            >
+                              {SYSTEM_ROLES.map((r) => (
+                                <option key={r} value={r}>
+                                  {r}
+                                </option>
+                              ))}
+                            </select>
+                            <button
+                              type="button"
+                              className="rounded-md px-1.5 py-1 text-rose-600 hover:bg-rose-50"
+                              disabled={pending}
+                              title="Αφαίρεση από tenant"
+                              onClick={() => {
+                                startTransition(async () => {
+                                  const res = await fetch(
+                                    "/api/settings/users/memberships",
+                                    {
+                                      method: "POST",
+                                      headers: {
+                                        "Content-Type": "application/json",
+                                      },
+                                      body: JSON.stringify({
+                                        action: "remove",
+                                        userId: editingRow.user.id,
+                                        tenantId: m.tenantId,
+                                      }),
+                                    },
+                                  );
+                                  if (!res.ok) {
+                                    const data = await res.json();
+                                    setError(data.error || "Αποτυχία");
+                                    return;
+                                  }
+                                  await loadOrgAccess(editingRow.user.id);
+                                  await refresh();
+                                });
+                              }}
+                            >
+                              <X size={14} />
+                            </button>
+                          </div>
+                        ) : null}
+                      </li>
+                    ))}
+                  </ul>
+                  {orgAccess.manageableTenants.some(
+                    (t) =>
+                      !orgAccess.memberships.some((m) => m.tenantId === t.id),
+                  ) ? (
+                    <div className="flex flex-wrap gap-2 pt-1">
+                      <select
+                        className="h-8 min-w-0 flex-1 rounded-lg border border-slate-200 px-2 text-xs"
+                        value={addTenantId}
+                        onChange={(e) => setAddTenantId(e.target.value)}
+                      >
+                        <option value="">— Προσθήκη σε tenant —</option>
+                        {orgAccess.manageableTenants
+                          .filter(
+                            (t) =>
+                              !orgAccess.memberships.some(
+                                (m) => m.tenantId === t.id,
+                              ),
+                          )
+                          .map((t) => (
+                            <option key={t.id} value={t.id}>
+                              {t.name}
+                            </option>
+                          ))}
+                      </select>
+                      <select
+                        className="h-8 rounded-lg border border-slate-200 px-2 text-xs"
+                        value={addRole}
+                        onChange={(e) =>
+                          setAddRole(e.target.value as SystemRole)
+                        }
+                      >
+                        {SYSTEM_ROLES.map((r) => (
+                          <option key={r} value={r}>
+                            {r}
+                          </option>
+                        ))}
+                      </select>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="secondary"
+                        disabled={pending || !addTenantId}
+                        onClick={() => {
+                          startTransition(async () => {
+                            const res = await fetch(
+                              "/api/settings/users/memberships",
+                              {
+                                method: "POST",
+                                headers: {
+                                  "Content-Type": "application/json",
+                                },
+                                body: JSON.stringify({
+                                  userId: editingRow.user.id,
+                                  tenantId: addTenantId,
+                                  role: addRole,
+                                }),
+                              },
+                            );
+                            if (!res.ok) {
+                              const data = await res.json();
+                              setError(data.error || "Αποτυχία");
+                              return;
+                            }
+                            setMessage("Προστέθηκε σε οργανισμό");
+                            await loadOrgAccess(editingRow.user.id);
+                            await refresh();
+                          });
+                        }}
+                      >
+                        + Προσθήκη
+                      </Button>
+                    </div>
+                  ) : null}
                 </div>
               ) : null}
 

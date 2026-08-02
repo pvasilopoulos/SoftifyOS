@@ -260,6 +260,7 @@ export function FinanceHubClient({
   draftJournalCount,
   pendingMyData,
   legalEntities = [],
+  initialLegalEntityId = "",
 }: {
   canWrite: boolean;
   accountCount: number;
@@ -291,12 +292,15 @@ export function FinanceHubClient({
   draftJournalCount: number;
   pendingMyData: number;
   legalEntities?: LegalEntityOpt[];
+  /** From session company context (B) */
+  initialLegalEntityId?: string;
 }) {
   const year = new Date().getFullYear();
   const [section, setSection] = useState<Section>("overview");
-  const [filters, setFilters] = useState<FinanceFilters>(() =>
-    defaultFinanceFilters(year),
-  );
+  const [filters, setFilters] = useState<FinanceFilters>(() => ({
+    ...defaultFinanceFilters(year),
+    legalEntityId: initialLegalEntityId || "",
+  }));
 
   const openMonths = useMemo(
     () => periods.filter((p) => p.kind === "MONTH" && p.status === "OPEN").length,

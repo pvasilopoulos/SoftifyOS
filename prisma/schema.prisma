@@ -158,6 +158,10 @@ model User {
   email        String   @unique
   name         String
   passwordHash String
+  /// Τελευταίος tenant που επέλεξε ο χρήστης (A)
+  lastTenantId String?
+  /// Prefs ανά tenant: { companies?: { [tenantId]: legalEntityId } }
+  workspacePrefs Json?
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 

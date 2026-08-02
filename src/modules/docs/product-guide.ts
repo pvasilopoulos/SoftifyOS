@@ -99,6 +99,10 @@ export const PRODUCT_DOC_SECTIONS: DocSection[] = [
         tone: "info",
         text: "OWNER/ADMIN διαχειρίζονται χρήστες, ρόλους, integrations και εξαγωγή ρυθμίσεων. VIEWER είναι μόνο ανάγνωση.",
       },
+      {
+        type: "p",
+        text: "Workspace A+B: Tenant (οργανισμός / απομόνωση δεδομένων) και Company/LegalEntity (νομική οντότητα μέσα στον tenant). Στο login με πολλά memberships επιλέγεις και τα δύο· στο header εναλλάσσεις οργανισμό (A) και εταιρεία (B). Οι προτιμήσεις αποθηκεύονται ανά χρήστη.",
+      },
     ],
   },
   {

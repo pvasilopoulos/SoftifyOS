@@ -3,17 +3,28 @@ import { z } from "zod";
 import { prisma } from "@/server/db";
 import { verifyPassword } from "@/platform/auth/password";
 import {
+  PREAUTH_COOKIE,
   SESSION_COOKIE,
+  preauthCookieOptions,
   sessionCookieOptions,
-  signSession,
+  signPreauth,
 } from "@/platform/auth/session";
+import { issueWorkspaceSession } from "@/platform/tenancy/issue-session";
+import {
+  buildMembershipWorkspaces,
+  readWorkspacePrefs,
+} from "@/platform/tenancy/workspace";
 import { writeAuditEvent } from "@/platform/tenancy/audit";
 import { getErrorMessage } from "@/shared/lib/safe";
 
 const loginSchema = z.object({
   email: z.string().email(),
   password: z.string().min(8).max(128),
-  tenantSlug: z.string().min(1).optional(),
+  /** Optional: skip picker when known */
+  tenantId: z.string().min(1).optional(),
+  legalEntityId: z.string().min(1).optional().nullable(),
+  /** Force picker even με 1 tenant */
+  forceSelect: z.boolean().optional(),
 });
 
 export async function POST(request: Request) {
@@ -45,10 +56,45 @@ export async function POST(request: Request) {
       );
     }
 
+    const prefs = readWorkspacePrefs(user.workspacePrefs);
+    const workspaces = await buildMembershipWorkspaces(prisma, {
+      memberships: user.memberships,
+      prefs,
+      lastTenantId: user.lastTenantId,
+    });
+
+    const wantsPicker =
+      body.forceSelect ||
+      (!body.tenantId && user.memberships.length > 1);
+
+    if (wantsPicker) {
+      const preauth = await signPreauth({
+        sub: user.id,
+        email: user.email,
+        name: user.name,
+      });
+      const response = NextResponse.json({
+        ok: true,
+        needsWorkspaceSelect: true,
+        user: { id: user.id, email: user.email, name: user.name },
+        lastTenantId: user.lastTenantId,
+        workspaces,
+      });
+      response.cookies.set(PREAUTH_COOKIE, preauth, preauthCookieOptions());
+      // Clear any stale full session
+      response.cookies.set(SESSION_COOKIE, "", {
+        ...sessionCookieOptions(),
+        maxAge: 0,
+      });
+      return response;
+    }
+
     const membership =
-      (body.tenantSlug
-        ? user.memberships.find((m) => m.tenant.slug === body.tenantSlug)
-        : undefined) ?? user.memberships[0];
+      (body.tenantId
+        ? user.memberships.find((m) => m.tenantId === body.tenantId)
+        : user.lastTenantId
+          ? user.memberships.find((m) => m.tenantId === user.lastTenantId)
+          : undefined) ?? user.memberships[0]!;
 
     if (!membership) {
       return NextResponse.json(
@@ -57,14 +103,16 @@ export async function POST(request: Request) {
       );
     }
 
-    const token = await signSession({
-      sub: user.id,
+    const { token, session } = await issueWorkspaceSession(prisma, {
+      userId: user.id,
       email: user.email,
       name: user.name,
       tenantId: membership.tenantId,
       tenantSlug: membership.tenant.slug,
       tenantName: membership.tenant.name,
       role: membership.role,
+      legalEntityId: body.legalEntityId,
+      existingPrefs: user.workspacePrefs,
     });
 
     await writeAuditEvent({
@@ -73,24 +121,36 @@ export async function POST(request: Request) {
       action: "auth.login",
       entity: "user",
       entityId: user.id,
+      meta: {
+        legalEntityId: session.legalEntityId,
+        legalEntityCode: session.legalEntityCode,
+      },
     });
 
     const response = NextResponse.json({
       ok: true,
-      user: {
-        id: user.id,
-        email: user.email,
-        name: user.name,
-      },
+      needsWorkspaceSelect: false,
+      user: { id: user.id, email: user.email, name: user.name },
       tenant: {
-        id: membership.tenantId,
-        slug: membership.tenant.slug,
-        name: membership.tenant.name,
-        role: membership.role,
+        id: session.tenantId,
+        slug: session.tenantSlug,
+        name: session.tenantName,
+        role: session.role,
       },
+      company: session.legalEntityId
+        ? {
+            id: session.legalEntityId,
+            code: session.legalEntityCode,
+            name: session.legalEntityName,
+          }
+        : null,
+      workspaces,
     });
-
     response.cookies.set(SESSION_COOKIE, token, sessionCookieOptions());
+    response.cookies.set(PREAUTH_COOKIE, "", {
+      ...preauthCookieOptions(),
+      maxAge: 0,
+    });
     return response;
   } catch (error) {
     if (error instanceof z.ZodError) {

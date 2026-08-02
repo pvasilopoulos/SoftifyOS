@@ -155,6 +155,7 @@ export default async function FinancePage() {
         })),
       }))}
       legalEntities={legalEntities}
+      initialLegalEntityId={session.legalEntityId ?? ""}
       arRows={arRows}
       apRows={apRows}
       purchaseInvoices={purchaseInvoices.map((p) => ({
