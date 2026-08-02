@@ -132,6 +132,49 @@ async function main() {
     }
   }
 
+  // Second demo company so tenant switcher has something to switch to
+  const tenantB = await prisma.tenant.upsert({
+    where: { slug: "softify-group" },
+    update: { name: "SOFTIFY GROUP" },
+    create: {
+      slug: "softify-group",
+      name: "SOFTIFY GROUP",
+    },
+  });
+  await prisma.membership.upsert({
+    where: {
+      tenantId_userId: {
+        tenantId: tenantB.id,
+        userId: user.id,
+      },
+    },
+    update: { role: MembershipRole.OWNER },
+    create: {
+      tenantId: tenantB.id,
+      userId: user.id,
+      role: MembershipRole.OWNER,
+    },
+  });
+  for (const role of systemRoles) {
+    await prisma.appRole.upsert({
+      where: { tenantId_code: { tenantId: tenantB.id, code: role.code } },
+      create: {
+        tenantId: tenantB.id,
+        code: role.code,
+        name: role.name,
+        description: role.description,
+        permissions: role.permissions,
+        isSystem: true,
+      },
+      update: {
+        name: role.name,
+        description: role.description,
+        permissions: role.permissions,
+        isSystem: true,
+      },
+    });
+  }
+
   await prisma.auditEvent.create({
     data: {
       tenantId: tenant.id,
@@ -144,7 +187,7 @@ async function main() {
   });
 
   console.log("Seeded SoftifyOS Phase 0");
-  console.log("  tenant:", tenant.slug);
+  console.log("  tenants:", tenant.slug, "+", tenantB.slug);
   console.log("  user:  maria@akropolis.gr / SoftifyOS!2026");
   console.log("  roles: OWNER/ADMIN/MEMBER/VIEWER");
 
