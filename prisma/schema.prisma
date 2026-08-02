@@ -150,6 +150,7 @@ model Tenant {
   invoiceStatusOptions         InvoiceStatusOption[]
   documentTransformRules       DocumentTransformRule[]
   marketplaceChannels          MarketplaceChannel[]
+  settlements                  Settlement[]
 
   @@map("tenants")
 }
@@ -307,6 +308,7 @@ model Customer {
   giftCards GiftCard[]
   loyaltyAccounts LoyaltyAccount[]
   deliveryNotes DeliveryNote[]
+  settlements Settlement[]
 
   @@unique([tenantId, code])
   @@index([tenantId, name])
@@ -604,6 +606,7 @@ model Supplier {
   purchaseOrders   PurchaseOrder[]
   purchasePayments PurchasePayment[]
   purchaseInvoices PurchaseInvoice[]
+  settlements      Settlement[]
 
   @@unique([tenantId, code])
   @@index([tenantId, name])
@@ -1725,6 +1728,7 @@ model Invoice {
   lines           InvoiceLine[]
   payments        InvoicePayment[]
   deliveryNotes   DeliveryNote[]
+  settlementAllocations SettlementAllocation[]
 
   @@unique([tenantId, legalEntityId, number])
   @@index([tenantId, legalEntityId, status, issuedAt(sort: Desc)])
@@ -1773,6 +1777,7 @@ model InvoicePayment {
   id               String   @id @default(cuid())
   tenantId         String
   invoiceId        String
+  settlementId     String?
   amount           Decimal  @db.Decimal(14, 2)
   /// Stable code from PaymentMethod catalog (e.g. CASH, CARD_VIVA)
   method           String   @default("OTHER")
@@ -1788,6 +1793,7 @@ model InvoicePayment {
 
   tenant         Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   invoice        Invoice         @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  settlement     Settlement?     @relation(fields: [settlementId], references: [id], onDelete: SetNull)
   paymentMethod  PaymentMethod?  @relation(fields: [paymentMethodId], references: [id], onDelete: SetNull)
   posSession     PosSession?     @relation(fields: [posSessionId], references: [id], onDelete: SetNull)
   giftCard       GiftCard?       @relation(fields: [giftCardId], references: [id], onDelete: SetNull)
@@ -1796,6 +1802,7 @@ model InvoicePayment {
   @@index([tenantId, invoiceId, paidAt(sort: Desc)])
   @@index([tenantId, posSessionId])
   @@index([tenantId, paymentMethodId])
+  @@index([tenantId, settlementId])
   @@map("invoice_payments")
 }
 
@@ -2020,6 +2027,16 @@ model DocumentSeries {
   glDebitAccount       String?
   glCreditAccount      String?
   glVatAccount         String?
+  /// Εξοφλήσεις: επιτρέπει μερικό ποσό
+  allowPartialSettlement Boolean         @default(true)
+  /// Πολλαπλοί τρόποι πληρωμής στην ίδια εξόφληση
+  allowMultiTender     Boolean           @default(true)
+  /// Πολλαπλά παραστατικά / πιστωτικά στην ίδια εξόφληση
+  allowMultiDocumentSettlement Boolean   @default(false)
+  /// Προκαταβολή / overpay on-account
+  allowOnAccount       Boolean           @default(false)
+  /// IMMEDIATE | CLEARING (κάρτα μέσω glClearingAccount)
+  settlementClearingMode String          @default("IMMEDIATE")
   isDefault            Boolean           @default(false)
   isActive             Boolean           @default(true)
   createdAt            DateTime          @default(now())
@@ -2060,6 +2077,110 @@ model DocumentSeriesPaymentMethod {
   @@index([tenantId, seriesId])
   @@index([tenantId, paymentMethodId])
   @@map("document_series_payment_methods")
+}
+
+enum SettlementKind {
+  RECEIPT
+  PAYMENT
+  CLEARING
+}
+
+enum SettlementStatus {
+  POSTED
+  VOIDED
+}
+
+enum SettlementTargetType {
+  INVOICE
+  CREDIT_NOTE
+  PURCHASE_INVOICE
+  ON_ACCOUNT
+}
+
+/// Ολική / μερική / σύνθετη εξόφληση (AR ή AP) με πολλαπλούς τρόπους
+model Settlement {
+  id               String           @id @default(cuid())
+  tenantId         String
+  legalEntityId    String?
+  number           String
+  kind             SettlementKind
+  status           SettlementStatus @default(POSTED)
+  /// CUSTOMER | SUPPLIER
+  partyType        String
+  customerId       String?
+  supplierId       String?
+  currency         String           @default("EUR")
+  totalAmount      Decimal          @db.Decimal(14, 2)
+  settledAt        DateTime         @default(now())
+  reference        String?
+  notes            String?
+  journalEntryId   String?
+  clearingJournalId String?
+  bankStatementLineId String?
+  voidedAt         DateTime?
+  voidedByUserId   String?
+  createdByUserId  String?
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
+
+  tenant      Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  legalEntity LegalEntity?  @relation(fields: [legalEntityId], references: [id], onDelete: SetNull)
+  customer    Customer?     @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  supplier    Supplier?     @relation(fields: [supplierId], references: [id], onDelete: SetNull)
+  allocations SettlementAllocation[]
+  methods     SettlementMethodLine[]
+  invoicePayments InvoicePayment[]
+
+  @@unique([tenantId, number])
+  @@index([tenantId, kind, settledAt(sort: Desc)])
+  @@index([tenantId, status, settledAt(sort: Desc)])
+  @@index([tenantId, customerId, settledAt(sort: Desc)])
+  @@index([tenantId, supplierId, settledAt(sort: Desc)])
+  @@index([tenantId, legalEntityId])
+  @@map("settlements")
+}
+
+model SettlementAllocation {
+  id             String               @id @default(cuid())
+  tenantId       String
+  settlementId   String
+  targetType     SettlementTargetType
+  invoiceId      String?
+  purchaseInvoiceId String?
+  amount         Decimal              @db.Decimal(14, 2)
+  createdAt      DateTime             @default(now())
+
+  settlement      Settlement       @relation(fields: [settlementId], references: [id], onDelete: Cascade)
+  invoice         Invoice?         @relation(fields: [invoiceId], references: [id], onDelete: Restrict)
+  purchaseInvoice PurchaseInvoice? @relation(fields: [purchaseInvoiceId], references: [id], onDelete: Restrict)
+
+  @@index([tenantId, settlementId])
+  @@index([tenantId, invoiceId])
+  @@index([tenantId, purchaseInvoiceId])
+  @@map("settlement_allocations")
+}
+
+model SettlementMethodLine {
+  id               String   @id @default(cuid())
+  tenantId         String
+  settlementId     String
+  paymentMethodId  String?
+  methodCode       String
+  amount           Decimal  @db.Decimal(14, 2)
+  changeAmount     Decimal  @default(0) @db.Decimal(14, 2)
+  externalRef      String?
+  giftCardId       String?
+  loyaltyAccountId String?
+  /// true όταν χρησιμοποιήθηκε glClearingAccount (κάρτα)
+  usesClearing     Boolean  @default(false)
+  createdAt        DateTime @default(now())
+
+  settlement    Settlement     @relation(fields: [settlementId], references: [id], onDelete: Cascade)
+  paymentMethod PaymentMethod? @relation(fields: [paymentMethodId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, settlementId])
+  @@index([tenantId, paymentMethodId])
+  @@map("settlement_method_lines")
 }
 
 enum PosSessionStatus {
@@ -2194,6 +2315,7 @@ model PaymentMethod {
   tenant      Tenant                        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   payments    InvoicePayment[]
   seriesLinks DocumentSeriesPaymentMethod[]
+  settlementMethods SettlementMethodLine[]
 
   @@unique([tenantId, code])
   @@index([tenantId, isActive, sortOrder])
@@ -2658,6 +2780,7 @@ model LegalEntity {
   purchaseOrders   PurchaseOrder[]
   documentSeries   DocumentSeries[]
   membershipAccess MembershipCompany[]
+  settlements      Settlement[]
   icMatchesA       IntercompanyMatch[]  @relation("IcEntityA")
   icMatchesB       IntercompanyMatch[]  @relation("IcEntityB")
 
@@ -2940,6 +3063,7 @@ model PurchaseInvoice {
   supplier    Supplier             @relation(fields: [supplierId], references: [id], onDelete: Restrict)
   legalEntity LegalEntity?         @relation(fields: [legalEntityId], references: [id], onDelete: SetNull)
   lines       PurchaseInvoiceLine[]
+  settlementAllocations SettlementAllocation[]
 
   @@unique([tenantId, number])
   @@index([tenantId, status, issueDate])

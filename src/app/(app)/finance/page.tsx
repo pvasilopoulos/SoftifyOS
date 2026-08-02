@@ -117,6 +117,7 @@ export default async function FinancePage() {
   return (
     <FinanceHubClient
       canWrite={session.role !== "VIEWER"}
+      isOwner={session.role === "OWNER"}
       accountCount={accountCount}
       period={{ code: period.code, status: period.status }}
       periods={periods.map((p) => ({
@@ -164,6 +165,7 @@ export default async function FinancePage() {
         status: p.status,
         total: toNumber(p.total),
         paidAmount: toNumber(p.paidAmount),
+        supplierId: p.supplierId,
         supplierName: p.supplier.name,
         issueDate: p.issueDate.toISOString(),
       }))}

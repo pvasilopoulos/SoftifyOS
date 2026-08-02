@@ -434,6 +434,27 @@ export async function POST(request: Request) {
       return { invoice, change: tenderCheck.change };
     });
 
+    // Φ4 — issue + settlement journals for retail receipt
+    let settlementId: string | null = null;
+    let issueJournalId: string | null = null;
+    let settlementJournalId: string | null = null;
+    try {
+      const { finalizePosCheckoutAccounting } = await import(
+        "@/modules/settlements/service"
+      );
+      const gl = await finalizePosCheckoutAccounting(prisma, {
+        tenantId: session.tenantId,
+        userId: session.sub,
+        legalEntityId,
+        invoiceId: result.invoice.id,
+      });
+      settlementId = gl.settlementId;
+      issueJournalId = gl.issueJournalId;
+      settlementJournalId = gl.settlementJournalId;
+    } catch {
+      // Checkout succeeds even if GL posting fails
+    }
+
     await writeAuditEvent({
       tenantId: session.tenantId,
       userId: session.sub,
@@ -447,6 +468,9 @@ export async function POST(request: Request) {
         change: result.change,
         sessionId: posSession.id,
         siteId: site.id,
+        settlementId,
+        issueJournalId,
+        settlementJournalId,
       },
     });
 
@@ -459,6 +483,9 @@ export async function POST(request: Request) {
           payable,
           change: result.change,
           sessionId: posSession.id,
+          settlementId,
+          issueJournalId,
+          settlementJournalId,
         },
       },
       { status: 201 },

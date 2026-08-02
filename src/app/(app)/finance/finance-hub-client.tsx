@@ -18,6 +18,7 @@ import {
   Search,
   Send,
   Wallet,
+  ArrowLeftRight,
 } from "lucide-react";
 import { PageHeader } from "@/shared/ui/page-header";
 import { Badge } from "@/shared/ui/badge";
@@ -27,6 +28,7 @@ import { formatEUR } from "@/modules/sales/invoice-utils";
 import { AccountingHubClient } from "./accounting-hub-client";
 import { FinanceOpsClient } from "./finance-ops-client";
 import { FinanceJournalClient } from "./finance-journal-client";
+import { SettlementsPanel } from "./settlements-panel";
 import {
   defaultFinanceFilters,
   periodPresetDates,
@@ -76,6 +78,7 @@ type Section =
   | "periods"
   | "ar"
   | "ap"
+  | "settlements"
   | "vat"
   | "banking"
   | "mydata"
@@ -147,6 +150,12 @@ const NAV: Array<{
         icon: Receipt,
       },
       {
+        id: "settlements",
+        label: "Εξοφλήσεις",
+        hint: "Εισπράξεις / πληρωμές / void",
+        icon: ArrowLeftRight,
+      },
+      {
         id: "banking",
         label: "Τράπεζες",
         hint: "Λογαριασμοί & matching",
@@ -214,6 +223,10 @@ const SECTION_HELP: Record<Section, { title: string; body: string }> = {
     title: "Υποχρεώσεις (AP)",
     body: "Ανοιχτές αγορές FI και παραγγελίες αγορών προς πληρωμή.",
   },
+  settlements: {
+    title: "Settlement Engine",
+    body: "Ολικές / μερικές / σύνθετες εξοφλήσεις AR & AP με ακύρωση και αντιστροφή άρθρου.",
+  },
   vat: {
     title: "ΦΠΑ περιόδου",
     body: "Σύνοψη ΦΠΑ εκροών / εισροών για το διάστημα των φίλτρων.",
@@ -246,6 +259,7 @@ const SECTION_HELP: Record<Section, { title: string; body: string }> = {
 
 export function FinanceHubClient({
   canWrite,
+  isOwner = false,
   accountCount,
   period,
   periods,
@@ -263,6 +277,7 @@ export function FinanceHubClient({
   initialLegalEntityId = "",
 }: {
   canWrite: boolean;
+  isOwner?: boolean;
   accountCount: number;
   period: { code: string; status: string };
   periods: Period[];
@@ -283,6 +298,7 @@ export function FinanceHubClient({
     status: string;
     total: number;
     paidAmount: number;
+    supplierId: string;
     supplierName: string;
     issueDate: string;
   }>;
@@ -740,6 +756,7 @@ export function FinanceHubClient({
           {accountingTab ? (
             <AccountingHubClient
               canWrite={canWrite}
+              isOwner={isOwner}
               initialPeriods={periods}
               forcedTab={accountingTab}
               hideOuterChrome
@@ -760,6 +777,10 @@ export function FinanceHubClient({
               purchaseInvoices={purchaseInvoices}
               filters={filters}
             />
+          ) : null}
+
+          {section === "settlements" ? (
+            <SettlementsPanel canWrite={canWrite} />
           ) : null}
         </div>
       </div>

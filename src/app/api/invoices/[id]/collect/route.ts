@@ -6,15 +6,20 @@ import { writeAuditEvent } from "@/platform/tenancy/audit";
 import { getErrorMessage } from "@/shared/lib/safe";
 import {
   roundMoney,
-  statusAfterPayment,
   toNumber,
-  type InvoiceStatusKey,
 } from "@/modules/sales/invoice-utils";
 import { invoiceCollectSchema } from "@/modules/sales/schemas";
-import { resolveSeriesPaymentMethods } from "@/modules/documents/series-payments";
+import {
+  createReceiptSettlement,
+  SettlementError,
+} from "@/modules/settlements/service";
 
 export const dynamic = "force-dynamic";
 
+/**
+ * Backward-compatible collect → Settlement Engine (Φ1).
+ * Body may include `methods[]` for multi-tender, or legacy single method/amount.
+ */
 export async function POST(
   request: Request,
   context: { params: Promise<{ id: string }> },
@@ -29,155 +34,78 @@ export async function POST(
     }
 
     const { id } = await context.params;
-    const body = invoiceCollectSchema.parse(await request.json());
+    const raw = await request.json();
 
-    const invoice = await prisma.invoice.findFirst({
-      where: {
-        id,
-        tenantId: session.tenantId,
-        ...(session.legalEntityId
-          ? { legalEntityId: session.legalEntityId }
-          : {}),
+    const multiSchema = z.object({
+      methods: z
+        .array(
+          z.object({
+            paymentMethodId: z.string().min(1).optional().nullable(),
+            method: z.string().trim().min(1).max(40).optional(),
+            amount: z.coerce.number().positive().max(10_000_000),
+            changeAmount: z.coerce.number().min(0).optional().default(0),
+            externalRef: z.string().trim().max(120).optional().nullable(),
+            note: z.string().trim().max(500).optional().nullable(),
+          }),
+        )
+        .min(1)
+        .max(20),
+      note: z.string().trim().max(500).optional().nullable(),
+    });
+
+    let methods: Array<{
+      paymentMethodId?: string | null;
+      method?: string;
+      amount: number;
+      changeAmount: number;
+      externalRef?: string | null;
+    }>;
+    let note: string | null = null;
+
+    if (Array.isArray(raw?.methods) && raw.methods.length > 0) {
+      const body = multiSchema.parse(raw);
+      methods = body.methods.map((m) => ({
+        paymentMethodId: m.paymentMethodId,
+        method: m.method,
+        amount: m.amount,
+        changeAmount: m.changeAmount ?? 0,
+        externalRef: m.externalRef,
+      }));
+      note = body.note ?? null;
+    } else {
+      const body = invoiceCollectSchema.parse(raw);
+      methods = [
+        {
+          paymentMethodId: body.paymentMethodId,
+          method: body.method,
+          amount: body.amount,
+          changeAmount: 0,
+        },
+      ];
+      note = body.note ?? null;
+    }
+
+    const { settlement, journalId } = await createReceiptSettlement(prisma, {
+      tenantId: session.tenantId,
+      userId: session.sub,
+      legalEntityId: session.legalEntityId,
+      data: {
+        invoiceId: id,
+        notes: note,
+        methods,
       },
+    });
+
+    const invoice = await prisma.invoice.findFirstOrThrow({
+      where: { id, tenantId: session.tenantId },
       select: {
         id: true,
         number: true,
         status: true,
-        total: true,
         paidAmount: true,
-        seriesId: true,
-        legalEntityId: true,
-        series: {
-          select: { glDebitAccount: true },
-        },
+        total: true,
       },
     });
-    if (!invoice) {
-      return NextResponse.json({ error: "Δεν βρέθηκε" }, { status: 404 });
-    }
-
-    const status = invoice.status as InvoiceStatusKey;
-    if (status === "DRAFT") {
-      return NextResponse.json(
-        { error: "Έκδώστε πρώτα το πρόχειρο τιμολόγιο" },
-        { status: 400 },
-      );
-    }
-    if (status === "CANCELLED") {
-      return NextResponse.json(
-        { error: "Το ακυρωμένο τιμολόγιο δεν δέχεται είσπραξη" },
-        { status: 400 },
-      );
-    }
-    if (status === "PAID") {
-      return NextResponse.json(
-        { error: "Το τιμολόγιο είναι ήδη εξοφλημένο" },
-        { status: 400 },
-      );
-    }
-
-    const allowed = await resolveSeriesPaymentMethods(prisma, {
-      tenantId: session.tenantId,
-      seriesId: invoice.seriesId,
-      collectOnly: true,
-      activeOnly: true,
-    });
-
-    if (allowed.length === 0) {
-      return NextResponse.json(
-        { error: "Δεν υπάρχουν διαθέσιμοι τρόποι είσπραξης" },
-        { status: 400 },
-      );
-    }
-
-    let method =
-      allowed.find((m) => m.id === body.paymentMethodId) ??
-      allowed.find((m) => m.code === body.method) ??
-      allowed.find((m) => m.isDefault) ??
-      allowed[0]!;
-
-    // Legacy enum fallback when series has no strict allow-list match
-    if (
-      !body.paymentMethodId &&
-      body.method &&
-      !allowed.some((m) => m.code === body.method)
-    ) {
-      const legacy = allowed.find((m) => m.kind === body.method);
-      if (legacy) method = legacy;
-    }
-
-    if (
-      body.paymentMethodId &&
-      !allowed.some((m) => m.id === body.paymentMethodId)
-    ) {
-      return NextResponse.json(
-        { error: "Ο τρόπος πληρωμής δεν επιτρέπεται για αυτή τη σειρά" },
-        { status: 400 },
-      );
-    }
-
-    const total = toNumber(invoice.total);
-    const currentPaid = toNumber(invoice.paidAmount);
-    const balance = roundMoney(total - currentPaid);
-    if (body.amount > balance + 0.001) {
-      return NextResponse.json(
-        {
-          error: `Το ποσό υπερβαίνει το υπόλοιπο (${balance.toFixed(2)} €)`,
-        },
-        { status: 400 },
-      );
-    }
-
-    const paidAmount = roundMoney(currentPaid + body.amount);
-    const nextStatus = statusAfterPayment(status, paidAmount, total);
-
-    const updated = await prisma.$transaction(async (tx) => {
-      await tx.invoicePayment.create({
-        data: {
-          tenantId: session.tenantId,
-          invoiceId: invoice.id,
-          amount: body.amount,
-          method: method.code,
-          paymentMethodId: method.id,
-          note: body.note || null,
-        },
-      });
-      return tx.invoice.update({
-        where: { id: invoice.id },
-        data: { paidAmount, status: nextStatus },
-      });
-    });
-
-    let journalId: string | null = null;
-    try {
-      const payment = await prisma.invoicePayment.findFirst({
-        where: { tenantId: session.tenantId, invoiceId: invoice.id },
-        orderBy: { createdAt: "desc" },
-        select: { id: true },
-      });
-      const pmGl = await prisma.paymentMethod.findFirst({
-        where: { id: method.id, tenantId: session.tenantId },
-        select: { glAccount: true, glClearingAccount: true },
-      });
-      const { tryPostInvoiceCollect } = await import("@/modules/ledger/service");
-      const journal = await tryPostInvoiceCollect(prisma, {
-        tenantId: session.tenantId,
-        invoiceId: invoice.id,
-        invoiceNumber: updated.number,
-        amount: body.amount,
-        paymentId: payment?.id ?? null,
-        glArAccount: invoice.series?.glDebitAccount ?? "30.00.00",
-        glCashAccount:
-          pmGl?.glAccount ||
-          pmGl?.glClearingAccount ||
-          "38.00.00",
-        userId: session.sub,
-        legalEntityId: invoice.legalEntityId ?? session.legalEntityId,
-      });
-      journalId = journal?.id ?? null;
-    } catch {
-      journalId = null;
-    }
 
     await writeAuditEvent({
       tenantId: session.tenantId,
@@ -186,30 +114,33 @@ export async function POST(
       entity: "invoice",
       entityId: invoice.id,
       meta: {
-        amount: body.amount,
-        method: method.code,
-        paymentMethodId: method.id,
-        paidAmount,
-        status: nextStatus,
-        note: body.note || null,
+        settlementId: settlement.id,
+        settlementNumber: settlement.number,
+        amount: toNumber(settlement.totalAmount),
+        methods: methods.map((m) => m.method || m.paymentMethodId || ""),
         journalId,
       },
     });
 
     return NextResponse.json({
       item: {
-        id: updated.id,
-        number: updated.number,
-        status: updated.status,
-        paidAmount: toNumber(updated.paidAmount),
-        total: toNumber(updated.total),
+        id: invoice.id,
+        number: invoice.number,
+        status: invoice.status,
+        paidAmount: toNumber(invoice.paidAmount),
+        total: toNumber(invoice.total),
         balance: roundMoney(
-          toNumber(updated.total) - toNumber(updated.paidAmount),
+          toNumber(invoice.total) - toNumber(invoice.paidAmount),
         ),
         journalId,
+        settlementId: settlement.id,
+        settlementNumber: settlement.number,
       },
     });
   } catch (error) {
+    if (error instanceof SettlementError) {
+      return NextResponse.json({ error: error.message }, { status: error.status });
+    }
     if (error instanceof z.ZodError) {
       return NextResponse.json(
         { error: "Μη έγκυρο ποσό είσπραξης" },

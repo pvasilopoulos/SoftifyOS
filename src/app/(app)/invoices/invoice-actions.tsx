@@ -78,25 +78,32 @@ export function InvoiceActions({
   }
 
   async function collectInvoice(
-    amount: number,
+    methods: Array<{ paymentMethodId: string; amount: number }>,
     note: string,
-    paymentMethodId: string | null,
   ) {
     setBusy("collect");
     setError(null);
     setMessage(null);
+    const amount = methods.reduce((s, m) => s + m.amount, 0);
     try {
       const res = await fetch(`/api/invoices/${invoiceId}/collect`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          amount,
+          methods: methods.map((m) => ({
+            paymentMethodId: m.paymentMethodId,
+            amount: m.amount,
+          })),
           note: note || null,
-          paymentMethodId: paymentMethodId || null,
         }),
       });
       const data = (await res.json()) as {
-        item?: { paidAmount: number; balance: number; status: string };
+        item?: {
+          paidAmount: number;
+          balance: number;
+          status: string;
+          settlementNumber?: string;
+        };
         error?: string;
       };
       if (!res.ok) {
@@ -104,8 +111,11 @@ export function InvoiceActions({
         return;
       }
       setCollectOpen(false);
+      const settle = data.item?.settlementNumber
+        ? ` · ${data.item.settlementNumber}`
+        : "";
       setMessage(
-        `Είσπραξη ${formatEUR(amount)} · υπόλοιπο ${formatEUR(data.item!.balance)}`,
+        `Είσπραξη ${formatEUR(amount)}${settle} · υπόλοιπο ${formatEUR(data.item!.balance)}`,
       );
       router.refresh();
       onDone?.();
@@ -240,9 +250,7 @@ export function InvoiceActions({
           balance={balance}
           busy={busy === "collect"}
           onClose={() => setCollectOpen(false)}
-          onSubmit={(amount, note, paymentMethodId) =>
-            void collectInvoice(amount, note, paymentMethodId)
-          }
+          onSubmit={(methods, note) => void collectInvoice(methods, note)}
         />
       ) : null}
     </div>
@@ -257,6 +265,12 @@ type CollectMethod = {
   isDefault: boolean;
 };
 
+type TenderLine = {
+  key: string;
+  paymentMethodId: string;
+  amount: string;
+};
+
 function CollectDialog({
   invoiceId,
   balance,
@@ -269,17 +283,13 @@ function CollectDialog({
   busy: boolean;
   onClose: () => void;
   onSubmit: (
-    amount: number,
+    methods: Array<{ paymentMethodId: string; amount: number }>,
     note: string,
-    paymentMethodId: string | null,
   ) => void;
 }) {
-  const [amount, setAmount] = useState(
-    balance > 0 ? String(balance) : "",
-  );
   const [note, setNote] = useState("");
-  const [methods, setMethods] = useState<CollectMethod[]>([]);
-  const [methodId, setMethodId] = useState("");
+  const [catalog, setCatalog] = useState<CollectMethod[]>([]);
+  const [lines, setLines] = useState<TenderLine[]>([]);
   const [loadingMethods, setLoadingMethods] = useState(true);
 
   useEffect(() => {
@@ -291,10 +301,16 @@ function CollectDialog({
         const data = (await res.json()) as { items?: CollectMethod[] };
         if (cancelled || !res.ok) return;
         const items = data.items ?? [];
-        setMethods(items);
+        setCatalog(items);
         const preferred =
           items.find((m) => m.isDefault)?.id ?? items[0]?.id ?? "";
-        setMethodId(preferred);
+        setLines([
+          {
+            key: "t0",
+            paymentMethodId: preferred,
+            amount: balance > 0 ? String(balance) : "",
+          },
+        ]);
       } finally {
         if (!cancelled) setLoadingMethods(false);
       }
@@ -302,7 +318,14 @@ function CollectDialog({
     return () => {
       cancelled = true;
     };
-  }, [invoiceId]);
+  }, [invoiceId, balance]);
+
+  const total = lines.reduce((s, l) => {
+    const n = Number(l.amount);
+    return s + (Number.isFinite(n) && n > 0 ? n : 0);
+  }, 0);
+  const round2 = (n: number) => Math.round(n * 100) / 100;
+  const remaining = round2(Math.max(0, balance - total));
 
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center bg-ink-950/40 p-4 sm:items-center">
@@ -310,7 +333,7 @@ function CollectDialog({
         role="dialog"
         aria-modal="true"
         aria-labelledby="collect-title"
-        className="w-full max-w-md rounded-2xl bg-white p-5 shadow-xl"
+        className="w-full max-w-lg rounded-2xl bg-white p-5 shadow-xl"
       >
         <div className="mb-4 flex items-start justify-between gap-3">
           <div>
@@ -319,6 +342,11 @@ function CollectDialog({
             </h3>
             <p className="mt-1 text-sm text-slate-500">
               Υπόλοιπο {formatEUR(balance)}
+              {lines.length > 1 ? (
+                <span className="ml-2 text-teal-700">
+                  · σύνολο {formatEUR(total)}
+                </span>
+              ) : null}
             </p>
           </div>
           <button
@@ -334,48 +362,111 @@ function CollectDialog({
           className="space-y-3"
           onSubmit={(e) => {
             e.preventDefault();
-            const value = Number(amount);
-            if (!Number.isFinite(value) || value <= 0) return;
-            onSubmit(value, note.trim(), methodId || null);
+            const methods = lines
+              .map((l) => ({
+                paymentMethodId: l.paymentMethodId,
+                amount: Number(l.amount),
+              }))
+              .filter(
+                (m) =>
+                  m.paymentMethodId &&
+                  Number.isFinite(m.amount) &&
+                  m.amount > 0,
+              );
+            if (methods.length === 0) return;
+            if (round2(methods.reduce((s, m) => s + m.amount, 0)) > balance + 0.001)
+              return;
+            onSubmit(methods, note.trim());
           }}
         >
-          <label className="block">
-            <span className="mb-1.5 block text-sm font-medium">Ποσό (€) *</span>
-            <input
-              required
-              type="number"
-              min="0.01"
-              step="0.01"
-              max={balance}
-              value={amount}
-              onChange={(e) => setAmount(e.target.value)}
-              className="h-11 w-full rounded-xl border border-slate-200 px-3 text-sm outline-none ring-teal-500/30 focus:ring-2"
-            />
-          </label>
-          <label className="block">
-            <span className="mb-1.5 block text-sm font-medium">
-              Τρόπος πληρωμής *
-            </span>
-            <select
-              required
-              value={methodId}
-              disabled={loadingMethods || methods.length === 0}
-              onChange={(e) => setMethodId(e.target.value)}
-              className="h-11 w-full rounded-xl border border-slate-200 px-3 text-sm outline-none ring-teal-500/30 focus:ring-2"
-            >
-              {loadingMethods ? (
-                <option value="">Φόρτωση…</option>
-              ) : methods.length === 0 ? (
-                <option value="">Δεν υπάρχουν τρόποι</option>
-              ) : (
-                methods.map((m) => (
-                  <option key={m.id} value={m.id}>
-                    {m.name} ({m.code})
-                  </option>
-                ))
-              )}
-            </select>
-          </label>
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <span className="text-sm font-medium">Τρόποι πληρωμής *</span>
+              <button
+                type="button"
+                disabled={loadingMethods || catalog.length === 0 || remaining <= 0}
+                onClick={() => {
+                  const preferred =
+                    catalog.find((m) => m.isDefault)?.id ?? catalog[0]?.id ?? "";
+                  setLines((prev) => [
+                    ...prev,
+                    {
+                      key: `t${Date.now()}`,
+                      paymentMethodId: preferred,
+                      amount: remaining > 0 ? String(remaining) : "",
+                    },
+                  ]);
+                }}
+                className="text-xs font-medium text-teal-700 hover:underline disabled:opacity-40"
+              >
+                + Προσθήκη τρόπου
+              </button>
+            </div>
+            {lines.map((line, idx) => (
+              <div
+                key={line.key}
+                className="grid grid-cols-[1fr_7rem_auto] gap-2"
+              >
+                <select
+                  required
+                  value={line.paymentMethodId}
+                  disabled={loadingMethods || catalog.length === 0}
+                  onChange={(e) =>
+                    setLines((prev) =>
+                      prev.map((l) =>
+                        l.key === line.key
+                          ? { ...l, paymentMethodId: e.target.value }
+                          : l,
+                      ),
+                    )
+                  }
+                  className="h-11 w-full rounded-xl border border-slate-200 px-3 text-sm outline-none ring-teal-500/30 focus:ring-2"
+                >
+                  {loadingMethods ? (
+                    <option value="">Φόρτωση…</option>
+                  ) : catalog.length === 0 ? (
+                    <option value="">Δεν υπάρχουν τρόποι</option>
+                  ) : (
+                    catalog.map((m) => (
+                      <option key={m.id} value={m.id}>
+                        {m.name} ({m.code})
+                      </option>
+                    ))
+                  )}
+                </select>
+                <input
+                  required
+                  type="number"
+                  min="0.01"
+                  step="0.01"
+                  max={balance}
+                  value={line.amount}
+                  onChange={(e) =>
+                    setLines((prev) =>
+                      prev.map((l) =>
+                        l.key === line.key
+                          ? { ...l, amount: e.target.value }
+                          : l,
+                      ),
+                    )
+                  }
+                  className="h-11 w-full rounded-xl border border-slate-200 px-3 text-sm outline-none ring-teal-500/30 focus:ring-2"
+                  aria-label={`Ποσό γραμμής ${idx + 1}`}
+                />
+                <button
+                  type="button"
+                  disabled={lines.length <= 1}
+                  onClick={() =>
+                    setLines((prev) => prev.filter((l) => l.key !== line.key))
+                  }
+                  className="rounded-xl px-2 text-slate-400 hover:bg-slate-100 hover:text-ink-900 disabled:opacity-30"
+                  aria-label="Αφαίρεση"
+                >
+                  <X size={14} />
+                </button>
+              </div>
+            ))}
+          </div>
           <label className="block">
             <span className="mb-1.5 block text-sm font-medium">Σημείωση</span>
             <input
@@ -388,7 +479,13 @@ function CollectDialog({
           <div className="flex flex-wrap gap-2 pt-1">
             <Button
               type="submit"
-              disabled={busy || loadingMethods || !methodId}
+              disabled={
+                busy ||
+                loadingMethods ||
+                lines.every((l) => !l.paymentMethodId) ||
+                total <= 0 ||
+                total > balance + 0.001
+              }
             >
               {busy ? "Αποθήκευση..." : "Καταχώρηση"}
             </Button>
@@ -398,7 +495,19 @@ function CollectDialog({
             <Button
               type="button"
               variant="ghost"
-              onClick={() => setAmount(String(balance))}
+              onClick={() =>
+                setLines((prev) =>
+                  prev.length
+                    ? [
+                        {
+                          ...prev[0]!,
+                          amount: String(balance),
+                        },
+                        ...prev.slice(1).map((l) => ({ ...l, amount: "" })),
+                      ]
+                    : prev,
+                )
+              }
             >
               Πλήρες υπόλοιπο
             </Button>

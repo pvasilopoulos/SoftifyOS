@@ -132,6 +132,23 @@ export async function PATCH(
           ...(body.glVatAccount !== undefined
             ? { glVatAccount: body.glVatAccount || null }
             : {}),
+          ...(body.allowPartialSettlement !== undefined
+            ? { allowPartialSettlement: body.allowPartialSettlement }
+            : {}),
+          ...(body.allowMultiTender !== undefined
+            ? { allowMultiTender: body.allowMultiTender }
+            : {}),
+          ...(body.allowMultiDocumentSettlement !== undefined
+            ? {
+                allowMultiDocumentSettlement: body.allowMultiDocumentSettlement,
+              }
+            : {}),
+          ...(body.allowOnAccount !== undefined
+            ? { allowOnAccount: body.allowOnAccount }
+            : {}),
+          ...(body.settlementClearingMode !== undefined
+            ? { settlementClearingMode: body.settlementClearingMode }
+            : {}),
           ...(body.isDefault !== undefined ? { isDefault: body.isDefault } : {}),
           ...(body.isActive !== undefined ? { isActive: body.isActive } : {}),
         },

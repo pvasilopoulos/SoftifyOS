@@ -188,6 +188,12 @@ export async function POST(request: Request) {
           glDebitAccount: body.glDebitAccount || null,
           glCreditAccount: body.glCreditAccount || null,
           glVatAccount: body.glVatAccount || null,
+          allowPartialSettlement: body.allowPartialSettlement ?? true,
+          allowMultiTender: body.allowMultiTender ?? true,
+          allowMultiDocumentSettlement:
+            body.allowMultiDocumentSettlement ?? false,
+          allowOnAccount: body.allowOnAccount ?? false,
+          settlementClearingMode: body.settlementClearingMode ?? "IMMEDIATE",
           isDefault: body.isDefault ?? false,
           isActive: body.isActive ?? true,
         },

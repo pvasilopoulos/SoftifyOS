@@ -39,12 +39,14 @@ type TrialRow = {
 
 export function AccountingHubClient({
   canWrite,
+  isOwner = false,
   initialPeriods,
   forcedTab,
   hideOuterChrome,
   filters,
 }: {
   canWrite: boolean;
+  isOwner?: boolean;
   initialPeriods: Period[];
   forcedTab?: Tab;
   hideOuterChrome?: boolean;
@@ -858,19 +860,24 @@ export function AccountingHubClient({
                     <Badge tone={p.status === "OPEN" ? "emerald" : "rose"}>
                       {p.status === "OPEN" ? "Ανοιχτή" : "Κλειστή"}
                     </Badge>
-                    {canWrite ? (
+                    {canWrite && p.status === "OPEN" ? (
                       <Button
                         size="sm"
                         variant="secondary"
                         disabled={pending}
-                        onClick={() =>
-                          periodAction(
-                            p.id,
-                            p.status === "OPEN" ? "close" : "reopen",
-                          )
-                        }
+                        onClick={() => periodAction(p.id, "close")}
                       >
-                        {p.status === "OPEN" ? "Κλείσιμο" : "Επαναφορά"}
+                        Κλείσιμο
+                      </Button>
+                    ) : null}
+                    {isOwner && p.status !== "OPEN" ? (
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        disabled={pending}
+                        onClick={() => periodAction(p.id, "reopen")}
+                      >
+                        Επαναφορά (OWNER)
                       </Button>
                     ) : null}
                   </div>

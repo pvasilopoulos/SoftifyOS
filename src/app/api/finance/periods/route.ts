@@ -76,6 +76,13 @@ export async function POST(request: Request) {
       });
     }
 
+    if (body.action === "reopen" && session.role !== "OWNER") {
+      return NextResponse.json(
+        { error: "Μόνο OWNER μπορεί να επαναφέρει κλειστή περίοδο" },
+        { status: 403 },
+      );
+    }
+
     const item =
       body.action === "close"
         ? await closeFiscalPeriod(prisma, {

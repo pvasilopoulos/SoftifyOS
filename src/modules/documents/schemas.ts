@@ -60,6 +60,15 @@ export const seriesCreateSchema = z.object({
   /** Empty / omitted = default form for document kind */
   allowedPrintFormIds: z.array(z.string().min(1)).max(50).optional(),
   defaultPrintFormId: z.string().min(1).nullable().optional(),
+  /** Settlement Engine (Φ2) */
+  allowPartialSettlement: z.boolean().optional().default(true),
+  allowMultiTender: z.boolean().optional().default(true),
+  allowMultiDocumentSettlement: z.boolean().optional().default(false),
+  allowOnAccount: z.boolean().optional().default(false),
+  settlementClearingMode: z
+    .enum(["IMMEDIATE", "CLEARING"])
+    .optional()
+    .default("IMMEDIATE"),
 });
 
 export const seriesUpdateSchema = seriesCreateSchema.partial();

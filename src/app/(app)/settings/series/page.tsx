@@ -115,6 +115,12 @@ export default async function SeriesSettingsPage() {
           glDebitAccount: s.glDebitAccount,
           glCreditAccount: s.glCreditAccount,
           glVatAccount: s.glVatAccount,
+          allowPartialSettlement: s.allowPartialSettlement,
+          allowMultiTender: s.allowMultiTender,
+          allowMultiDocumentSettlement: s.allowMultiDocumentSettlement,
+          allowOnAccount: s.allowOnAccount,
+          settlementClearingMode:
+            s.settlementClearingMode === "CLEARING" ? "CLEARING" : "IMMEDIATE",
           isDefault: s.isDefault,
           isActive: s.isActive,
           allowedPaymentMethodIds: pay.allowedPaymentMethodIds,

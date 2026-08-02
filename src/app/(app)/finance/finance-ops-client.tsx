@@ -73,8 +73,18 @@ type PurchaseInvoiceRow = {
   status: string;
   total: number;
   paidAmount: number;
+  supplierId: string;
   supplierName: string;
   issueDate: string;
+};
+
+type PayMethod = {
+  id: string;
+  code: string;
+  name: string;
+  showInCollect?: boolean;
+  isActive?: boolean;
+  sortOrder?: number;
 };
 
 export function FinanceOpsClient({
@@ -112,6 +122,15 @@ export function FinanceOpsClient({
   const [rows, setRows] = useState(myData);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [localPurchases, setLocalPurchases] = useState(purchaseInvoices);
+  const [payTarget, setPayTarget] = useState<PurchaseInvoiceRow | null>(null);
+  const [payMethods, setPayMethods] = useState<PayMethod[]>([]);
+  const [payMethodId, setPayMethodId] = useState("");
+  const [payAmount, setPayAmount] = useState("");
+
+  useEffect(() => {
+    setLocalPurchases(purchaseInvoices);
+  }, [purchaseInvoices]);
 
   useEffect(() => {
     if (forcedTab) setTab(forcedTab);
@@ -165,7 +184,7 @@ export function FinanceOpsClient({
 
   const filteredPurchases = useMemo(() => {
     const q = filters?.q?.trim().toLowerCase() ?? "";
-    return purchaseInvoices.filter((r) => {
+    return localPurchases.filter((r) => {
       if (filters?.from && r.issueDate.slice(0, 10) < filters.from) return false;
       if (filters?.to && r.issueDate.slice(0, 10) > filters.to) return false;
       if (!q) return true;
@@ -175,7 +194,71 @@ export function FinanceOpsClient({
         r.status.toLowerCase().includes(q)
       );
     });
-  }, [purchaseInvoices, filters]);
+  }, [localPurchases, filters]);
+
+  async function openPay(row: PurchaseInvoiceRow) {
+    const balance = Math.max(0, Math.round((row.total - row.paidAmount) * 100) / 100);
+    if (balance <= 0) return;
+    setPayTarget(row);
+    setPayAmount(String(balance));
+    setError(null);
+    const res = await fetch("/api/settings/payment-methods");
+    const data = (await res.json()) as { items?: PayMethod[] };
+    const items = (data.items ?? []).filter(
+      (m) => m.isActive !== false && m.showInCollect !== false,
+    );
+    setPayMethods(items);
+    setPayMethodId(items[0]?.id ?? "");
+  }
+
+  async function submitPay() {
+    if (!payTarget) return;
+    const amount = Number(payAmount);
+    if (!Number.isFinite(amount) || amount <= 0 || !payMethodId) {
+      setError("Συμπλήρωσε ποσό και τρόπο πληρωμής");
+      return;
+    }
+    setBusyId(payTarget.id);
+    setError(null);
+    try {
+      const res = await fetch("/api/settlements", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          kind: "PAYMENT",
+          supplierId: payTarget.supplierId,
+          purchaseInvoiceId: payTarget.id,
+          methods: [{ paymentMethodId: payMethodId, amount }],
+        }),
+      });
+      const data = (await res.json()) as {
+        item?: { number: string };
+        error?: string;
+      };
+      if (!res.ok) {
+        setError(data.error || "Αποτυχία πληρωμής");
+        return;
+      }
+      toast.success(`Πληρωμή ${data.item?.number ?? ""}`);
+      setLocalPurchases((prev) =>
+        prev.map((p) => {
+          if (p.id !== payTarget.id) return p;
+          const paidAmount =
+            Math.round((p.paidAmount + amount) * 100) / 100;
+          const status =
+            paidAmount + 0.001 >= p.total
+              ? "PAID"
+              : paidAmount > 0
+                ? "PARTIAL"
+                : p.status;
+          return { ...p, paidAmount, status };
+        }),
+      );
+      setPayTarget(null);
+    } finally {
+      setBusyId(null);
+    }
+  }
 
   const filteredMyData = useMemo(() => {
     const q = filters?.q?.trim().toLowerCase() ?? "";
@@ -424,30 +507,52 @@ export function FinanceOpsClient({
                   <th className="px-3 py-2">Προμηθευτής</th>
                   <th className="px-3 py-2">Κατάσταση</th>
                   <th className="px-3 py-2 text-right">Υπόλοιπο</th>
+                  <th className="px-3 py-2" />
                 </tr>
               </thead>
               <tbody>
-                {filteredPurchases.map((r) => (
-                  <tr key={r.id} className="border-t border-slate-100">
-                    <td className="px-3 py-2 font-mono text-xs font-semibold">
-                      {r.number}
-                    </td>
-                    <td className="px-3 py-2">{r.supplierName}</td>
-                    <td className="px-3 py-2">
-                      <Badge tone="teal">{r.status}</Badge>
-                    </td>
-                    <td className="px-3 py-2 text-right font-medium tabular-nums">
-                      {money(Math.max(0, r.total - r.paidAmount))}
-                    </td>
-                  </tr>
-                ))}
+                {filteredPurchases.map((r) => {
+                  const bal = Math.max(0, r.total - r.paidAmount);
+                  const canPay =
+                    canWrite &&
+                    bal > 0 &&
+                    r.status !== "DRAFT" &&
+                    r.status !== "CANCELLED" &&
+                    r.status !== "PAID";
+                  return (
+                    <tr key={r.id} className="border-t border-slate-100">
+                      <td className="px-3 py-2 font-mono text-xs font-semibold">
+                        {r.number}
+                      </td>
+                      <td className="px-3 py-2">{r.supplierName}</td>
+                      <td className="px-3 py-2">
+                        <Badge tone="teal">{r.status}</Badge>
+                      </td>
+                      <td className="px-3 py-2 text-right font-medium tabular-nums">
+                        {money(bal)}
+                      </td>
+                      <td className="px-3 py-2 text-right">
+                        {canPay ? (
+                          <Button
+                            size="sm"
+                            variant="secondary"
+                            disabled={busyId === r.id}
+                            onClick={() => void openPay(r)}
+                          >
+                            Πληρωμή
+                          </Button>
+                        ) : null}
+                      </td>
+                    </tr>
+                  );
+                })}
                 {filteredPurchases.length === 0 ? (
                   <tr>
                     <td
-                      colSpan={4}
+                      colSpan={5}
                       className="px-3 py-6 text-center text-slate-500"
                     >
-                      {purchaseInvoices.length === 0
+                      {localPurchases.length === 0
                         ? "Καμία αγορά FI — δημιούργησε από «Αγορές FI»."
                         : "Καμία αγορά με τα τρέχοντα φίλτρα."}
                     </td>
@@ -456,6 +561,72 @@ export function FinanceOpsClient({
               </tbody>
             </table>
           </div>
+
+          {payTarget ? (
+            <div className="fixed inset-0 z-50 flex items-end justify-center bg-ink-950/40 p-4 sm:items-center">
+              <div className="w-full max-w-md rounded-2xl bg-white p-5 shadow-xl">
+                <h3 className="text-lg font-semibold text-ink-950">
+                  Πληρωμή {payTarget.number}
+                </h3>
+                <p className="mt-1 text-sm text-slate-500">
+                  {payTarget.supplierName} · υπόλοιπο{" "}
+                  {money(
+                    Math.max(0, payTarget.total - payTarget.paidAmount),
+                  )}
+                </p>
+                <div className="mt-4 space-y-3">
+                  <label className="block">
+                    <span className="mb-1.5 block text-sm font-medium">
+                      Ποσό (€)
+                    </span>
+                    <input
+                      type="number"
+                      min="0.01"
+                      step="0.01"
+                      value={payAmount}
+                      onChange={(e) => setPayAmount(e.target.value)}
+                      className="h-11 w-full rounded-xl border border-slate-200 px-3 text-sm"
+                    />
+                  </label>
+                  <label className="block">
+                    <span className="mb-1.5 block text-sm font-medium">
+                      Τρόπος πληρωμής
+                    </span>
+                    <select
+                      value={payMethodId}
+                      onChange={(e) => setPayMethodId(e.target.value)}
+                      className="h-11 w-full rounded-xl border border-slate-200 px-3 text-sm"
+                    >
+                      {payMethods.map((m) => (
+                        <option key={m.id} value={m.id}>
+                          {m.name} ({m.code})
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  {error ? (
+                    <p className="rounded-xl bg-rose-50 px-3 py-2 text-xs text-rose-700">
+                      {error}
+                    </p>
+                  ) : null}
+                  <div className="flex gap-2">
+                    <Button
+                      disabled={busyId === payTarget.id}
+                      onClick={() => void submitPay()}
+                    >
+                      {busyId === payTarget.id ? "..." : "Καταχώρηση"}
+                    </Button>
+                    <Button
+                      variant="secondary"
+                      onClick={() => setPayTarget(null)}
+                    >
+                      Ακύρωση
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          ) : null}
 
           <div className="overflow-hidden rounded-xl border border-slate-200 bg-white">
             <p className="border-b border-slate-100 px-3 py-2 text-xs text-slate-500">

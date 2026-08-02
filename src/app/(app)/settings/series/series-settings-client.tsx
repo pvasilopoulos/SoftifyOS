@@ -72,6 +72,11 @@ type Series = {
   glDebitAccount: string | null;
   glCreditAccount: string | null;
   glVatAccount: string | null;
+  allowPartialSettlement: boolean;
+  allowMultiTender: boolean;
+  allowMultiDocumentSettlement: boolean;
+  allowOnAccount: boolean;
+  settlementClearingMode: "IMMEDIATE" | "CLEARING";
   isDefault: boolean;
   isActive: boolean;
   allowedPaymentMethodIds: string[];
@@ -119,6 +124,15 @@ function payloadFromForm(
     glDebitAccount: String(form.get("glDebitAccount") || "") || null,
     glCreditAccount: String(form.get("glCreditAccount") || "") || null,
     glVatAccount: String(form.get("glVatAccount") || "") || null,
+    allowPartialSettlement: form.get("allowPartialSettlement") === "on",
+    allowMultiTender: form.get("allowMultiTender") === "on",
+    allowMultiDocumentSettlement:
+      form.get("allowMultiDocumentSettlement") === "on",
+    allowOnAccount: form.get("allowOnAccount") === "on",
+    settlementClearingMode:
+      String(form.get("settlementClearingMode") || "IMMEDIATE") === "CLEARING"
+        ? "CLEARING"
+        : "IMMEDIATE",
     isDefault: form.get("isDefault") === "on",
     isActive: form.get("isActive") === "on",
     allowedPaymentMethodIds: payments.allowedPaymentMethodIds,
@@ -1082,6 +1096,50 @@ function SeriesDrawer({
                   .
                 </p>
               ) : null}
+            </Section>
+
+            <Section title="Εξοφλήσεις (Settlement)">
+              <div className="flex flex-col gap-2.5 text-sm">
+                <Check
+                  name="allowPartialSettlement"
+                  label="Μερική εξόφληση"
+                  defaultChecked={initial?.allowPartialSettlement ?? true}
+                />
+                <Check
+                  name="allowMultiTender"
+                  label="Πολλαπλοί τρόποι πληρωμής"
+                  defaultChecked={initial?.allowMultiTender ?? true}
+                />
+                <Check
+                  name="allowMultiDocumentSettlement"
+                  label="Πολλαπλά παραστατικά στην ίδια εξόφληση"
+                  defaultChecked={
+                    initial?.allowMultiDocumentSettlement ?? false
+                  }
+                />
+                <Check
+                  name="allowOnAccount"
+                  label="Προκαταβολή / on-account"
+                  defaultChecked={initial?.allowOnAccount ?? false}
+                />
+                <label className="block">
+                  <span className="mb-1.5 block text-xs font-medium text-slate-600">
+                    Εκκαθάριση καρτών
+                  </span>
+                  <select
+                    name="settlementClearingMode"
+                    defaultValue={
+                      initial?.settlementClearingMode ?? "IMMEDIATE"
+                    }
+                    className="h-10 w-full rounded-xl border border-slate-200 px-3 text-sm"
+                  >
+                    <option value="IMMEDIATE">Άμεση (Dr ταμείο/τράπεζα)</option>
+                    <option value="CLEARING">
+                      Clearing (μέσω glClearingAccount)
+                    </option>
+                  </select>
+                </label>
+              </div>
             </Section>
 
             <Section title="Επιλογές">
