@@ -10,6 +10,11 @@ import {
   loadTrialBalance,
 } from "@/modules/ledger/reports";
 import { loadCostCenterReport } from "@/modules/ledger/controlling";
+import {
+  loadCustomerCard,
+  loadSupplierCard,
+  loadVatBooks,
+} from "@/modules/ledger/greek-books";
 
 export const dynamic = "force-dynamic";
 
@@ -24,6 +29,7 @@ export async function GET(request: Request) {
     const from = url.searchParams.get("from");
     const to = url.searchParams.get("to");
     const accountId = url.searchParams.get("accountId");
+    const partyId = url.searchParams.get("partyId");
     const legalEntityId = url.searchParams.get("legalEntityId");
     const opts = {
       from: from ? new Date(from) : null,
@@ -85,6 +91,57 @@ export async function GET(request: Request) {
           opts,
         )),
       });
+    }
+    if (kind === "vat-books") {
+      const fromDate = opts.from ?? new Date(new Date().getFullYear(), 0, 1);
+      const toDate = opts.to ?? new Date();
+      return NextResponse.json({
+        kind,
+        ...(await loadVatBooks(prisma, session.tenantId, {
+          from: fromDate,
+          to: toDate,
+          legalEntityId: opts.legalEntityId,
+        })),
+      });
+    }
+    if (kind === "customer-card") {
+      if (!partyId) {
+        return NextResponse.json(
+          { error: "Απαιτείται partyId (πελάτης)" },
+          { status: 400 },
+        );
+      }
+      const card = await loadCustomerCard(
+        prisma,
+        session.tenantId,
+        partyId,
+        opts,
+      );
+      if (!card) {
+        return NextResponse.json({ error: "Πελάτης δεν βρέθηκε" }, { status: 404 });
+      }
+      return NextResponse.json({ kind, ...card });
+    }
+    if (kind === "supplier-card") {
+      if (!partyId) {
+        return NextResponse.json(
+          { error: "Απαιτείται partyId (προμηθευτής)" },
+          { status: 400 },
+        );
+      }
+      const card = await loadSupplierCard(
+        prisma,
+        session.tenantId,
+        partyId,
+        opts,
+      );
+      if (!card) {
+        return NextResponse.json(
+          { error: "Προμηθευτής δεν βρέθηκε" },
+          { status: 404 },
+        );
+      }
+      return NextResponse.json({ kind, ...card });
     }
     return NextResponse.json({ error: "Unknown report kind" }, { status: 400 });
   } catch (error) {

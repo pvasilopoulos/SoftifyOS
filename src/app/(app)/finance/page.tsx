@@ -109,7 +109,7 @@ export default async function FinancePage() {
     .filter((r) => r.bucket !== "current")
     .reduce((s, r) => s + r.balance, 0);
   const arTotal = arRows.reduce((s, r) => s + r.balance, 0);
-  const apTotal = apRows.reduce((s, r) => s + r.total, 0);
+  const apTotal = apRows.reduce((s, r) => s + r.balance, 0);
   const pendingMyData = myData.filter((s) =>
     ["PENDING", "SENT", "REJECTED"].includes(s.status),
   ).length;

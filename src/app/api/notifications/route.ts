@@ -234,27 +234,27 @@ export async function GET() {
       });
     }
 
-    const apTotal = apRows.reduce((s, r) => s + r.total, 0);
+    const apTotal = apRows.reduce((s, r) => s + r.balance, 0);
     if (apRows.length > 0) {
       items.push({
         id: "summary:ap-open",
         category: "ops",
         priority: apTotal > 10000 ? "high" : "medium",
         tone: "slate",
-        title: `${apRows.length} ανοιχτές παραγγελίες αγοράς`,
-        body: `Εκτιμώμενη αξία ${money(apTotal)}`,
-        href: "/purchasing",
+        title: `${apRows.length} ανοιχτά τιμολόγια αγοράς`,
+        body: `Υπόλοιπο προς πληρωμή ${money(apTotal)}`,
+        href: "/finance",
         amount: apTotal,
-        tags: ["AP", "PO"],
+        tags: ["AP", "PI"],
         meta: [
-          { label: "ΠΟ", value: String(apRows.length) },
-          { label: "Αξία", value: money(apTotal) },
+          { label: "Τιμ.", value: String(apRows.length) },
+          { label: "Υπόλοιπο", value: money(apTotal) },
         ],
         actions: [
           {
-            id: "open-purchasing",
-            label: "Αγορές",
-            href: "/purchasing",
+            id: "open-ap",
+            label: "Υποχρεώσεις",
+            href: "/finance",
             primary: true,
           },
         ],

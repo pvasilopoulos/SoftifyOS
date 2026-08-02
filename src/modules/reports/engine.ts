@@ -1149,7 +1149,7 @@ export async function loadDashboardBundle(
       },
       {
         label: "Open AP",
-        value: money(apRows.reduce((s, r) => s + r.total, 0)),
+        value: money(apRows.reduce((s, r) => s + r.balance, 0)),
       },
       { label: "ΦΠΑ χρήσης", value: money(vat.netVatPayable) },
     ],

@@ -26,6 +26,18 @@ type SettlementRow = {
   }>;
 };
 
+type PendingClearing = {
+  id: string;
+  settlementId: string;
+  settlementNumber: string;
+  settledAt: string;
+  customer: { id: string; name: string; code: string } | null;
+  methodCode: string;
+  amount: number;
+  clearingGl: string;
+  bankGl: string;
+};
+
 function money(n: number) {
   return n.toLocaleString("el-GR", { style: "currency", currency: "EUR" });
 }
@@ -33,29 +45,41 @@ function money(n: number) {
 const KIND_LABEL: Record<string, string> = {
   RECEIPT: "Είσπραξη",
   PAYMENT: "Πληρωμή",
-  CLEARING: "Clearing",
+  CLEARING: "Εκκαθάριση",
 };
 
 export function SettlementsPanel({ canWrite }: { canWrite: boolean }) {
   const [items, setItems] = useState<SettlementRow[]>([]);
-  const [kind, setKind] = useState<"ALL" | "RECEIPT" | "PAYMENT">("ALL");
+  const [pending, setPending] = useState<PendingClearing[]>([]);
+  const [kind, setKind] = useState<"ALL" | "RECEIPT" | "PAYMENT" | "CLEARING">(
+    "ALL",
+  );
   const [loading, setLoading] = useState(true);
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
       const qs = kind === "ALL" ? "" : `?kind=${kind}`;
-      const res = await fetch(`/api/settlements${qs}`);
+      const [res, clrRes] = await Promise.all([
+        fetch(`/api/settlements${qs}`),
+        fetch("/api/settlements?pendingClearing=1"),
+      ]);
       const data = (await res.json()) as {
         items?: SettlementRow[];
         error?: string;
+      };
+      const clr = (await clrRes.json()) as {
+        items?: PendingClearing[];
       };
       if (!res.ok) {
         toast.error(data.error || "Αποτυχία φόρτωσης");
         return;
       }
       setItems(data.items ?? []);
+      setPending(clr.items ?? []);
+      setSelected(new Set());
     } finally {
       setLoading(false);
     }
@@ -84,8 +108,116 @@ export function SettlementsPanel({ canWrite }: { canWrite: boolean }) {
     }
   }
 
+  function toggle(id: string) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  async function runClearing() {
+    if (selected.size === 0) {
+      toast.error("Επίλεξε τουλάχιστον μία γραμμή");
+      return;
+    }
+    setBusyId("clearing");
+    try {
+      const res = await fetch("/api/settlements", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          kind: "CLEARING",
+          sourceMethodLineIds: [...selected],
+        }),
+      });
+      const data = (await res.json()) as {
+        error?: string;
+        item?: { number: string };
+      };
+      if (!res.ok) {
+        toast.error(data.error || "Αποτυχία εκκαθάρισης");
+        return;
+      }
+      toast.success(`Εκκαθάριση ${data.item?.number ?? ""}`);
+      await load();
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  const pendingTotal = pending
+    .filter((p) => selected.has(p.id))
+    .reduce((s, p) => s + p.amount, 0);
+
   return (
-    <section className="space-y-3">
+    <section className="space-y-4">
+      {pending.length > 0 ? (
+        <div className="space-y-2 rounded-xl border border-amber-200 bg-amber-50/40 p-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <p className="text-sm font-semibold text-ink-950">
+                Εκκρεμής εκκαθάριση καρτών (βήμα 2)
+              </p>
+              <p className="text-xs text-slate-600">
+                {pending.length} γραμμές · Clearing → Τράπεζα/Ταμείο
+              </p>
+            </div>
+            {canWrite ? (
+              <Button
+                size="sm"
+                disabled={busyId === "clearing" || selected.size === 0}
+                onClick={() => void runClearing()}
+              >
+                {busyId === "clearing"
+                  ? "..."
+                  : `Εκκαθάριση ${selected.size ? money(pendingTotal) : ""}`}
+              </Button>
+            ) : null}
+          </div>
+          <div className="overflow-hidden rounded-lg border border-amber-100 bg-white">
+            <table className="w-full text-left text-sm">
+              <thead className="bg-amber-50/80 text-xs uppercase text-slate-500">
+                <tr>
+                  <th className="px-3 py-2 w-8" />
+                  <th className="px-3 py-2">Είσπραξη</th>
+                  <th className="px-3 py-2">Πελάτης</th>
+                  <th className="px-3 py-2">Τρόπος</th>
+                  <th className="px-3 py-2">GL</th>
+                  <th className="px-3 py-2 text-right">Ποσό</th>
+                </tr>
+              </thead>
+              <tbody>
+                {pending.map((p) => (
+                  <tr key={p.id} className="border-t border-slate-100">
+                    <td className="px-3 py-2">
+                      <input
+                        type="checkbox"
+                        checked={selected.has(p.id)}
+                        onChange={() => toggle(p.id)}
+                        disabled={!canWrite}
+                      />
+                    </td>
+                    <td className="px-3 py-2 font-mono text-xs font-semibold">
+                      {p.settlementNumber}
+                    </td>
+                    <td className="px-3 py-2">{p.customer?.name ?? "—"}</td>
+                    <td className="px-3 py-2 text-xs">{p.methodCode}</td>
+                    <td className="px-3 py-2 font-mono text-[11px] text-slate-500">
+                      {p.clearingGl} → {p.bankGl}
+                    </td>
+                    <td className="px-3 py-2 text-right font-medium tabular-nums">
+                      {money(p.amount)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      ) : null}
+
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex gap-1 rounded-xl bg-slate-100 p-1">
           {(
@@ -93,6 +225,7 @@ export function SettlementsPanel({ canWrite }: { canWrite: boolean }) {
               ["ALL", "Όλες"],
               ["RECEIPT", "Εισπράξεις"],
               ["PAYMENT", "Πληρωμές"],
+              ["CLEARING", "Εκκαθαρίσεις"],
             ] as const
           ).map(([k, label]) => (
             <button
@@ -129,11 +262,8 @@ export function SettlementsPanel({ canWrite }: { canWrite: boolean }) {
           </thead>
           <tbody>
             {items.map((s) => {
-              const party =
-                s.customer?.name || s.supplier?.name || "—";
-              const methods = s.methods
-                .map((m) => m.methodCode)
-                .join(" · ");
+              const party = s.customer?.name || s.supplier?.name || "—";
+              const methods = s.methods.map((m) => m.methodCode).join(" · ");
               return (
                 <tr key={s.id} className="border-t border-slate-100">
                   <td className="px-3 py-2 font-mono text-xs font-semibold">

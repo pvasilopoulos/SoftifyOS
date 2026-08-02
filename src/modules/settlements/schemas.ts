@@ -42,9 +42,24 @@ export const createPaymentSettlementSchema = z.object({
   methods: z.array(settlementMethodLineSchema).min(1).max(20),
 });
 
+/** Φ4 — βήμα 2 εκκαθάρισης καρτών: Clearing → Τράπεζα/Ταμείο */
+export const createClearingSettlementSchema = z.object({
+  sourceMethodLineIds: z.array(z.string().min(1)).min(1).max(50),
+  /** Προορισμός (τραπεζικός / ταμείο) — κωδικός GL ή τρόπος πληρωμής */
+  bankGlAccount: z.string().trim().max(40).optional().nullable(),
+  paymentMethodId: z.string().min(1).optional().nullable(),
+  legalEntityId: z.string().min(1).optional().nullable(),
+  settledAt: z.string().datetime().optional().nullable(),
+  reference: z.string().trim().max(120).optional().nullable(),
+  notes: z.string().trim().max(2000).optional().nullable(),
+});
+
 export type CreateReceiptSettlementInput = z.infer<
   typeof createReceiptSettlementSchema
 >;
 export type CreatePaymentSettlementInput = z.infer<
   typeof createPaymentSettlementSchema
+>;
+export type CreateClearingSettlementInput = z.infer<
+  typeof createClearingSettlementSchema
 >;

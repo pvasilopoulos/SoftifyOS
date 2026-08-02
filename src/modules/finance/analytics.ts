@@ -54,32 +54,59 @@ export async function loadArRows(db: PrismaClient, tenantId: string) {
     .filter((r) => r.balance > 0.005);
 }
 
+/** Φ3 — AP aging από ανοιχτά τιμολόγια αγοράς (PurchaseInvoice) */
 export async function loadApRows(db: PrismaClient, tenantId: string) {
-  const orders = await db.purchaseOrder.findMany({
+  const invoices = await db.purchaseInvoice.findMany({
     where: {
       tenantId,
-      status: { in: ["ORDERED", "PARTIAL", "RECEIVED"] },
+      status: { in: ["POSTED", "PARTIAL"] },
     },
-    orderBy: [{ orderedAt: "desc" }],
+    orderBy: [{ dueDate: "asc" }, { issueDate: "desc" }],
     take: 200,
     select: {
       id: true,
       number: true,
       status: true,
-      orderedAt: true,
+      issueDate: true,
+      dueDate: true,
       total: true,
+      paidAmount: true,
       supplier: { select: { id: true, code: true, name: true } },
     },
   });
 
-  return orders.map((po) => ({
-    id: po.id,
-    number: po.number,
-    status: po.status,
-    orderedAt: po.orderedAt.toISOString(),
-    total: toNumber(po.total),
-    supplier: po.supplier,
-  }));
+  const now = Date.now();
+  return invoices
+    .map((inv) => {
+      const total = toNumber(inv.total);
+      const paid = toNumber(inv.paidAmount);
+      const balance = Math.round((total - paid) * 100) / 100;
+      const dueMs = inv.dueDate ? inv.dueDate.getTime() : null;
+      const daysPastDue =
+        dueMs != null && balance > 0.005
+          ? Math.max(0, Math.floor((now - dueMs) / 86_400_000))
+          : 0;
+      let bucket: "current" | "1-30" | "31-60" | "61-90" | "90+" = "current";
+      if (daysPastDue > 90) bucket = "90+";
+      else if (daysPastDue > 60) bucket = "61-90";
+      else if (daysPastDue > 30) bucket = "31-60";
+      else if (daysPastDue > 0) bucket = "1-30";
+      return {
+        id: inv.id,
+        number: inv.number,
+        status: inv.status,
+        orderedAt: inv.issueDate.toISOString(),
+        issueDate: inv.issueDate.toISOString(),
+        dueAt: inv.dueDate?.toISOString() ?? null,
+        total,
+        paid,
+        balance,
+        daysPastDue,
+        bucket,
+        supplier: inv.supplier,
+      };
+    })
+    .filter((r) => r.balance > 0.005);
 }
 
 export async function loadVatSummary(

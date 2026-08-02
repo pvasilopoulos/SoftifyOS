@@ -12,6 +12,7 @@ import {
   type InvoiceStatusKey,
 } from "@/modules/sales/invoice-utils";
 import type {
+  CreateClearingSettlementInput,
   CreatePaymentSettlementInput,
   CreateReceiptSettlementInput,
 } from "./schemas";
@@ -34,7 +35,12 @@ function round2(n: number) {
 
 async function nextSettlementNumber(db: Db, tenantId: string, kind: string) {
   const year = new Date().getFullYear();
-  const prefix = kind === "PAYMENT" ? `ΕΞΠ-${year}-` : `ΕΙΣ-${year}-`;
+  const prefix =
+    kind === "PAYMENT"
+      ? `ΕΞΠ-${year}-`
+      : kind === "CLEARING"
+        ? `ΕΚΚ-${year}-`
+        : `ΕΙΣ-${year}-`;
   const latest = await db.settlement.findFirst({
     where: { tenantId, number: { startsWith: prefix } },
     orderBy: { number: "desc" },
@@ -44,6 +50,11 @@ async function nextSettlementNumber(db: Db, tenantId: string, kind: string) {
     ? Number(latest.number.slice(prefix.length)) + 1 || 1
     : 1;
   return `${prefix}${String(seq).padStart(5, "0")}`;
+}
+
+/** externalRef on CLEARING method lines points back to source method line */
+function clearingRef(methodLineId: string) {
+  return `clr:${methodLineId}`;
 }
 
 type ResolvedMethod = {
@@ -676,6 +687,17 @@ export async function voidSettlement(
   }
 
   await db.$transaction(async (tx) => {
+    // Φ4 — void CLEARING: ξεκλείδωμα πηγών (clearingJournalId)
+    if (settlement.kind === "CLEARING" && settlement.journalEntryId) {
+      await tx.settlement.updateMany({
+        where: {
+          tenantId: input.tenantId,
+          clearingJournalId: settlement.journalEntryId,
+        },
+        data: { clearingJournalId: null },
+      });
+    }
+
     for (const a of settlement.allocations) {
       if (a.invoiceId) {
         const inv = await tx.invoice.findFirst({
@@ -752,6 +774,228 @@ export async function voidSettlement(
     where: { id: settlement.id },
     include: { allocations: true, methods: true },
   });
+}
+
+/**
+ * Φ4 — βήμα 2 εκκαθάρισης: μεταφορά από glClearingAccount → τράπεζα/ταμείο.
+ * Οι γραμμές τρόπου με usesClearing=true παραμένουν ανοιχτές μέχρι να εκκαθαριστούν.
+ */
+export async function listPendingClearing(
+  db: Db,
+  tenantId: string,
+  opts?: { legalEntityId?: string | null },
+) {
+  const methods = await db.settlementMethodLine.findMany({
+    where: {
+      tenantId,
+      usesClearing: true,
+      settlement: {
+        tenantId,
+        status: "POSTED",
+        kind: "RECEIPT",
+        ...(opts?.legalEntityId
+          ? { legalEntityId: opts.legalEntityId }
+          : {}),
+      },
+    },
+    include: {
+      settlement: {
+        select: {
+          id: true,
+          number: true,
+          settledAt: true,
+          legalEntityId: true,
+          customer: { select: { id: true, name: true, code: true } },
+        },
+      },
+      paymentMethod: {
+        select: {
+          id: true,
+          code: true,
+          name: true,
+          glAccount: true,
+          glClearingAccount: true,
+        },
+      },
+    },
+    orderBy: { createdAt: "asc" },
+    take: 200,
+  });
+
+  const refs = methods.map((m) => clearingRef(m.id));
+  const already = refs.length
+    ? await db.settlementMethodLine.findMany({
+        where: {
+          tenantId,
+          externalRef: { in: refs },
+          settlement: { kind: "CLEARING", status: "POSTED" },
+        },
+        select: { externalRef: true },
+      })
+    : [];
+  const cleared = new Set(already.map((a) => a.externalRef).filter(Boolean));
+
+  return methods
+    .filter((m) => !cleared.has(clearingRef(m.id)))
+    .map((m) => ({
+      id: m.id,
+      settlementId: m.settlementId,
+      settlementNumber: m.settlement.number,
+      settledAt: m.settlement.settledAt.toISOString(),
+      legalEntityId: m.settlement.legalEntityId,
+      customer: m.settlement.customer,
+      methodCode: m.methodCode,
+      paymentMethodId: m.paymentMethodId,
+      amount: round2(toNumber(m.amount) - toNumber(m.changeAmount)),
+      clearingGl: m.paymentMethod?.glClearingAccount || "33.90.01",
+      bankGl: m.paymentMethod?.glAccount || "38.03.00",
+    }));
+}
+
+export async function createClearingSettlement(
+  db: PrismaClient,
+  input: {
+    tenantId: string;
+    userId?: string | null;
+    legalEntityId?: string | null;
+    data: CreateClearingSettlementInput;
+  },
+) {
+  const pending = await listPendingClearing(db, input.tenantId, {
+    legalEntityId: input.legalEntityId ?? input.data.legalEntityId,
+  });
+  const selected = pending.filter((p) =>
+    input.data.sourceMethodLineIds.includes(p.id),
+  );
+  if (selected.length !== input.data.sourceMethodLineIds.length) {
+    throw new SettlementError(
+      "Κάποιες γραμμές δεν είναι ανοιχτές για εκκαθάριση",
+      400,
+    );
+  }
+  if (selected.length === 0) {
+    throw new SettlementError("Δεν επιλέχθηκαν γραμμές εκκαθάρισης", 400);
+  }
+
+  let bankCode = input.data.bankGlAccount || selected[0]!.bankGl;
+  if (input.data.paymentMethodId) {
+    const pm = await db.paymentMethod.findFirst({
+      where: { id: input.data.paymentMethodId, tenantId: input.tenantId },
+      select: { glAccount: true },
+    });
+    if (pm?.glAccount) bankCode = pm.glAccount;
+  }
+
+  const total = round2(selected.reduce((s, m) => s + m.amount, 0));
+  const number = await nextSettlementNumber(db, input.tenantId, "CLEARING");
+  const settledAt = input.data.settledAt
+    ? new Date(input.data.settledAt)
+    : new Date();
+  const legalEntityId =
+    input.data.legalEntityId ||
+    input.legalEntityId ||
+    selected[0]!.legalEntityId;
+
+  const settlement = await db.settlement.create({
+    data: {
+      tenantId: input.tenantId,
+      legalEntityId,
+      number,
+      kind: "CLEARING",
+      status: "POSTED",
+      partyType: "CUSTOMER",
+      customerId: selected[0]!.customer?.id ?? null,
+      currency: "EUR",
+      totalAmount: total,
+      settledAt,
+      reference: input.data.reference ?? selected.map((s) => s.settlementNumber).join(", "),
+      notes: input.data.notes ?? "Εκκαθάριση καρτών (βήμα 2)",
+      createdByUserId: input.userId ?? null,
+      methods: {
+        create: selected.map((m) => ({
+          tenantId: input.tenantId,
+          paymentMethodId: m.paymentMethodId,
+          methodCode: m.methodCode,
+          amount: m.amount,
+          changeAmount: 0,
+          externalRef: clearingRef(m.id),
+          usesClearing: false,
+        })),
+      },
+    },
+    include: { allocations: true, methods: true },
+  });
+
+  let journalId: string | null = null;
+  try {
+    const bank = await findAccountByCode(db, input.tenantId, bankCode);
+    // Group by clearing GL in case multiple schemes
+    const byClearing = new Map<string, number>();
+    for (const m of selected) {
+      byClearing.set(
+        m.clearingGl,
+        round2((byClearing.get(m.clearingGl) ?? 0) + m.amount),
+      );
+    }
+    const lines: Array<{
+      glAccountId: string;
+      debit?: number;
+      credit?: number;
+      memo?: string;
+      legalEntityId?: string | null;
+    }> = [];
+    if (bank) {
+      lines.push({
+        glAccountId: bank.id,
+        debit: total,
+        memo: "Εκκαθάριση → τράπεζα",
+        legalEntityId,
+      });
+    }
+    for (const [code, amt] of byClearing) {
+      const clr = await findAccountByCode(db, input.tenantId, code);
+      if (!clr) continue;
+      lines.push({
+        glAccountId: clr.id,
+        credit: amt,
+        memo: `Εκκαθάριση ${code}`,
+        legalEntityId,
+      });
+    }
+    if (lines.length >= 2) {
+      const journal = await createAndPostJournal(db, {
+        tenantId: input.tenantId,
+        description: `Εκκαθάριση ${number}`,
+        sourceType: "settlement.clearing",
+        sourceId: settlement.id,
+        createdByUserId: input.userId,
+        legalEntityId,
+        lines,
+      });
+      journalId = journal.id;
+      await db.settlement.update({
+        where: { id: settlement.id },
+        data: { journalEntryId: journalId },
+      });
+      // Mark source settlements when fully cleared
+      const sourceIds = [...new Set(selected.map((s) => s.settlementId))];
+      for (const sid of sourceIds) {
+        const still = (await listPendingClearing(db, input.tenantId)).filter(
+          (p) => p.settlementId === sid,
+        );
+        if (still.length === 0) {
+          await db.settlement.update({
+            where: { id: sid },
+            data: { clearingJournalId: journalId },
+          });
+        }
+      }
+    }
+  } catch (e) {
+    if (!(e instanceof LedgerError)) throw e;
+  }
+
+  return { settlement, journalId };
 }
 
 export async function listSettlements(

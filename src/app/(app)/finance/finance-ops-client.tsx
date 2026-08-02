@@ -26,7 +26,13 @@ type ApRow = {
   number: string;
   status: string;
   orderedAt: string;
+  issueDate?: string;
+  dueAt: string | null;
   total: number;
+  paid: number;
+  balance: number;
+  daysPastDue: number;
+  bucket: string;
   supplier: { id: string; code: string; name: string };
 };
 
@@ -60,12 +66,6 @@ type MyDataRow = {
 function money(n: number) {
   return n.toLocaleString("el-GR", { style: "currency", currency: "EUR" });
 }
-
-const PO_STATUS: Record<string, string> = {
-  ORDERED: "Παραγγελία",
-  PARTIAL: "Μερική",
-  RECEIVED: "Παραληφθείσα",
-};
 
 type PurchaseInvoiceRow = {
   id: string;
@@ -145,7 +145,7 @@ export function FinanceOpsClient({
     [arRows],
   );
   const apTotal = useMemo(
-    () => apRows.reduce((s, r) => s + r.total, 0),
+    () => apRows.reduce((s, r) => s + r.balance, 0),
     [apRows],
   );
 
@@ -168,16 +168,20 @@ export function FinanceOpsClient({
     });
   }, [arRows, filters]);
 
-  const filteredApPo = useMemo(() => {
+  const filteredAp = useMemo(() => {
     const q = filters?.q?.trim().toLowerCase() ?? "";
+    const aging = filters?.aging ?? "ALL";
     return apRows.filter((r) => {
-      if (filters?.from && r.orderedAt.slice(0, 10) < filters.from) return false;
-      if (filters?.to && r.orderedAt.slice(0, 10) > filters.to) return false;
+      if (aging !== "ALL" && r.bucket !== aging) return false;
+      const issued = (r.issueDate ?? r.orderedAt)?.slice(0, 10);
+      if (filters?.from && issued && issued < filters.from) return false;
+      if (filters?.to && issued && issued > filters.to) return false;
       if (!q) return true;
       return (
         r.number.toLowerCase().includes(q) ||
         r.supplier.name.toLowerCase().includes(q) ||
-        r.supplier.code.toLowerCase().includes(q)
+        r.supplier.code.toLowerCase().includes(q) ||
+        r.status.toLowerCase().includes(q)
       );
     });
   }, [apRows, filters]);
@@ -282,9 +286,9 @@ export function FinanceOpsClient({
     () => filteredAr.reduce((s, r) => s + r.balance, 0),
     [filteredAr],
   );
-  const filteredApPoTotal = useMemo(
-    () => filteredApPo.reduce((s, r) => s + r.total, 0),
-    [filteredApPo],
+  const filteredApTotal = useMemo(
+    () => filteredAp.reduce((s, r) => s + r.balance, 0),
+    [filteredAp],
   );
   const filteredPurchaseOpen = useMemo(
     () =>
@@ -397,7 +401,7 @@ export function FinanceOpsClient({
             {tab === "ar"
               ? `Εμφάνιση ${filteredAr.length}/${arRows.length} · υπόλοιπο ${money(filteredArTotal)}`
               : tab === "ap"
-                ? `PO ${filteredApPo.length}/${apRows.length} · ${money(filteredApPoTotal)} · αγορές FI ${money(filteredPurchaseOpen)}`
+                ? `Aging ${filteredAp.length}/${apRows.length} · ${money(filteredApTotal)} · αγορές FI ${money(filteredPurchaseOpen)}`
                 : tab === "mydata"
                   ? `Περιβάλλον: ${myDataEnv} · ${filteredMyData.length}/${rows.length} εγγραφές`
                   : tab === "vat"
@@ -472,15 +476,15 @@ export function FinanceOpsClient({
           <div className="grid gap-2 sm:grid-cols-2">
             <div className="rounded-xl border border-slate-100 bg-slate-50 px-3 py-2">
               <p className="text-xs text-slate-500">
-                Ανοιχτά PO (φίλτρο {filteredApPo.length}/{apRows.length})
+                AP aging (φίλτρο {filteredAp.length}/{apRows.length})
               </p>
               <p className="text-lg font-semibold tabular-nums">
-                {money(filteredApPoTotal)}
+                {money(filteredApTotal)}
               </p>
             </div>
             <div className="rounded-xl border border-slate-100 bg-slate-50 px-3 py-2">
               <p className="text-xs text-slate-500">
-                Αγορές FI υπόλοιπο ({filteredPurchases.length})
+                Αγορές FI λίστα ({filteredPurchases.length})
               </p>
               <p className="text-lg font-semibold tabular-nums">
                 {money(filteredPurchaseOpen)}
@@ -489,33 +493,25 @@ export function FinanceOpsClient({
           </div>
 
           <div className="overflow-hidden rounded-xl border border-slate-200 bg-white">
-            <div className="flex items-center justify-between border-b border-slate-100 px-3 py-2">
-              <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                Τιμολόγια αγοράς FI
-              </p>
-              <Link
-                href="/purchasing"
-                className="text-xs font-medium text-teal-700 hover:underline"
-              >
-                Purchasing →
-              </Link>
-            </div>
+            <p className="border-b border-slate-100 px-3 py-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
+              Aging τιμολογίων αγοράς
+            </p>
             <table className="w-full text-left text-sm">
               <thead className="bg-slate-50 text-xs uppercase text-slate-500">
                 <tr>
                   <th className="px-3 py-2">Αρ.</th>
                   <th className="px-3 py-2">Προμηθευτής</th>
-                  <th className="px-3 py-2">Κατάσταση</th>
+                  <th className="px-3 py-2">Λήξη</th>
+                  <th className="px-3 py-2">Aging</th>
                   <th className="px-3 py-2 text-right">Υπόλοιπο</th>
                   <th className="px-3 py-2" />
                 </tr>
               </thead>
               <tbody>
-                {filteredPurchases.map((r) => {
-                  const bal = Math.max(0, r.total - r.paidAmount);
+                {filteredAp.map((r) => {
                   const canPay =
                     canWrite &&
-                    bal > 0 &&
+                    r.balance > 0 &&
                     r.status !== "DRAFT" &&
                     r.status !== "CANCELLED" &&
                     r.status !== "PAID";
@@ -524,12 +520,19 @@ export function FinanceOpsClient({
                       <td className="px-3 py-2 font-mono text-xs font-semibold">
                         {r.number}
                       </td>
-                      <td className="px-3 py-2">{r.supplierName}</td>
+                      <td className="px-3 py-2">{r.supplier.name}</td>
+                      <td className="px-3 py-2 text-xs text-slate-600">
+                        {r.dueAt
+                          ? new Date(r.dueAt).toLocaleDateString("el-GR")
+                          : "—"}
+                      </td>
                       <td className="px-3 py-2">
-                        <Badge tone="teal">{r.status}</Badge>
+                        <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[11px] font-medium">
+                          {r.bucket}
+                        </span>
                       </td>
                       <td className="px-3 py-2 text-right font-medium tabular-nums">
-                        {money(bal)}
+                        {money(r.balance)}
                       </td>
                       <td className="px-3 py-2 text-right">
                         {canPay ? (
@@ -537,7 +540,18 @@ export function FinanceOpsClient({
                             size="sm"
                             variant="secondary"
                             disabled={busyId === r.id}
-                            onClick={() => void openPay(r)}
+                            onClick={() =>
+                              void openPay({
+                                id: r.id,
+                                number: r.number,
+                                status: r.status,
+                                total: r.total,
+                                paidAmount: r.paid,
+                                supplierId: r.supplier.id,
+                                supplierName: r.supplier.name,
+                                issueDate: r.issueDate ?? r.orderedAt,
+                              })
+                            }
                           >
                             Πληρωμή
                           </Button>
@@ -546,15 +560,15 @@ export function FinanceOpsClient({
                     </tr>
                   );
                 })}
-                {filteredPurchases.length === 0 ? (
+                {filteredAp.length === 0 ? (
                   <tr>
                     <td
-                      colSpan={5}
+                      colSpan={6}
                       className="px-3 py-6 text-center text-slate-500"
                     >
-                      {localPurchases.length === 0
-                        ? "Καμία αγορά FI — δημιούργησε από «Αγορές FI»."
-                        : "Καμία αγορά με τα τρέχοντα φίλτρα."}
+                      {apRows.length === 0
+                        ? "Καμία ανοιχτή υποχρέωση — δημιούργησε αγορές FI."
+                        : "Καμία υποχρέωση με τα τρέχοντα φίλτρα."}
                     </td>
                   </tr>
                 ) : null}
@@ -627,55 +641,6 @@ export function FinanceOpsClient({
               </div>
             </div>
           ) : null}
-
-          <div className="overflow-hidden rounded-xl border border-slate-200 bg-white">
-            <p className="border-b border-slate-100 px-3 py-2 text-xs text-slate-500">
-              Ανοιχτές παραγγελίες αγοράς (PO)
-            </p>
-            <table className="w-full text-left text-sm">
-              <thead className="bg-slate-50 text-xs uppercase text-slate-500">
-                <tr>
-                  <th className="px-3 py-2">PO</th>
-                  <th className="px-3 py-2">Προμηθευτής</th>
-                  <th className="px-3 py-2">Κατάσταση</th>
-                  <th className="px-3 py-2 text-right">Σύνολο</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filteredApPo.map((r) => (
-                  <tr key={r.id} className="border-t border-slate-100">
-                    <td className="px-3 py-2 font-mono text-xs font-semibold">
-                      <Link
-                        href="/purchasing"
-                        className="text-sky-700 hover:underline"
-                      >
-                        {r.number}
-                      </Link>
-                    </td>
-                    <td className="px-3 py-2">{r.supplier.name}</td>
-                    <td className="px-3 py-2 text-xs">
-                      {PO_STATUS[r.status] ?? r.status}
-                    </td>
-                    <td className="px-3 py-2 text-right font-medium tabular-nums">
-                      {money(r.total)}
-                    </td>
-                  </tr>
-                ))}
-                {filteredApPo.length === 0 ? (
-                  <tr>
-                    <td
-                      colSpan={4}
-                      className="px-3 py-6 text-center text-slate-500"
-                    >
-                      {apRows.length === 0
-                        ? "Καμία ανοιχτή παραγγελία αγοράς."
-                        : "Καμία παραγγελία με τα τρέχοντα φίλτρα."}
-                    </td>
-                  </tr>
-                ) : null}
-              </tbody>
-            </table>
-          </div>
         </div>
       ) : null}
 

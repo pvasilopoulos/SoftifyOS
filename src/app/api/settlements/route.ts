@@ -5,12 +5,15 @@ import { getSession } from "@/platform/auth/session";
 import { writeAuditEvent } from "@/platform/tenancy/audit";
 import { getErrorMessage } from "@/shared/lib/safe";
 import {
+  createClearingSettlementSchema,
   createPaymentSettlementSchema,
   createReceiptSettlementSchema,
 } from "@/modules/settlements/schemas";
 import {
+  createClearingSettlement,
   createPaymentSettlement,
   createReceiptSettlement,
+  listPendingClearing,
   listSettlements,
   serializeSettlement,
   SettlementError,
@@ -23,6 +26,12 @@ export async function GET(request: NextRequest) {
     const session = await getSession();
     if (!session) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+    if (request.nextUrl.searchParams.get("pendingClearing") === "1") {
+      const pending = await listPendingClearing(prisma, session.tenantId, {
+        legalEntityId: session.legalEntityId,
+      });
+      return NextResponse.json({ items: pending });
     }
     const kind = request.nextUrl.searchParams.get("kind") as
       | "RECEIPT"
@@ -53,7 +62,43 @@ export async function POST(request: Request) {
     }
 
     const raw = await request.json();
-    const kind = raw?.kind === "PAYMENT" ? "PAYMENT" : "RECEIPT";
+    const kind =
+      raw?.kind === "PAYMENT"
+        ? "PAYMENT"
+        : raw?.kind === "CLEARING"
+          ? "CLEARING"
+          : "RECEIPT";
+
+    if (kind === "CLEARING") {
+      const body = createClearingSettlementSchema.parse(raw);
+      const { settlement, journalId } = await createClearingSettlement(prisma, {
+        tenantId: session.tenantId,
+        userId: session.sub,
+        legalEntityId: session.legalEntityId,
+        data: body,
+      });
+      await writeAuditEvent({
+        tenantId: session.tenantId,
+        userId: session.sub,
+        action: "settlement.clearing.create",
+        entity: "settlement",
+        entityId: settlement.id,
+        meta: { number: settlement.number, journalId },
+      });
+      const item = await prisma.settlement.findFirstOrThrow({
+        where: { id: settlement.id },
+        include: {
+          customer: { select: { id: true, name: true, code: true } },
+          supplier: { select: { id: true, name: true, code: true } },
+          allocations: true,
+          methods: true,
+        },
+      });
+      return NextResponse.json(
+        { item: serializeSettlement(item), journalId },
+        { status: 201 },
+      );
+    }
 
     if (kind === "PAYMENT") {
       const body = createPaymentSettlementSchema.parse(raw);
@@ -71,20 +116,17 @@ export async function POST(request: Request) {
         entityId: settlement.id,
         meta: { number: settlement.number, journalId },
       });
-      const full = await listSettlements(prisma, session.tenantId, { take: 1 });
-      const item =
-        full.find((s) => s.id === settlement.id) ??
-        (await prisma.settlement.findFirstOrThrow({
-          where: { id: settlement.id },
-          include: {
-            customer: { select: { id: true, name: true, code: true } },
-            supplier: { select: { id: true, name: true, code: true } },
-            allocations: true,
-            methods: true,
-          },
-        }));
+      const item = await prisma.settlement.findFirstOrThrow({
+        where: { id: settlement.id },
+        include: {
+          customer: { select: { id: true, name: true, code: true } },
+          supplier: { select: { id: true, name: true, code: true } },
+          allocations: true,
+          methods: true,
+        },
+      });
       return NextResponse.json(
-        { item: serializeSettlement(item as never), journalId },
+        { item: serializeSettlement(item), journalId },
         { status: 201 },
       );
     }

@@ -4,12 +4,11 @@ import { prisma } from "@/server/db";
 import { getSession } from "@/platform/auth/session";
 import { writeAuditEvent } from "@/platform/tenancy/audit";
 import { getErrorMessage } from "@/shared/lib/safe";
+import { toNumber } from "@/modules/sales/invoice-utils";
 import {
-  statusAfterPayment,
-  toNumber,
-  type InvoiceStatusKey,
-} from "@/modules/sales/invoice-utils";
-import { tryPostInvoiceCollect } from "@/modules/ledger/service";
+  createReceiptSettlement,
+  SettlementError,
+} from "@/modules/settlements/service";
 
 export const dynamic = "force-dynamic";
 
@@ -18,6 +17,7 @@ const schema = z.object({
   ignore: z.boolean().optional(),
 });
 
+/** Bank match → Settlement Engine (Φ1) */
 export async function POST(
   request: Request,
   context: { params: Promise<{ id: string }> },
@@ -82,49 +82,41 @@ export async function POST(
       return NextResponse.json({ error: "Το τιμολόγιο είναι εξοφλημένο" }, { status: 400 });
     }
 
-    const paidAmount = toNumber(invoice.paidAmount) + payAmount;
-    const nextStatus = statusAfterPayment(
-      invoice.status as InvoiceStatusKey,
-      paidAmount,
-      toNumber(invoice.total),
-    );
-
-    await prisma.$transaction(async (tx) => {
-      await tx.invoicePayment.create({
-        data: {
-          tenantId: session.tenantId,
-          invoiceId: invoice.id,
-          amount: payAmount,
-          method: "TRANSFER",
-          note: `Bank match · ${line.description}`,
-          externalRef: line.reference || line.id,
-          paidAt: line.bookedAt,
-        },
-      });
-      await tx.invoice.update({
-        where: { id: invoice.id },
-        data: { paidAmount, status: nextStatus },
-      });
-      await tx.bankStatementLine.update({
-        where: { id: line.id },
-        data: {
-          status: "MATCHED",
-          matchedInvoiceId: invoice.id,
-          matchNote: `Είσπραξη ${payAmount}`,
-        },
-      });
+    const { settlement, journalId } = await createReceiptSettlement(prisma, {
+      tenantId: session.tenantId,
+      userId: session.sub,
+      legalEntityId: session.legalEntityId ?? invoice.legalEntityId,
+      data: {
+        invoiceId: invoice.id,
+        customerId: invoice.customerId,
+        settledAt: line.bookedAt.toISOString(),
+        reference: line.reference || line.id,
+        notes: `Bank match · ${line.description}`,
+        methods: [
+          {
+            method: "TRANSFER",
+            amount: payAmount,
+            changeAmount: 0,
+            externalRef: line.reference || line.id,
+          },
+        ],
+      },
     });
 
-    try {
-      await tryPostInvoiceCollect(prisma, {
-        tenantId: session.tenantId,
-        invoiceId: invoice.id,
-        invoiceNumber: invoice.number,
-        amount: payAmount,
-        userId: session.sub,
-      });
-    } catch {
-      /* best-effort GL */
+    await prisma.bankStatementLine.update({
+      where: { id: line.id },
+      data: {
+        status: "MATCHED",
+        matchedInvoiceId: invoice.id,
+        matchNote: `Είσπραξη ${payAmount} · ${settlement.number}`,
+      },
+    });
+
+    if (settlement.id) {
+      await prisma.settlement.update({
+        where: { id: settlement.id },
+        data: { bankStatementLineId: line.id },
+      }).catch(() => null);
     }
 
     await writeAuditEvent({
@@ -133,7 +125,12 @@ export async function POST(
       action: "banking.match",
       entity: "bank_statement_line",
       entityId: line.id,
-      meta: { invoiceId: invoice.id, amount: payAmount },
+      meta: {
+        invoiceId: invoice.id,
+        amount: payAmount,
+        settlementId: settlement.id,
+        journalId,
+      },
     });
 
     return NextResponse.json({
@@ -142,9 +139,15 @@ export async function POST(
         status: "MATCHED",
         invoiceId: invoice.id,
         amount: payAmount,
+        settlementId: settlement.id,
+        settlementNumber: settlement.number,
+        journalId,
       },
     });
   } catch (error) {
+    if (error instanceof SettlementError) {
+      return NextResponse.json({ error: error.message }, { status: error.status });
+    }
     if (error instanceof z.ZodError) {
       return NextResponse.json({ error: "Μη έγκυρα δεδομένα" }, { status: 400 });
     }

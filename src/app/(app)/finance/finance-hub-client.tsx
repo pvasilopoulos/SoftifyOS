@@ -19,6 +19,7 @@ import {
   Send,
   Wallet,
   ArrowLeftRight,
+  Library,
 } from "lucide-react";
 import { PageHeader } from "@/shared/ui/page-header";
 import { Badge } from "@/shared/ui/badge";
@@ -29,6 +30,7 @@ import { AccountingHubClient } from "./accounting-hub-client";
 import { FinanceOpsClient } from "./finance-ops-client";
 import { FinanceJournalClient } from "./finance-journal-client";
 import { SettlementsPanel } from "./settlements-panel";
+import { GreekBooksPanel } from "./greek-books-panel";
 import {
   defaultFinanceFilters,
   periodPresetDates,
@@ -80,6 +82,7 @@ type Section =
   | "ap"
   | "settlements"
   | "vat"
+  | "books"
   | "banking"
   | "mydata"
   | "controlling"
@@ -168,6 +171,12 @@ const NAV: Array<{
     hint: "ΦΠΑ & ΑΑΔΕ",
     items: [
       { id: "vat", label: "ΦΠΑ περιόδου", hint: "Εκροές / εισροές", icon: Calculator },
+      {
+        id: "books",
+        label: "Ελληνικά βιβλία",
+        hint: "ΦΠΑ · καρτέλες · έναρξη",
+        icon: Library,
+      },
       { id: "mydata", label: "myDATA", hint: "Ουρά διαβίβασης", icon: Send },
     ],
   },
@@ -230,6 +239,10 @@ const SECTION_HELP: Record<Section, { title: string; body: string }> = {
   vat: {
     title: "ΦΠΑ περιόδου",
     body: "Σύνοψη ΦΠΑ εκροών / εισροών για το διάστημα των φίλτρων.",
+  },
+  books: {
+    title: "Ελληνικά βιβλία (Φ5)",
+    body: "Βιβλίο ΦΠΑ ανά συντελεστή, καρτέλες πελάτη/προμηθευτή και wizard υπολοίπων έναρξης.",
   },
   banking: {
     title: "Τράπεζες",
@@ -781,6 +794,12 @@ export function FinanceHubClient({
 
           {section === "settlements" ? (
             <SettlementsPanel canWrite={canWrite} />
+          ) : null}
+
+          {section === "books" ? (
+            <section className="soft-panel p-4">
+              <GreekBooksPanel canWrite={canWrite} filters={filters} />
+            </section>
           ) : null}
         </div>
       </div>
