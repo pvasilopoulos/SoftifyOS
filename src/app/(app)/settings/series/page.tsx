@@ -116,11 +116,28 @@ export default async function SeriesSettingsPage() {
           glCreditAccount: s.glCreditAccount,
           glVatAccount: s.glVatAccount,
           allowPartialSettlement: s.allowPartialSettlement,
+          allowOverpayment: s.allowOverpayment,
           allowMultiTender: s.allowMultiTender,
+          maxTenderLines: s.maxTenderLines,
           allowMultiDocumentSettlement: s.allowMultiDocumentSettlement,
+          allowCreditNoteOffset: s.allowCreditNoteOffset,
           allowOnAccount: s.allowOnAccount,
+          allowWriteOff: s.allowWriteOff,
+          writeOffMaxAmount: Number(s.writeOffMaxAmount),
+          settlementTolerance: Number(s.settlementTolerance),
+          allowCashChange: s.allowCashChange,
+          allowGiftCardTender: s.allowGiftCardTender,
+          allowLoyaltyTender: s.allowLoyaltyTender,
+          requireExternalRef: s.requireExternalRef,
           settlementClearingMode:
             s.settlementClearingMode === "CLEARING" ? "CLEARING" : "IMMEDIATE",
+          settlementValueDateMode:
+            s.settlementValueDateMode === "DOCUMENT_DATE"
+              ? "DOCUMENT_DATE"
+              : "PAYMENT_DATE",
+          autoPostSettlementJournal: s.autoPostSettlementJournal,
+          allowVoidSettlement: s.allowVoidSettlement,
+          allowBankMatch: s.allowBankMatch,
           isDefault: s.isDefault,
           isActive: s.isActive,
           allowedPaymentMethodIds: pay.allowedPaymentMethodIds,

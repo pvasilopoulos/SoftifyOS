@@ -60,15 +60,42 @@ export const seriesCreateSchema = z.object({
   /** Empty / omitted = default form for document kind */
   allowedPrintFormIds: z.array(z.string().min(1)).max(50).optional(),
   defaultPrintFormId: z.string().min(1).nullable().optional(),
-  /** Settlement Engine (Φ2) */
+  /** Settlement Engine (Φ2) — πλήρης πολιτική εξόφλησης ανά σειρά */
   allowPartialSettlement: z.boolean().optional().default(true),
+  allowOverpayment: z.boolean().optional().default(false),
   allowMultiTender: z.boolean().optional().default(true),
+  maxTenderLines: z.coerce.number().int().min(1).max(20).optional().default(10),
   allowMultiDocumentSettlement: z.boolean().optional().default(false),
+  allowCreditNoteOffset: z.boolean().optional().default(true),
   allowOnAccount: z.boolean().optional().default(false),
+  allowWriteOff: z.boolean().optional().default(false),
+  writeOffMaxAmount: z.coerce
+    .number()
+    .min(0)
+    .max(10_000)
+    .optional()
+    .default(0),
+  settlementTolerance: z.coerce
+    .number()
+    .min(0)
+    .max(1)
+    .optional()
+    .default(0.01),
+  allowCashChange: z.boolean().optional().default(true),
+  allowGiftCardTender: z.boolean().optional().default(true),
+  allowLoyaltyTender: z.boolean().optional().default(true),
+  requireExternalRef: z.boolean().optional().default(false),
   settlementClearingMode: z
     .enum(["IMMEDIATE", "CLEARING"])
     .optional()
     .default("IMMEDIATE"),
+  settlementValueDateMode: z
+    .enum(["PAYMENT_DATE", "DOCUMENT_DATE"])
+    .optional()
+    .default("PAYMENT_DATE"),
+  autoPostSettlementJournal: z.boolean().optional().default(true),
+  allowVoidSettlement: z.boolean().optional().default(true),
+  allowBankMatch: z.boolean().optional().default(true),
 });
 
 export const seriesUpdateSchema = seriesCreateSchema.partial();

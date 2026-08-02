@@ -70,14 +70,111 @@ type ResolvedMethod = {
   usesClearing: boolean;
 };
 
+type SeriesSettlementPolicy = {
+  allowPartialSettlement: boolean;
+  allowOverpayment: boolean;
+  allowMultiTender: boolean;
+  maxTenderLines: number;
+  allowMultiDocumentSettlement: boolean;
+  allowCreditNoteOffset: boolean;
+  allowOnAccount: boolean;
+  allowWriteOff: boolean;
+  writeOffMaxAmount: number;
+  settlementTolerance: number;
+  allowCashChange: boolean;
+  allowGiftCardTender: boolean;
+  allowLoyaltyTender: boolean;
+  requireExternalRef: boolean;
+  settlementClearingMode: string;
+  settlementValueDateMode: string;
+  autoPostSettlementJournal: boolean;
+  allowVoidSettlement: boolean;
+  allowBankMatch: boolean;
+  glDebitAccount: string | null;
+  id: string;
+};
+
+const SERIES_SETTLEMENT_SELECT = {
+  id: true,
+  glDebitAccount: true,
+  allowPartialSettlement: true,
+  allowOverpayment: true,
+  allowMultiTender: true,
+  maxTenderLines: true,
+  allowMultiDocumentSettlement: true,
+  allowCreditNoteOffset: true,
+  allowOnAccount: true,
+  allowWriteOff: true,
+  writeOffMaxAmount: true,
+  settlementTolerance: true,
+  allowCashChange: true,
+  allowGiftCardTender: true,
+  allowLoyaltyTender: true,
+  requireExternalRef: true,
+  settlementClearingMode: true,
+  settlementValueDateMode: true,
+  autoPostSettlementJournal: true,
+  allowVoidSettlement: true,
+  allowBankMatch: true,
+} as const;
+
+function policyFromSeries(
+  series: {
+    id: string;
+    glDebitAccount: string | null;
+    allowPartialSettlement: boolean;
+    allowOverpayment?: boolean;
+    allowMultiTender: boolean;
+    maxTenderLines?: number;
+    allowMultiDocumentSettlement: boolean;
+    allowCreditNoteOffset?: boolean;
+    allowOnAccount: boolean;
+    allowWriteOff?: boolean;
+    writeOffMaxAmount?: unknown;
+    settlementTolerance?: unknown;
+    allowCashChange?: boolean;
+    allowGiftCardTender?: boolean;
+    allowLoyaltyTender?: boolean;
+    requireExternalRef?: boolean;
+    settlementClearingMode: string;
+    settlementValueDateMode?: string;
+    autoPostSettlementJournal?: boolean;
+    allowVoidSettlement?: boolean;
+    allowBankMatch?: boolean;
+  } | null,
+): SeriesSettlementPolicy {
+  return {
+    id: series?.id ?? "",
+    glDebitAccount: series?.glDebitAccount ?? null,
+    allowPartialSettlement: series?.allowPartialSettlement ?? true,
+    allowOverpayment: series?.allowOverpayment ?? false,
+    allowMultiTender: series?.allowMultiTender ?? true,
+    maxTenderLines: series?.maxTenderLines ?? 10,
+    allowMultiDocumentSettlement: series?.allowMultiDocumentSettlement ?? false,
+    allowCreditNoteOffset: series?.allowCreditNoteOffset ?? true,
+    allowOnAccount: series?.allowOnAccount ?? false,
+    allowWriteOff: series?.allowWriteOff ?? false,
+    writeOffMaxAmount: toNumber(series?.writeOffMaxAmount ?? 0),
+    settlementTolerance: toNumber(series?.settlementTolerance ?? 0.01),
+    allowCashChange: series?.allowCashChange ?? true,
+    allowGiftCardTender: series?.allowGiftCardTender ?? true,
+    allowLoyaltyTender: series?.allowLoyaltyTender ?? true,
+    requireExternalRef: series?.requireExternalRef ?? false,
+    settlementClearingMode: series?.settlementClearingMode ?? "IMMEDIATE",
+    settlementValueDateMode: series?.settlementValueDateMode ?? "PAYMENT_DATE",
+    autoPostSettlementJournal: series?.autoPostSettlementJournal ?? true,
+    allowVoidSettlement: series?.allowVoidSettlement ?? true,
+    allowBankMatch: series?.allowBankMatch ?? true,
+  };
+}
+
 async function resolveMethods(
   db: Db,
   input: {
     tenantId: string;
     seriesId: string | null;
     methods: CreateReceiptSettlementInput["methods"];
-    allowMultiTender: boolean;
-    clearingMode: string;
+    policy: SeriesSettlementPolicy;
   },
 ): Promise<ResolvedMethod[]> {
   const allowed = await resolveSeriesPaymentMethods(db, {
@@ -89,9 +186,15 @@ async function resolveMethods(
   if (allowed.length === 0) {
     throw new SettlementError("Δεν υπάρχουν διαθέσιμοι τρόποι πληρωμής", 400);
   }
-  if (!input.allowMultiTender && input.methods.length > 1) {
+  if (!input.policy.allowMultiTender && input.methods.length > 1) {
     throw new SettlementError(
       "Η σειρά δεν επιτρέπει πολλαπλούς τρόπους πληρωμής",
+      400,
+    );
+  }
+  if (input.methods.length > input.policy.maxTenderLines) {
+    throw new SettlementError(
+      `Μέγιστος αριθμός τρόπων: ${input.policy.maxTenderLines}`,
       400,
     );
   }
@@ -116,15 +219,43 @@ async function resolveMethods(
         kind: true,
       },
     });
+    const changeAmount = round2(m.changeAmount ?? 0);
+    if (changeAmount > 0 && !input.policy.allowCashChange) {
+      throw new SettlementError(
+        "Η σειρά δεν επιτρέπει ρέστα μετρητών",
+        400,
+      );
+    }
+    if (m.giftCardId && !input.policy.allowGiftCardTender) {
+      throw new SettlementError(
+        "Η σειρά δεν επιτρέπει εξόφληση με δωροκάρτα",
+        400,
+      );
+    }
+    if (m.loyaltyAccountId && !input.policy.allowLoyaltyTender) {
+      throw new SettlementError(
+        "Η σειρά δεν επιτρέπει εξόφληση με πόντους loyalty",
+        400,
+      );
+    }
+    if (
+      input.policy.requireExternalRef &&
+      !String(m.externalRef ?? "").trim()
+    ) {
+      throw new SettlementError(
+        `Απαιτείται αναφορά για τον τρόπο ${method.code}`,
+        400,
+      );
+    }
     const useClearing =
-      input.clearingMode === "CLEARING" &&
+      input.policy.settlementClearingMode === "CLEARING" &&
       Boolean(pm?.glClearingAccount) &&
       (pm?.kind === "CARD" || Boolean(pm?.glClearingAccount));
     resolved.push({
       paymentMethodId: method.id,
       methodCode: method.code,
       amount: round2(m.amount),
-      changeAmount: round2(m.changeAmount ?? 0),
+      changeAmount,
       externalRef: m.externalRef ?? null,
       giftCardId: m.giftCardId ?? null,
       loyaltyAccountId: m.loyaltyAccountId ?? null,
@@ -269,30 +400,30 @@ export async function createReceiptSettlement(
       ...(input.legalEntityId ? { legalEntityId: input.legalEntityId } : {}),
     },
     include: {
-      series: {
-        select: {
-          id: true,
-          glDebitAccount: true,
-          allowPartialSettlement: true,
-          allowMultiTender: true,
-          allowMultiDocumentSettlement: true,
-          allowOnAccount: true,
-          settlementClearingMode: true,
-        },
-      },
+      series: { select: SERIES_SETTLEMENT_SELECT },
     },
   });
   if (invoices.length !== invoiceIds.length) {
     throw new SettlementError("Παραστατικό δεν βρέθηκε", 404);
   }
 
-  const series = invoices[0]!.series;
-  if (
-    !series?.allowMultiDocumentSettlement &&
-    allocations.length > 1
-  ) {
+  const policy = policyFromSeries(invoices[0]?.series ?? null);
+  if (!policy.allowMultiDocumentSettlement && allocations.length > 1) {
     throw new SettlementError(
       "Η σειρά δεν επιτρέπει εξόφληση πολλών παραστατικών",
+      400,
+    );
+  }
+  if (
+    !policy.allowCreditNoteOffset &&
+    allocations.some(
+      (a) =>
+        a.targetType === "CREDIT_NOTE" ||
+        invoices.find((i) => i.id === a.invoiceId)?.kind === "SALES_CREDIT",
+    )
+  ) {
+    throw new SettlementError(
+      "Η σειρά δεν επιτρέπει συμψηφισμό πιστωτικών",
       400,
     );
   }
@@ -320,30 +451,44 @@ export async function createReceiptSettlement(
     input.data.methods.reduce((s, m) => s + m.amount, 0),
   );
   const allocTotal = round2(allocations.reduce((s, a) => s + a.amount, 0));
-  if (Math.abs(methodTotal - allocTotal) > 0.01) {
+  const tol = policy.settlementTolerance;
+  if (Math.abs(methodTotal - allocTotal) > tol + 0.0001) {
     throw new SettlementError(
-      `Άθροισμα τρόπων (${methodTotal.toFixed(2)}) ≠ κατανομές (${allocTotal.toFixed(2)})`,
+      `Άθροισμα τρόπων (${methodTotal.toFixed(2)}) ≠ κατανομής (${allocTotal.toFixed(2)})`,
       400,
     );
   }
 
   for (const a of allocations) {
+    if (a.targetType === "ON_ACCOUNT" || !a.invoiceId) {
+      if (!policy.allowOnAccount) {
+        throw new SettlementError(
+          "Η σειρά δεν επιτρέπει πίστωση σε λογαριασμό πελάτη",
+          400,
+        );
+      }
+      continue;
+    }
     const inv = invoices.find((i) => i.id === a.invoiceId)!;
     const balance = round2(toNumber(inv.total) - toNumber(inv.paidAmount));
-    if (a.amount > balance + 0.001) {
-      throw new SettlementError(
-        `Ποσό υπερβαίνει υπόλοιπο ${inv.number} (${balance.toFixed(2)})`,
-        400,
-      );
+    if (a.amount > balance + tol) {
+      if (!policy.allowOverpayment && !policy.allowOnAccount) {
+        throw new SettlementError(
+          `Ποσό υπερβαίνει υπόλοιπο ${inv.number} (${balance.toFixed(2)})`,
+          400,
+        );
+      }
     }
-    if (
-      !series?.allowPartialSettlement &&
-      a.amount + 0.001 < balance
-    ) {
-      throw new SettlementError(
-        "Η σειρά απαιτεί ολική εξόφληση",
-        400,
-      );
+    const shortfall = round2(balance - a.amount);
+    if (shortfall > tol && !policy.allowPartialSettlement) {
+      if (
+        !(
+          policy.allowWriteOff &&
+          shortfall <= policy.writeOffMaxAmount + 0.0001
+        )
+      ) {
+        throw new SettlementError("Η σειρά απαιτεί ολική εξόφληση", 400);
+      }
     }
   }
 
@@ -354,16 +499,21 @@ export async function createReceiptSettlement(
 
   const resolvedMethods = await resolveMethods(db, {
     tenantId: input.tenantId,
-    seriesId: series?.id ?? invoices[0]!.seriesId,
+    seriesId: policy.id || invoices[0]!.seriesId,
     methods: input.data.methods,
-    allowMultiTender: series?.allowMultiTender ?? true,
-    clearingMode: series?.settlementClearingMode ?? "IMMEDIATE",
+    policy,
   });
 
   const number = await nextSettlementNumber(db, input.tenantId, "RECEIPT");
-  const settledAt = input.data.settledAt
+  let settledAt = input.data.settledAt
     ? new Date(input.data.settledAt)
     : new Date();
+  if (
+    policy.settlementValueDateMode === "DOCUMENT_DATE" &&
+    invoices[0]?.issuedAt
+  ) {
+    settledAt = invoices[0].issuedAt;
+  }
 
   const settlement = await db.$transaction(async (tx) => {
     const row = await tx.settlement.create({
@@ -413,7 +563,9 @@ export async function createReceiptSettlement(
     });
 
     for (const a of allocations) {
-      const inv = invoices.find((i) => i.id === a.invoiceId)!;
+      if (!a.invoiceId) continue;
+      const inv = invoices.find((i) => i.id === a.invoiceId);
+      if (!inv) continue;
       const paidAmount = roundMoney(toNumber(inv.paidAmount) + a.amount);
       const nextStatus = statusAfterPayment(
         inv.status as InvoiceStatusKey,
@@ -450,6 +602,9 @@ export async function createReceiptSettlement(
 
   let journalId: string | null = null;
   try {
+    if (!policy.autoPostSettlementJournal) {
+      return { settlement, journalId: null };
+    }
     const journal = await postSettlementJournal(db, {
       tenantId: input.tenantId,
       legalEntityId,
@@ -457,7 +612,7 @@ export async function createReceiptSettlement(
       number: settlement.number,
       kind: "RECEIPT",
       methods: resolvedMethods,
-      arOrApCode: series?.glDebitAccount || "30.00.00",
+      arOrApCode: policy.glDebitAccount || "30.00.00",
       userId: input.userId,
     });
     journalId = journal?.id ?? null;
@@ -555,12 +710,12 @@ export async function createPaymentSettlement(
     pis[0]!.legalEntityId;
 
   // AP: allow all active collect/payment methods (showInCollect)
+  const apPolicy = policyFromSeries(null);
   const resolvedMethods = await resolveMethods(db, {
     tenantId: input.tenantId,
     seriesId: null,
     methods: input.data.methods,
-    allowMultiTender: true,
-    clearingMode: "IMMEDIATE",
+    policy: apPolicy,
   });
 
   const number = await nextSettlementNumber(db, input.tenantId, "PAYMENT");
@@ -684,6 +839,25 @@ export async function voidSettlement(
   if (!settlement) throw new SettlementError("Η εξόφληση δεν βρέθηκε", 404);
   if (settlement.status === "VOIDED") {
     throw new SettlementError("Ήδη ακυρωμένη", 400);
+  }
+
+  // Enforce series allowVoidSettlement for AR receipts
+  if (settlement.kind === "RECEIPT") {
+    const allocInv = settlement.allocations.find((a) => a.invoiceId)?.invoiceId;
+    if (allocInv) {
+      const inv = await db.invoice.findFirst({
+        where: { id: allocInv, tenantId: input.tenantId },
+        select: {
+          series: { select: { allowVoidSettlement: true } },
+        },
+      });
+      if (inv?.series && inv.series.allowVoidSettlement === false) {
+        throw new SettlementError(
+          "Η σειρά δεν επιτρέπει ακύρωση εξόφλησης",
+          400,
+        );
+      }
+    }
   }
 
   await db.$transaction(async (tx) => {

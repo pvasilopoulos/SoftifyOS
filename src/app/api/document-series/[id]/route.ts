@@ -135,19 +135,61 @@ export async function PATCH(
           ...(body.allowPartialSettlement !== undefined
             ? { allowPartialSettlement: body.allowPartialSettlement }
             : {}),
+          ...(body.allowOverpayment !== undefined
+            ? { allowOverpayment: body.allowOverpayment }
+            : {}),
           ...(body.allowMultiTender !== undefined
             ? { allowMultiTender: body.allowMultiTender }
+            : {}),
+          ...(body.maxTenderLines !== undefined
+            ? { maxTenderLines: body.maxTenderLines }
             : {}),
           ...(body.allowMultiDocumentSettlement !== undefined
             ? {
                 allowMultiDocumentSettlement: body.allowMultiDocumentSettlement,
               }
             : {}),
+          ...(body.allowCreditNoteOffset !== undefined
+            ? { allowCreditNoteOffset: body.allowCreditNoteOffset }
+            : {}),
           ...(body.allowOnAccount !== undefined
             ? { allowOnAccount: body.allowOnAccount }
             : {}),
+          ...(body.allowWriteOff !== undefined
+            ? { allowWriteOff: body.allowWriteOff }
+            : {}),
+          ...(body.writeOffMaxAmount !== undefined
+            ? { writeOffMaxAmount: body.writeOffMaxAmount }
+            : {}),
+          ...(body.settlementTolerance !== undefined
+            ? { settlementTolerance: body.settlementTolerance }
+            : {}),
+          ...(body.allowCashChange !== undefined
+            ? { allowCashChange: body.allowCashChange }
+            : {}),
+          ...(body.allowGiftCardTender !== undefined
+            ? { allowGiftCardTender: body.allowGiftCardTender }
+            : {}),
+          ...(body.allowLoyaltyTender !== undefined
+            ? { allowLoyaltyTender: body.allowLoyaltyTender }
+            : {}),
+          ...(body.requireExternalRef !== undefined
+            ? { requireExternalRef: body.requireExternalRef }
+            : {}),
           ...(body.settlementClearingMode !== undefined
             ? { settlementClearingMode: body.settlementClearingMode }
+            : {}),
+          ...(body.settlementValueDateMode !== undefined
+            ? { settlementValueDateMode: body.settlementValueDateMode }
+            : {}),
+          ...(body.autoPostSettlementJournal !== undefined
+            ? { autoPostSettlementJournal: body.autoPostSettlementJournal }
+            : {}),
+          ...(body.allowVoidSettlement !== undefined
+            ? { allowVoidSettlement: body.allowVoidSettlement }
+            : {}),
+          ...(body.allowBankMatch !== undefined
+            ? { allowBankMatch: body.allowBankMatch }
             : {}),
           ...(body.isDefault !== undefined ? { isDefault: body.isDefault } : {}),
           ...(body.isActive !== undefined ? { isActive: body.isActive } : {}),

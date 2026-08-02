@@ -68,9 +68,18 @@ export async function POST(
         tenantId: session.tenantId,
         status: { in: ["ISSUED", "PARTIAL", "OVERDUE"] },
       },
+      include: {
+        series: { select: { allowBankMatch: true } },
+      },
     });
     if (!invoice) {
       return NextResponse.json({ error: "Τιμολόγιο δεν βρέθηκε" }, { status: 404 });
+    }
+    if (invoice.series && invoice.series.allowBankMatch === false) {
+      return NextResponse.json(
+        { error: "Η σειρά δεν επιτρέπει συμψηφισμό τραπεζικής κίνησης" },
+        { status: 400 },
+      );
     }
 
     const balance = Math.max(

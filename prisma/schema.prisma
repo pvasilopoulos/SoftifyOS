@@ -2027,16 +2027,44 @@ model DocumentSeries {
   glDebitAccount       String?
   glCreditAccount      String?
   glVatAccount         String?
-  /// Εξοφλήσεις: επιτρέπει μερικό ποσό
+  /// Εξοφλήσεις: επιτρέπει ποσό < υπόλοιπο παραστατικού
   allowPartialSettlement Boolean         @default(true)
+  /// Ποσοστό/ποσό άνω του υπολοίπου (υπερπληρωμή)
+  allowOverpayment     Boolean           @default(false)
   /// Πολλαπλοί τρόποι πληρωμής στην ίδια εξόφληση
   allowMultiTender     Boolean           @default(true)
-  /// Πολλαπλά παραστατικά / πιστωτικά στην ίδια εξόφληση
+  /// Μέγιστος αριθμός τρόπων σε μία εξόφληση
+  maxTenderLines       Int               @default(10)
+  /// Πολλαπλά παραστατικά στην ίδια εξόφληση
   allowMultiDocumentSettlement Boolean   @default(false)
-  /// Προκαταβολή / overpay on-account
+  /// Συμψηφισμός πιστωτικών στην ίδια εξόφληση
+  allowCreditNoteOffset Boolean          @default(true)
+  /// Προκαταβολή / υπόλοιπο υπέρ πελάτη (on-account)
   allowOnAccount       Boolean           @default(false)
+  /// Διαγραφή μικροϋπολοίπου (write-off)
+  allowWriteOff        Boolean           @default(false)
+  /// Μέγιστο ποσό write-off (€)
+  writeOffMaxAmount    Decimal           @default(0) @db.Decimal(14, 2)
+  /// Ανοχή στρογγυλοποίησης (€) μεταξύ τρόπων και κατανομών
+  settlementTolerance  Decimal           @default(0.01) @db.Decimal(14, 2)
+  /// Ρέστα μετρητών (change)
+  allowCashChange      Boolean           @default(true)
+  /// Δωροκάρτα ως τρόπος εξόφλησης
+  allowGiftCardTender  Boolean           @default(true)
+  /// Πόντοι loyalty ως τρόπος εξόφλησης
+  allowLoyaltyTender   Boolean           @default(true)
+  /// Υποχρεωτικό externalRef / auth code σε κάθε τρόπο
+  requireExternalRef   Boolean           @default(false)
   /// IMMEDIATE | CLEARING (κάρτα μέσω glClearingAccount)
   settlementClearingMode String          @default("IMMEDIATE")
+  /// PAYMENT_DATE | DOCUMENT_DATE — ημερομηνία αξίας εξόφλησης
+  settlementValueDateMode String         @default("PAYMENT_DATE")
+  /// Αυτόματο λογιστικό άρθρο εξόφλησης
+  autoPostSettlementJournal Boolean      @default(true)
+  /// Επιτρέπει ακύρωση (void) εξόφλησης
+  allowVoidSettlement  Boolean           @default(true)
+  /// Επιτρέπει bank statement match σε παραστατικά της σειράς
+  allowBankMatch       Boolean           @default(true)
   isDefault            Boolean           @default(false)
   isActive             Boolean           @default(true)
   createdAt            DateTime          @default(now())
