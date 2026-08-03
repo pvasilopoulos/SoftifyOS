@@ -228,7 +228,7 @@ export function InvoiceActions({
 
   const btnSize = iconsOnly ? "icon" : size;
   const iconBtnClass = iconsOnly
-    ? "h-9 w-9 shrink-0 rounded-lg shadow-none"
+    ? "h-9 w-9 shrink-0 rounded-xl shadow-none"
     : size === "sm"
       ? "h-8 w-8"
       : undefined;
@@ -242,7 +242,7 @@ export function InvoiceActions({
           onClick={() => void issueInvoice()}
           title="Έκδοση"
           aria-label={busy === "issue" ? "Έκδοση…" : "Έκδοση"}
-          className={iconsOnly ? "h-9 w-9 shrink-0 rounded-lg" : iconBtnClass}
+          className={iconsOnly ? "h-9 w-9 shrink-0 rounded-xl" : iconBtnClass}
         >
           <CheckCircle2 size={iconsOnly ? 16 : 14} />
           {iconsOnly ? null : busy === "issue" ? "..." : "Έκδοση"}
@@ -277,7 +277,7 @@ export function InvoiceActions({
           aria-label={busy === "send" ? "Αποστολή…" : "Αποστολή"}
           className={
             iconsOnly
-              ? "h-9 w-9 shrink-0 rounded-lg shadow-none"
+              ? "h-9 w-9 shrink-0 rounded-xl shadow-none"
               : size === "sm"
                 ? "h-8 w-8"
                 : undefined
@@ -305,8 +305,8 @@ export function InvoiceActions({
           className={
             iconsOnly
               ? canCollect
-                ? "h-9 w-9 shrink-0 rounded-lg"
-                : "h-9 w-9 shrink-0 rounded-lg shadow-none"
+                ? "h-9 w-9 shrink-0 rounded-xl"
+                : "h-9 w-9 shrink-0 rounded-xl shadow-none"
               : undefined
           }
         >
@@ -317,14 +317,14 @@ export function InvoiceActions({
       {showCancel && canCancel ? (
         <Button
           size={btnSize}
-          variant={iconsOnly ? "ghost" : "ghost"}
+          variant="ghost"
           disabled={busy === "cancel"}
           onClick={() => void cancelInvoice()}
           title="Ακύρωση"
           aria-label={busy === "cancel" ? "Ακύρωση…" : "Ακύρωση"}
           className={
             iconsOnly
-              ? "h-9 w-9 shrink-0 rounded-lg text-rose-600 shadow-none hover:bg-rose-50 hover:text-rose-700"
+              ? "h-9 w-9 shrink-0 rounded-xl text-rose-600 shadow-none hover:bg-rose-50 hover:text-rose-700"
               : undefined
           }
         >
