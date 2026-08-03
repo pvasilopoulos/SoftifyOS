@@ -83,6 +83,7 @@ export default async function IntegrationsSettingsPage() {
         myDataSubscriptionKey: "",
         hasMyDataSubscriptionKey: Boolean(raw.myDataSubscriptionKey),
         myDataSubscriptionKeyHint: maskSecret(raw.myDataSubscriptionKey),
+        eInvoicingProvider: raw.eInvoicingProvider ?? "NONE",
         notes: raw.notes ?? "",
         erganiEnv: raw.erganiEnv ?? "simulator",
         lastWebhookTest: raw.lastWebhookTest ?? null,

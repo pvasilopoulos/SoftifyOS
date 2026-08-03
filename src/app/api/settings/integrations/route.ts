@@ -31,6 +31,9 @@ const schema = z.object({
   myDataUserId: z.string().trim().max(120).optional().nullable(),
   myDataSubscriptionKey: z.string().trim().max(200).optional().nullable(),
   clearMyDataSubscriptionKey: z.boolean().optional(),
+  eInvoicingProvider: z
+    .enum(["NONE", "AADE", "MOCK", "NOVAON", "IMPACT"])
+    .optional(),
   notes: z.string().trim().max(2000).optional().nullable(),
   erganiEnv: z.enum(["simulator", "test", "prod"]).optional(),
 });
@@ -50,6 +53,7 @@ function publicView(integrations: IntegrationsConfig) {
     myDataUserId: integrations.myDataUserId ?? "",
     myDataSubscriptionKeyHint: maskSecret(integrations.myDataSubscriptionKey),
     hasMyDataSubscriptionKey: Boolean(integrations.myDataSubscriptionKey),
+    eInvoicingProvider: integrations.eInvoicingProvider ?? "NONE",
     notes: integrations.notes ?? "",
     erganiEnv: integrations.erganiEnv ?? "simulator",
     lastWebhookTest: integrations.lastWebhookTest ?? null,
@@ -136,6 +140,9 @@ export async function PUT(request: Request) {
       ...(body.myDataEnv !== undefined ? { myDataEnv: body.myDataEnv } : {}),
       ...(body.myDataUserId !== undefined
         ? { myDataUserId: body.myDataUserId || null }
+        : {}),
+      ...(body.eInvoicingProvider !== undefined
+        ? { eInvoicingProvider: body.eInvoicingProvider }
         : {}),
       ...(body.notes !== undefined ? { notes: body.notes || null } : {}),
       ...(body.erganiEnv !== undefined ? { erganiEnv: body.erganiEnv } : {}),

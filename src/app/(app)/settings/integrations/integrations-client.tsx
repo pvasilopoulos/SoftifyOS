@@ -75,6 +75,7 @@ type FormState = {
   myDataSubscriptionKey: string;
   hasMyDataSubscriptionKey: boolean;
   myDataSubscriptionKeyHint: string;
+  eInvoicingProvider: "NONE" | "AADE" | "MOCK" | "NOVAON" | "IMPACT";
   notes: string;
   erganiEnv: MyDataEnv;
   lastWebhookTest: IntegrationTestResult | null;
@@ -222,6 +223,7 @@ export function IntegrationsHubClient({
             myDataUserId: form.myDataUserId || null,
             myDataSubscriptionKey:
               form.myDataSubscriptionKey.trim() || undefined,
+            eInvoicingProvider: form.eInvoicingProvider,
             notes: form.notes || null,
             erganiEnv: form.erganiEnv,
             ...extra,
@@ -257,6 +259,8 @@ export function IntegrationsHubClient({
           myDataSubscriptionKeyHint:
             data.integrations?.myDataSubscriptionKeyHint ??
             f.myDataSubscriptionKeyHint,
+          eInvoicingProvider:
+            data.integrations?.eInvoicingProvider ?? f.eInvoicingProvider,
         }));
         if (data.integrations?.apiTokens) {
           setTokens(data.integrations.apiTokens);
@@ -871,6 +875,33 @@ export function IntegrationsHubClient({
                   Διαγραφή αποθηκευμένου subscription key
                 </button>
               ) : null}
+
+              <label className="block text-xs text-slate-600">
+                Πάροχος e-invoicing
+                <select
+                  disabled={!canWrite}
+                  value={form.eInvoicingProvider}
+                  onChange={(e) =>
+                    setForm((f) => ({
+                      ...f,
+                      eInvoicingProvider: e.target
+                        .value as FormState["eInvoicingProvider"],
+                    }))
+                  }
+                  className={inputClass}
+                >
+                  <option value="NONE">Κανένας — απευθείας ΑΑΔΕ ERP API</option>
+                  <option value="AADE">ΑΑΔΕ ERP API (ίδιο με κανένας)</option>
+                  <option value="MOCK">MOCK sandbox πάροχος</option>
+                  <option value="NOVAON">Novaon (live — όχι ακόμα)</option>
+                  <option value="IMPACT">Impact (live — όχι ακόμα)</option>
+                </select>
+                <span className="mt-1 block text-[11px] text-slate-500">
+                  Με MOCK (σε simulator/test): η επεξεργασία ουράς περνά από
+                  πάροχο και γράφει channel=provider. NOVAON/IMPACT απορρίπτουν
+                  μέχρι να συνδεθεί live adapter. MOCK απαγορεύεται σε prod.
+                </span>
+              </label>
 
               <label className="block text-xs text-slate-600">
                 Εργάνη env (HR bridge)

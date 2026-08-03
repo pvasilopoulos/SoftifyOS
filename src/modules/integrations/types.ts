@@ -55,6 +55,12 @@ export type IntegrationsConfig = {
   myDataEnv?: MyDataEnv;
   myDataUserId?: string | null;
   myDataSubscriptionKey?: string | null;
+  /**
+   * Certified e-invoicing πάροχος channel.
+   * NONE/AADE = direct AADE ERP API (default).
+   * MOCK = sandbox provider. NOVAON/IMPACT = live (fail-closed until wired).
+   */
+  eInvoicingProvider?: "NONE" | "AADE" | "MOCK" | "NOVAON" | "IMPACT" | null;
   notes?: string | null;
   apiTokens?: IntegrationApiToken[];
   lastWebhookTest?: IntegrationTestResult | null;
