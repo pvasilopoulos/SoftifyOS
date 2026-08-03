@@ -11,6 +11,8 @@ export type SeriesOption = {
   previewNumber: string;
   isDefault: boolean;
   isActive: boolean;
+  myDataEnabled?: boolean;
+  myDataInvoiceType?: string | null;
   site: { code: string; name: string; kind: string } | null;
 };
 
@@ -116,10 +118,26 @@ export function SeriesPicker({
       {error ? (
         <p className="mt-1 text-xs text-rose-700">{error}</p>
       ) : selected ? (
-        <p className="mt-1 text-xs text-slate-500">
-          Επόμενος αριθμός{" "}
-          <span className="font-mono text-ink-800">{selected.previewNumber}</span>
-          {selected.site ? ` · ${selected.site.name}` : ""}
+        <p className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-slate-500">
+          <span>
+            Επόμενος αριθμός{" "}
+            <span className="font-mono text-ink-800">
+              {selected.previewNumber}
+            </span>
+            {selected.site ? ` · ${selected.site.name}` : ""}
+          </span>
+          {selected.myDataEnabled ? (
+            <span className="inline-flex items-center rounded-md bg-emerald-50 px-1.5 py-0.5 text-[11px] font-medium text-emerald-800 ring-1 ring-emerald-200/80">
+              myDATA
+              {selected.myDataInvoiceType
+                ? ` ${selected.myDataInvoiceType}`
+                : ""}
+            </span>
+          ) : (
+            <span className="inline-flex items-center rounded-md bg-slate-100 px-1.5 py-0.5 text-[11px] font-medium text-slate-600">
+              χωρίς myDATA
+            </span>
+          )}
         </p>
       ) : !loading && items.length === 0 ? (
         <p className="mt-1 text-xs text-amber-700">
