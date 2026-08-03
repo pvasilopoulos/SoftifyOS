@@ -420,7 +420,7 @@ export function InvoiceDetailClient({
             <div
               role="toolbar"
               aria-label="Ενέργειες παραστατικού"
-              className="inline-flex max-w-full flex-wrap items-center gap-0.5 rounded-xl border border-slate-200/90 bg-white p-1 shadow-sm"
+              className="inline-flex max-w-full flex-wrap items-center gap-0.5 rounded-2xl border border-slate-200 bg-white p-1 shadow-sm"
             >
               <Button
                 size="icon"
@@ -429,10 +429,14 @@ export function InvoiceDetailClient({
                 onClick={copyNumber}
                 title={copied ? "Αντιγράφηκε" : "Αντιγραφή αριθμού"}
                 aria-label={copied ? "Αντιγράφηκε" : "Αντιγραφή αριθμού"}
-                className="h-9 w-9 shrink-0 rounded-lg shadow-none"
+                className="h-9 w-9 shrink-0 rounded-xl shadow-none"
               >
                 {copied ? <Check size={16} /> : <ClipboardCopy size={16} />}
               </Button>
+              <span
+                aria-hidden
+                className="mx-0.5 hidden h-5 w-px bg-slate-200 sm:block"
+              />
               <InvoiceActions
                 invoiceId={invoice.id}
                 status={invoice.status}
@@ -441,6 +445,10 @@ export function InvoiceDetailClient({
                 size="md"
                 iconsOnly
                 showCollect={invoice.kind !== "SALES_CREDIT"}
+              />
+              <span
+                aria-hidden
+                className="mx-0.5 hidden h-5 w-px bg-slate-200 sm:block"
               />
               <TransformActionButton
                 sourceKind={invoice.kind}

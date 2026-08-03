@@ -81,7 +81,7 @@ export function TransformActionButton({
         aria-label={label}
         className={
           iconOnly
-            ? "h-9 w-9 shrink-0 rounded-lg shadow-none"
+            ? "h-9 w-9 shrink-0 rounded-xl shadow-none"
             : undefined
         }
       >
