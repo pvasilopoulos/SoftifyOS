@@ -109,6 +109,44 @@ function requiresPaymentMethods(invoiceType: string) {
   return /^(1\.|2\.|5\.|11\.)/.test(t);
 }
 
+/**
+ * Top-level AadeBookInvoiceType children in official XSD order
+ * (InvoicesDoc-v1.0.10). Used for regression checks.
+ */
+export const AADE_INVOICE_CHILD_ORDER = [
+  "uid",
+  "mark",
+  "cancelledByMark",
+  "authenticationCode",
+  "transmissionFailure",
+  "issuer",
+  "counterpart",
+  "invoiceHeader",
+  "paymentMethods",
+  "invoiceDetails",
+  "taxesTotals",
+  "invoiceSummary",
+  "qrCodeUrl",
+  "otherTransportDetails",
+] as const;
+
+/** Extract ordered top-level invoice child tags present in an InvoicesDoc XML. */
+export function extractAadeInvoiceChildOrder(xml: string): string[] {
+  const m = xml.match(/<invoice\b[^>]*>([\s\S]*?)<\/invoice>/i);
+  if (!m?.[1]) return [];
+  const allowed = new Set<string>(AADE_INVOICE_CHILD_ORDER);
+  const found: string[] = [];
+  const re = /<([a-zA-Z][\w]*)\b/g;
+  let hit: RegExpExecArray | null;
+  while ((hit = re.exec(m[1]))) {
+    const tag = hit[1]!;
+    if (!allowed.has(tag)) continue;
+    if (found[found.length - 1] === tag) continue;
+    found.push(tag);
+  }
+  return found;
+}
+
 function fmtDate(d: Date) {
   return d.toISOString().slice(0, 10);
 }
@@ -277,10 +315,10 @@ export async function buildInvoiceInvoicesDocXml(
         : [];
   const paymentsXml = paymentMethodsXml(paymentRows);
 
-  // AADE AadeBookInvoiceType XSD order (strict):
-  // uid?, mark?, cancelledByMark?, authenticationCode?,
-  // issuer?, counterpart?, paymentMethods?, invoiceHeader,
-  // invoiceDetails+, taxesTotals?, invoiceSummary, …
+  // Official InvoicesDoc-v1.0.10.xsd AadeBookInvoiceType sequence:
+  // issuer? → counterpart? → invoiceHeader → paymentMethods? →
+  // invoiceDetails+ → taxesTotals? → invoiceSummary → …
+  // (Docs markdown sometimes lists paymentMethods before header — that is wrong.)
   return `<?xml version="1.0" encoding="UTF-8"?>
 ${invoicesDocOpen()}
   <invoice>
@@ -290,7 +328,6 @@ ${invoicesDocOpen()}
       <branch>0</branch>
     </issuer>
     ${counterpart}
-    ${paymentsXml}
     <invoiceHeader>
       <series>${escapeXml(seriesCode)}</series>
       <aa>${aa}</aa>
@@ -298,6 +335,7 @@ ${invoicesDocOpen()}
       <invoiceType>${escapeXml(invoiceType)}</invoiceType>
       <currency>EUR</currency>
     </invoiceHeader>
+    ${paymentsXml}
     ${lineXml}
     <invoiceSummary>
       <totalNetValue>${net.toFixed(2)}</totalNetValue>
