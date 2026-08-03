@@ -33,7 +33,6 @@ import {
   type InvoiceStatusKey,
 } from "@/modules/sales/invoice-utils";
 import { InvoiceActions } from "../invoice-actions";
-import { CreditFromInvoice } from "./credit-from-invoice";
 import { TransformActionButton } from "@/modules/document-transforms/transform-dialog";
 
 export type InvoiceDetailPayload = {
