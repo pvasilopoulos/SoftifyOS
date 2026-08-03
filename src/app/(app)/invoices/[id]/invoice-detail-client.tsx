@@ -231,10 +231,6 @@ export function InvoiceDetailClient({
   );
   const ratio = paidRatio(invoice.paidAmount, invoice.total);
   const dueDays = daysUntil(invoice.dueAt);
-  const canCredit =
-    (invoice.kind === "SALES_INVOICE" || invoice.kind === "RETAIL_RECEIPT") &&
-    status !== "DRAFT" &&
-    status !== "CANCELLED";
   const canEdit =
     invoice.canWrite &&
     (status === "DRAFT" ||
@@ -450,7 +446,6 @@ export function InvoiceDetailClient({
                     invoice.canWrite && invoice.kind !== "SALES_CREDIT"
                   }
                 />
-                <CreditFromInvoice invoiceId={invoice.id} canCredit={canCredit} />
               </div>
             </div>
           }
