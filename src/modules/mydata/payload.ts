@@ -36,6 +36,79 @@ function expensesClassificationXml(input: {
   </expensesClassification>`;
 }
 
+/** AADE PartyType: GR counterparts must not include name (error 220). */
+function counterpartXml(input: {
+  vatNumber: string;
+  country?: string | null;
+  name?: string | null;
+  issuerVat?: string | null;
+}) {
+  const vat = (input.vatNumber || "").replace(/\s/g, "");
+  if (vat.length < 9) return "";
+  const country = (input.country || "GR").toUpperCase();
+  const issuerVat = (input.issuerVat || "").replace(/\s/g, "");
+  if (issuerVat && vat === issuerVat) {
+    throw new Error(
+      "Το ΑΦΜ πελάτη/προμηθευτή πρέπει να διαφέρει από το ΑΦΜ επιχείρησης (ΑΑΔΕ 235)",
+    );
+  }
+  const nameXml =
+    country === "GR" || !input.name?.trim()
+      ? ""
+      : `\n  <name>${escapeXml(input.name.trim())}</name>`;
+  return `<counterpart>
+  <vatNumber>${escapeXml(vat)}</vatNumber>
+  <country>${escapeXml(country)}</country>
+  <branch>0</branch>${nameXml}
+</counterpart>`;
+}
+
+/**
+ * AADE payment method type codes (table 8.12).
+ * 1 domestic account · 3 cash · 5 on credit · 6 web banking · 7 POS
+ */
+function mapPaymentKindToAadeType(
+  kind: string | null | undefined,
+  methodCode?: string | null,
+): number {
+  const k = (kind || "").toUpperCase();
+  const code = (methodCode || "").toUpperCase();
+  if (k === "CASH" || code === "CASH") return 3;
+  if (k === "CARD" || code.includes("CARD") || code.includes("POS")) return 7;
+  if (k === "TRANSFER" || code.includes("TRANSFER") || code.includes("BANK"))
+    return 6;
+  if (k === "GIFT_CARD" || k === "LOYALTY") return 5;
+  return 5;
+}
+
+function paymentMethodsXml(
+  rows: Array<{ type: number; amount: number; info?: string | null }>,
+) {
+  if (rows.length === 0) return "";
+  const details = rows
+    .filter((r) => r.amount > 0)
+    .map((r) => {
+      const info = r.info?.trim()
+        ? `\n    <paymentMethodInfo>${escapeXml(r.info.trim())}</paymentMethodInfo>`
+        : "";
+      return `<paymentMethodDetails>
+    <type>${r.type}</type>
+    <amount>${r.amount.toFixed(2)}</amount>${info}
+  </paymentMethodDetails>`;
+    })
+    .join("\n  ");
+  if (!details) return "";
+  return `<paymentMethods>
+  ${details}
+</paymentMethods>`;
+}
+
+/** Types that AADE requires paymentMethods on SendInvoices (e.g. 1.1). */
+function requiresPaymentMethods(invoiceType: string) {
+  const t = invoiceType.trim();
+  return /^(1\.|2\.|5\.|11\.)/.test(t);
+}
+
 function fmtDate(d: Date) {
   return d.toISOString().slice(0, 10);
 }
@@ -125,6 +198,15 @@ export async function buildInvoiceInvoicesDocXml(
           lineTotal: true,
         },
       },
+      payments: {
+        orderBy: { paidAt: "asc" },
+        select: {
+          amount: true,
+          method: true,
+          note: true,
+          paymentMethod: { select: { kind: true, code: true, name: true } },
+        },
+      },
     },
   });
 
@@ -173,15 +255,27 @@ export async function buildInvoiceInvoicesDocXml(
     })
     .join("\n");
 
-  const counterpart =
-    counterVat.length >= 9
-      ? `<counterpart>
-  <vatNumber>${escapeXml(counterVat)}</vatNumber>
-  <country>${escapeXml(invoice.customer?.country || "GR")}</country>
-  <branch>0</branch>
-  <name>${escapeXml(invoice.customer?.name || "")}</name>
-</counterpart>`
-      : "";
+  const counterpart = counterpartXml({
+    vatNumber: counterVat,
+    country: invoice.customer?.country || "GR",
+    name: invoice.customer?.name,
+    issuerVat: issuer.issuerVat,
+  });
+
+  const paymentRows =
+    invoice.payments.length > 0
+      ? invoice.payments.map((p) => ({
+          type: mapPaymentKindToAadeType(
+            p.paymentMethod?.kind ?? null,
+            p.paymentMethod?.code ?? p.method,
+          ),
+          amount: round2(Number(p.amount)),
+          info: p.note || p.paymentMethod?.name || p.method,
+        }))
+      : requiresPaymentMethods(invoiceType)
+        ? [{ type: 5, amount: total, info: "Επί πιστώσει" }]
+        : [];
+  const paymentsXml = paymentMethodsXml(paymentRows);
 
   return `<?xml version="1.0" encoding="UTF-8"?>
 ${invoicesDocOpen()}
@@ -192,6 +286,7 @@ ${invoicesDocOpen()}
       <branch>0</branch>
     </issuer>
     ${counterpart}
+    ${paymentsXml}
     <invoiceHeader>
       <series>${escapeXml(seriesCode)}</series>
       <aa>${aa}</aa>
@@ -275,15 +370,12 @@ export async function buildDeliveryNoteInvoicesDocXml(
     })
     .join("\n");
 
-  const counterpart =
-    counterVat.length >= 9
-      ? `<counterpart>
-  <vatNumber>${escapeXml(counterVat)}</vatNumber>
-  <country>${escapeXml(note.customer?.country || "GR")}</country>
-  <branch>0</branch>
-  <name>${escapeXml(note.customer?.name || "")}</name>
-</counterpart>`
-      : "";
+  const counterpart = counterpartXml({
+    vatNumber: counterVat,
+    country: note.customer?.country || "GR",
+    name: note.customer?.name,
+    issuerVat: issuer.issuerVat,
+  });
 
   return `<?xml version="1.0" encoding="UTF-8"?>
 ${invoicesDocOpen()}
@@ -383,15 +475,12 @@ export async function buildPurchaseInvoiceInvoicesDocXml(
     })
     .join("\n");
 
-  const counterpart =
-    counterVat.length >= 9
-      ? `<counterpart>
-  <vatNumber>${escapeXml(counterVat)}</vatNumber>
-  <country>GR</country>
-  <branch>0</branch>
-  <name>${escapeXml(pi.supplier?.name || "")}</name>
-</counterpart>`
-      : "";
+  const counterpart = counterpartXml({
+    vatNumber: counterVat,
+    country: "GR",
+    name: pi.supplier?.name,
+    issuerVat: issuer.issuerVat,
+  });
 
   return `<?xml version="1.0" encoding="UTF-8"?>
 ${invoicesDocOpen()}
