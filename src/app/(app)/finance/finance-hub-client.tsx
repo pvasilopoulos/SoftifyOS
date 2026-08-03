@@ -251,7 +251,7 @@ const SECTION_HELP: Record<Section, { title: string; body: string }> = {
   },
   mydata: {
     title: "myDATA / ΑΑΔΕ",
-    body: "Ουρά διαβίβασης παραστατικών. Έλεγξε περιβάλλον (simulator/test/prod) στις Integrations.",
+    body: "Σύντομη ουρά εδώ. Για πλήρη διαχείριση (φίλτρα, λεπτομέρειες, response) άνοιξε το module myDATA Live.",
   },
   controlling: {
     title: "Controlling",

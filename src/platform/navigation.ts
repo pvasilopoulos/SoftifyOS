@@ -278,6 +278,13 @@ export const defaultMenuTree: MenuNodeConfig[] = [
         icon: "Wallet",
       },
       {
+        id: "mydata",
+        type: "link",
+        label: "myDATA Live",
+        href: "/mydata",
+        icon: "ScrollText",
+      },
+      {
         id: "hr",
         type: "link",
         label: "HR",

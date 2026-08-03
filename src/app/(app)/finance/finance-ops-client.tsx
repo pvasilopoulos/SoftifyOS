@@ -878,12 +878,19 @@ export function FinanceOpsClient({
                   : " · live AADE SendInvoices"}
               </p>
               <p className="text-slate-500">
-                Περιβάλλον / πάροχος e-invoicing:{" "}
+                Πλήρης διαχείριση:{" "}
+                <Link
+                  href="/mydata"
+                  className="font-medium text-teal-700 hover:underline"
+                >
+                  myDATA Live →
+                </Link>
+                {" · "}
                 <Link
                   href="/settings/integrations"
                   className="text-teal-700 hover:underline"
                 >
-                  Ρυθμίσεις → Integrations → myDATA
+                  Integrations
                 </Link>
               </p>
             </div>

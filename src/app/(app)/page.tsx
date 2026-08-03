@@ -209,7 +209,7 @@ export default async function DashboardPage({
       meta: "Ουρά διαβίβασης ΑΑΔΕ",
       tone: "amber",
       icon: AlertTriangle,
-      href: "/finance?section=ops",
+      href: "/mydata",
     });
   }
   if (unmatchedBank > 0) {

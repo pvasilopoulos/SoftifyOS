@@ -770,6 +770,12 @@ export function IntegrationsHubClient({
                     {testBusy === "mydata" ? "Testing…" : "Test connection"}
                   </Button>
                   <Link
+                    href="/mydata"
+                    className="inline-flex h-8 items-center rounded-lg border border-slate-200 px-3 text-xs font-medium hover:bg-slate-50"
+                  >
+                    Άνοιγμα myDATA Live
+                  </Link>
+                  <Link
                     href="/finance"
                     className="inline-flex h-8 items-center rounded-lg border border-slate-200 px-3 text-xs font-medium hover:bg-slate-50"
                   >
