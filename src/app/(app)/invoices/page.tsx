@@ -48,6 +48,8 @@ async function loadFirstPage(tenantId: string, legalEntityId: string) {
     issued: countMap.ISSUED ?? 0,
     overdue: countMap.OVERDUE ?? 0,
     paid: countMap.PAID ?? 0,
+    partial: countMap.PARTIAL ?? 0,
+    cancelled: countMap.CANCELLED ?? 0,
   };
 
   const hasMore = rows.length > 50;
@@ -99,7 +101,7 @@ export default async function InvoicesPage() {
     <div className="space-y-5">
       <PageHeader
         title="Παραστατικά"
-        description="Τιμολόγια · πιστωτικά · ΑΠΥ · δυναμικές προβολές"
+        description="Αναζήτηση, φίλτρα είδους & ημερομηνίας, προεπισκόπηση και μαζικές ενέργειες"
         actions={
           <div className="flex flex-wrap gap-2">
             <Link

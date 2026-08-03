@@ -1,7 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState, useTransition } from "react";
+import { useCallback, useEffect, useMemo, useState, useTransition } from "react";
+import { createPortal } from "react-dom";
 import {
   Building2,
   CalendarClock,
@@ -9,15 +10,19 @@ import {
   FileDown,
   Filter,
   Hash,
+  LayoutList,
   Mail,
   MapPin,
   Pencil,
   Phone,
   Receipt,
+  Rows3,
   Search,
   Send,
+  SlidersHorizontal,
   UserRound,
   Wallet,
+  X,
 } from "lucide-react";
 import { Badge } from "@/shared/ui/badge";
 import { Button } from "@/shared/ui/button";
@@ -44,6 +49,7 @@ import {
   normalizeListConfig,
   type ListViewConfig,
 } from "@/modules/entity-views/types";
+import { periodPresetDates } from "@/app/(app)/finance/finance-filters";
 
 type ListViewOpt = {
   id: string;
@@ -78,6 +84,8 @@ type Counts = {
   issued: number;
   overdue: number;
   paid: number;
+  partial?: number;
+  cancelled?: number;
 };
 
 type ListResponse = {
@@ -132,15 +140,35 @@ type DetailResponse = {
   error?: string;
 };
 
+type KindFilter = "" | "SALES_INVOICE" | "SALES_CREDIT" | "RETAIL_RECEIPT";
+type Density = "comfortable" | "compact";
+
 const tabs: Array<{ id: keyof Counts | "all"; label: string; apiTab: string }> =
   [
     { id: "all", label: "Όλα", apiTab: "all" },
     { id: "pending", label: "Εκκρεμή", apiTab: "pending" },
     { id: "issued", label: "Εκδομένα", apiTab: "issued" },
+    { id: "partial", label: "Μερικά", apiTab: "partial" },
     { id: "overdue", label: "Ληξιπρόθεσμα", apiTab: "overdue" },
     { id: "paid", label: "Πληρωμένα", apiTab: "paid" },
     { id: "draft", label: "Πρόχειρα", apiTab: "draft" },
+    { id: "cancelled", label: "Ακυρωμένα", apiTab: "cancelled" },
   ];
+
+const kindOptions: Array<{ id: KindFilter; label: string }> = [
+  { id: "", label: "Όλα τα είδη" },
+  { id: "SALES_INVOICE", label: "Τιμολόγια" },
+  { id: "SALES_CREDIT", label: "Πιστωτικά" },
+  { id: "RETAIL_RECEIPT", label: "ΑΠΥ" },
+];
+
+function fmtShortDate(iso: string | null | undefined) {
+  if (!iso) return "—";
+  return new Date(iso).toLocaleDateString("el-GR", {
+    day: "2-digit",
+    month: "short",
+  });
+}
 
 export function InvoicesWorkspace({
   initialItems,
@@ -166,6 +194,13 @@ export function InvoicesWorkspace({
   const [ms, setMs] = useState(initialMs);
   const [tab, setTab] = useState("all");
   const [q, setQ] = useState("");
+  const [kind, setKind] = useState<KindFilter>("");
+  const [issuedFrom, setIssuedFrom] = useState("");
+  const [issuedTo, setIssuedTo] = useState("");
+  const [unpaid, setUnpaid] = useState(false);
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  const [density, setDensity] = useState<Density>("comfortable");
+  const [mobilePreviewOpen, setMobilePreviewOpen] = useState(false);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [previewId, setPreviewId] = useState<string | null>(
     initialItems[0]?.id ?? null,
@@ -190,8 +225,67 @@ export function InvoicesWorkspace({
     ) as unknown as InvoiceListItem[];
   }, [items, config]);
 
+  const activeFilterCount =
+    (kind ? 1 : 0) +
+    (issuedFrom || issuedTo ? 1 : 0) +
+    (unpaid ? 1 : 0) +
+    (q.trim() ? 1 : 0);
+
+  const loadList = useCallback(
+    async (
+      opts: {
+        nextTab?: string;
+        append?: boolean;
+        cursor?: string | null;
+        nextQ?: string;
+        nextKind?: KindFilter;
+        nextFrom?: string;
+        nextTo?: string;
+        nextUnpaid?: boolean;
+      } = {},
+    ) => {
+      const nextTab = opts.nextTab ?? tab;
+      const nextQ = opts.nextQ ?? q;
+      const nextKind = opts.nextKind ?? kind;
+      const nextFrom = opts.nextFrom ?? issuedFrom;
+      const nextTo = opts.nextTo ?? issuedTo;
+      const nextUnpaid = opts.nextUnpaid ?? unpaid;
+      const append = opts.append ?? false;
+
+      setError(null);
+      const params = new URLSearchParams({ limit: "50", tab: nextTab });
+      if (nextQ.trim()) params.set("q", nextQ.trim());
+      if (nextKind) params.set("kind", nextKind);
+      if (nextFrom) params.set("issuedFrom", nextFrom);
+      if (nextTo) params.set("issuedTo", nextTo);
+      if (nextUnpaid) params.set("unpaid", "1");
+      if (append && opts.cursor) params.set("cursor", opts.cursor);
+
+      const res = await fetch(`/api/invoices?${params}`, { cache: "no-store" });
+      const data = (await res.json()) as ListResponse;
+      if (!res.ok) {
+        setError(data.error || "Αποτυχία φόρτωσης");
+        return;
+      }
+      startTransition(() => {
+        setItems((prev) => (append ? [...prev, ...data.items] : data.items));
+        setNextCursor(data.nextCursor);
+        if (data.counts) setCounts(data.counts);
+        setMs(data.meta.ms);
+        if (!append) {
+          setSelectedIds([]);
+          setPreviewId(data.items[0]?.id ?? null);
+        }
+      });
+    },
+    [tab, q, kind, issuedFrom, issuedTo, unpaid],
+  );
+
   useEffect(() => {
-    if (!previewId) return;
+    if (!previewId) {
+      setPreview(null);
+      return;
+    }
     let cancelled = false;
     void (async () => {
       const res = await fetch(`/api/invoices/${previewId}`, {
@@ -210,31 +304,11 @@ export function InvoicesWorkspace({
     };
   }, [previewId]);
 
-  async function loadList(
-    nextTab = tab,
-    append = false,
-    cursor?: string | null,
-  ) {
-    setError(null);
-    const params = new URLSearchParams({ limit: "50", tab: nextTab });
-    if (q.trim()) params.set("q", q.trim());
-    if (append && cursor) params.set("cursor", cursor);
-    const res = await fetch(`/api/invoices?${params}`, { cache: "no-store" });
-    const data = (await res.json()) as ListResponse;
-    if (!res.ok) {
-      setError(data.error || "Αποτυχία φόρτωσης");
-      return;
+  function selectPreview(id: string) {
+    setPreviewId(id);
+    if (typeof window !== "undefined" && window.innerWidth < 1280) {
+      setMobilePreviewOpen(true);
     }
-    startTransition(() => {
-      setItems((prev) => (append ? [...prev, ...data.items] : data.items));
-      setNextCursor(data.nextCursor);
-      if (data.counts) setCounts(data.counts);
-      setMs(data.meta.ms);
-      if (!append) {
-        setSelectedIds([]);
-        setPreviewId(data.items[0]?.id ?? null);
-      }
-    });
   }
 
   function toggleSelect(id: string) {
@@ -248,62 +322,330 @@ export function InvoicesWorkspace({
     else setSelectedIds(visibleItems.map((i) => i.id));
   }
 
+  function clearAdvancedFilters() {
+    setKind("");
+    setIssuedFrom("");
+    setIssuedTo("");
+    setUnpaid(false);
+    void loadList({
+      nextKind: "",
+      nextFrom: "",
+      nextTo: "",
+      nextUnpaid: false,
+    });
+  }
+
+  function applyPreset(kindPreset: "month" | "quarter" | "ytd" | "year") {
+    const { from, to } = periodPresetDates(kindPreset);
+    setIssuedFrom(from);
+    setIssuedTo(to);
+    void loadList({ nextFrom: from, nextTo: to });
+  }
+
+  const rowPad = density === "compact" ? "px-3 py-2" : "px-4 py-3";
+
+  const previewPanel =
+    preview && preview.id === previewId ? (
+      <InvoicePreviewPanel
+        preview={preview}
+        onClose={() => setMobilePreviewOpen(false)}
+        onDone={() => {
+          void loadList();
+          void (async () => {
+            const res = await fetch(`/api/invoices/${preview.id}`, {
+              cache: "no-store",
+            });
+            const data = (await res.json()) as DetailResponse;
+            if (res.ok && data.item) setPreview(data.item);
+          })();
+        }}
+      />
+    ) : (
+      <div className="flex h-full min-h-[22rem] flex-col items-center justify-center gap-3 px-6 py-16 text-center">
+        <div className="flex size-14 items-center justify-center rounded-2xl bg-slate-100 text-slate-400">
+          <Receipt size={26} strokeWidth={1.5} />
+        </div>
+        <div>
+          <p className="text-sm font-semibold text-ink-900">
+            Επιλέξτε παραστατικό
+          </p>
+          <p className="mt-1 max-w-[16rem] text-xs leading-relaxed text-slate-500">
+            Σύνολα, πελάτης, γραμμές, εισπράξεις και γρήγορες ενέργειες.
+          </p>
+        </div>
+      </div>
+    );
+
   return (
     <div className="space-y-4">
-      <div className="flex gap-2 overflow-x-auto pb-1">
-        {tabs.map((t) => (
+      {/* Status tabs */}
+      <div className="flex gap-1.5 overflow-x-auto pb-0.5 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+        {tabs.map((t) => {
+          const count =
+            counts[t.id as keyof Counts] ??
+            (t.id === "partial" || t.id === "cancelled" ? 0 : counts.all);
+          return (
+            <button
+              key={t.id}
+              type="button"
+              onClick={() => {
+                setTab(t.apiTab);
+                void loadList({ nextTab: t.apiTab });
+              }}
+              className={cn(
+                "shrink-0 rounded-full px-3 py-1.5 text-sm font-medium transition",
+                tab === t.apiTab
+                  ? "bg-ink-950 text-white shadow-sm"
+                  : "bg-white text-slate-600 ring-1 ring-slate-200/90 hover:bg-slate-50",
+              )}
+            >
+              {t.label}
+              <span className="ml-1.5 tabular-nums text-xs opacity-70">
+                {count}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+
+      {/* Toolbar */}
+      <div className="soft-panel space-y-3 p-3 sm:p-3.5">
+        <div className="flex flex-col gap-2 lg:flex-row lg:items-center">
+          <label className="flex min-h-10 flex-1 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 focus-within:border-teal-300 focus-within:ring-2 focus-within:ring-teal-500/20">
+            <Search size={16} className="shrink-0 text-slate-400" />
+            <input
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") void loadList({ nextQ: q });
+              }}
+              placeholder="Αριθμός, πελάτης ή κωδικός…"
+              className="w-full bg-transparent py-2 text-sm outline-none"
+            />
+            {q ? (
+              <button
+                type="button"
+                onClick={() => {
+                  setQ("");
+                  void loadList({ nextQ: "" });
+                }}
+                className="rounded-lg p-1 text-slate-400 hover:bg-slate-100 hover:text-ink-900"
+                aria-label="Καθαρισμός αναζήτησης"
+              >
+                <X size={14} />
+              </button>
+            ) : null}
+          </label>
+
+          <div className="flex flex-wrap items-center gap-1.5">
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => void loadList()}
+              disabled={isPending}
+            >
+              <Search size={14} />
+              Αναζήτηση
+            </Button>
+            <Button
+              variant={filtersOpen || activeFilterCount > 0 ? "primary" : "secondary"}
+              size="sm"
+              onClick={() => setFiltersOpen((o) => !o)}
+            >
+              <SlidersHorizontal size={14} />
+              Φίλτρα
+              {activeFilterCount > 0 ? (
+                <span className="ml-0.5 inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-white/20 px-1.5 text-[11px] font-semibold">
+                  {activeFilterCount}
+                </span>
+              ) : null}
+            </Button>
+            <div className="inline-flex rounded-xl border border-slate-200 bg-white p-0.5">
+              <button
+                type="button"
+                title="Άνετη προβολή"
+                onClick={() => setDensity("comfortable")}
+                className={cn(
+                  "inline-flex h-8 w-8 items-center justify-center rounded-lg transition",
+                  density === "comfortable"
+                    ? "bg-slate-900 text-white"
+                    : "text-slate-500 hover:bg-slate-50",
+                )}
+              >
+                <LayoutList size={14} />
+              </button>
+              <button
+                type="button"
+                title="Συμπαγής προβολή"
+                onClick={() => setDensity("compact")}
+                className={cn(
+                  "inline-flex h-8 w-8 items-center justify-center rounded-lg transition",
+                  density === "compact"
+                    ? "bg-slate-900 text-white"
+                    : "text-slate-500 hover:bg-slate-50",
+                )}
+              >
+                <Rows3 size={14} />
+              </button>
+            </div>
+            {listViews.length > 0 ? (
+              <ViewSwitcher
+                views={listViews}
+                value={viewId}
+                onChange={setViewId}
+              />
+            ) : null}
+          </div>
+        </div>
+
+        {/* Kind chips always visible */}
+        <div className="flex flex-wrap items-center gap-1.5">
+          {kindOptions.map((k) => (
+            <button
+              key={k.id || "all-kinds"}
+              type="button"
+              onClick={() => {
+                setKind(k.id);
+                void loadList({ nextKind: k.id });
+              }}
+              className={cn(
+                "rounded-lg px-2.5 py-1 text-xs font-medium transition",
+                kind === k.id
+                  ? "bg-teal-700 text-white"
+                  : "bg-slate-100 text-slate-600 hover:bg-slate-200/80",
+              )}
+            >
+              {k.label}
+            </button>
+          ))}
           <button
-            key={t.id}
             type="button"
             onClick={() => {
-              setTab(t.apiTab);
-              void loadList(t.apiTab, false);
+              const next = !unpaid;
+              setUnpaid(next);
+              void loadList({ nextUnpaid: next });
             }}
             className={cn(
-              "shrink-0 rounded-full px-3.5 py-1.5 text-sm font-medium transition",
-              tab === t.apiTab
-                ? "bg-ink-950 text-white"
-                : "bg-white text-slate-600 ring-1 ring-slate-200 hover:bg-slate-50",
+              "rounded-lg px-2.5 py-1 text-xs font-medium transition",
+              unpaid
+                ? "bg-amber-600 text-white"
+                : "bg-slate-100 text-slate-600 hover:bg-slate-200/80",
             )}
           >
-            {t.label}
-            <span className="ml-1.5 text-xs opacity-70">
-              {counts[t.id as keyof Counts] ?? counts.all}
-            </span>
+            Ανεξόφλητα
           </button>
-        ))}
-      </div>
+        </div>
 
-      <div className="flex flex-wrap gap-2">
-        <ViewSwitcher
-          views={listViews}
-          value={viewId}
-          onChange={setViewId}
-        />
-      </div>
+        {filtersOpen ? (
+          <div className="rounded-xl border border-slate-200 bg-slate-50/70 p-3">
+            <div className="flex flex-wrap items-end gap-3">
+              <label className="block text-xs">
+                <span className="mb-1 block font-medium text-slate-600">
+                  Από έκδοση
+                </span>
+                <input
+                  type="date"
+                  value={issuedFrom}
+                  onChange={(e) => setIssuedFrom(e.target.value)}
+                  className="h-9 rounded-lg border border-slate-200 bg-white px-2.5 text-sm outline-none focus:border-teal-300 focus:ring-2 focus:ring-teal-500/20"
+                />
+              </label>
+              <label className="block text-xs">
+                <span className="mb-1 block font-medium text-slate-600">
+                  Έως έκδοση
+                </span>
+                <input
+                  type="date"
+                  value={issuedTo}
+                  onChange={(e) => setIssuedTo(e.target.value)}
+                  className="h-9 rounded-lg border border-slate-200 bg-white px-2.5 text-sm outline-none focus:border-teal-300 focus:ring-2 focus:ring-teal-500/20"
+                />
+              </label>
+              <div className="flex flex-wrap gap-1">
+                {(
+                  [
+                    ["month", "Μήνας"],
+                    ["quarter", "Τρίμηνο"],
+                    ["ytd", "YTD"],
+                    ["year", "Έτος"],
+                  ] as const
+                ).map(([key, label]) => (
+                  <button
+                    key={key}
+                    type="button"
+                    onClick={() => applyPreset(key)}
+                    className="rounded-lg bg-white px-2.5 py-1.5 text-xs font-medium text-slate-600 ring-1 ring-slate-200 hover:bg-slate-50"
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+              <Button
+                size="sm"
+                onClick={() => void loadList()}
+                disabled={isPending}
+              >
+                <Filter size={14} />
+                Εφαρμογή
+              </Button>
+              {activeFilterCount > 0 ? (
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={clearAdvancedFilters}
+                >
+                  Καθαρισμός
+                </Button>
+              ) : null}
+            </div>
+          </div>
+        ) : null}
 
-      <div className="flex flex-col gap-2 sm:flex-row">
-        <label className="soft-surface flex flex-1 items-center gap-2 px-3 py-2.5">
-          <Search size={16} className="text-slate-400" />
-          <input
-            value={q}
-            onChange={(e) => setQ(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") void loadList(tab, false);
-            }}
-            placeholder="Αναζήτηση αριθμού ή πελάτη..."
-            className="w-full bg-transparent text-sm outline-none"
-          />
-        </label>
-        <Button
-          variant="secondary"
-          onClick={() => void loadList(tab, false)}
-          disabled={isPending}
-        >
-          <Filter size={16} />
-          Εφαρμογή
-        </Button>
-        <Badge tone={ms < 200 ? "emerald" : "amber"}>{ms} ms</Badge>
+        {/* Active chips */}
+        {activeFilterCount > 0 ? (
+          <div className="flex flex-wrap items-center gap-1.5 text-xs">
+            <span className="text-slate-400">Ενεργά:</span>
+            {q.trim() ? (
+              <FilterChip
+                label={`«${q.trim()}»`}
+                onClear={() => {
+                  setQ("");
+                  void loadList({ nextQ: "" });
+                }}
+              />
+            ) : null}
+            {kind ? (
+              <FilterChip
+                label={
+                  kindOptions.find((k) => k.id === kind)?.label ?? kind
+                }
+                onClear={() => {
+                  setKind("");
+                  void loadList({ nextKind: "" });
+                }}
+              />
+            ) : null}
+            {unpaid ? (
+              <FilterChip
+                label="Ανεξόφλητα"
+                onClear={() => {
+                  setUnpaid(false);
+                  void loadList({ nextUnpaid: false });
+                }}
+              />
+            ) : null}
+            {issuedFrom || issuedTo ? (
+              <FilterChip
+                label={`${issuedFrom || "…"} → ${issuedTo || "…"}`}
+                onClear={() => {
+                  setIssuedFrom("");
+                  setIssuedTo("");
+                  void loadList({ nextFrom: "", nextTo: "" });
+                }}
+              />
+            ) : null}
+          </div>
+        ) : null}
       </div>
 
       {selectedIds.length > 0 ? (
@@ -329,14 +671,7 @@ export function InvoicesWorkspace({
                     ? null
                     : `Αποστολή: ${ok}/${selectedIds.length} επιτυχημένες`,
                 );
-                void loadList(tab, false);
-                if (previewId) {
-                  const res = await fetch(`/api/invoices/${previewId}`, {
-                    cache: "no-store",
-                  });
-                  const data = (await res.json()) as DetailResponse;
-                  if (res.ok && data.item) setPreview(data.item);
-                }
+                void loadList();
               });
             }}
           >
@@ -373,35 +708,81 @@ export function InvoicesWorkspace({
         </p>
       ) : null}
 
-      <div className="grid gap-4 xl:grid-cols-[1.35fr_0.95fr]">
+      <div className="grid gap-4 xl:grid-cols-[minmax(0,1.4fr)_minmax(320px,0.9fr)]">
         <section className="soft-panel overflow-hidden">
-          <div className="hidden border-b border-slate-100 px-4 py-2.5 text-xs font-medium uppercase tracking-wide text-slate-400 md:grid md:grid-cols-[auto_1fr_1.2fr_0.7fr_0.8fr_0.8fr] md:gap-3">
-            <input
-              type="checkbox"
-              checked={
-                visibleItems.length > 0 &&
-                selectedIds.length === visibleItems.length
-              }
-              onChange={toggleAll}
-              aria-label="Επιλογή όλων"
-            />
-            <span>Αριθμός</span>
-            <span>Πελάτης</span>
-            <span className="text-right">Ποσό</span>
-            <span>Κατάσταση</span>
-            <span>{useDynamic ? "Προβολή" : "Πληρωμή"}</span>
-          </div>
+          {useDynamic && config.columns?.length ? (
+            <div
+              className={cn(
+                "hidden items-center gap-3 border-b border-slate-100 text-xs font-medium uppercase tracking-wide text-slate-400 md:flex",
+                rowPad,
+              )}
+            >
+              <input
+                type="checkbox"
+                checked={
+                  visibleItems.length > 0 &&
+                  selectedIds.length === visibleItems.length
+                }
+                onChange={toggleAll}
+                aria-label="Επιλογή όλων"
+              />
+              <div className="min-w-0 flex-1">
+                <DynamicListHeader
+                  columns={config.columns}
+                  builtins={builtins}
+                  customDefs={customFields}
+                />
+              </div>
+              <span className="w-9" />
+            </div>
+          ) : (
+            <div
+              className={cn(
+                "hidden border-b border-slate-100 text-[11px] font-semibold uppercase tracking-wide text-slate-400 md:grid md:grid-cols-[auto_minmax(0,1.1fr)_minmax(0,1.2fr)_5.5rem_6.5rem_5.5rem_auto] md:items-center md:gap-3",
+                rowPad,
+              )}
+            >
+              <input
+                type="checkbox"
+                checked={
+                  visibleItems.length > 0 &&
+                  selectedIds.length === visibleItems.length
+                }
+                onChange={toggleAll}
+                aria-label="Επιλογή όλων"
+              />
+              <span>Αριθμός</span>
+              <span>Πελάτης</span>
+              <span className="text-right">Ποσό</span>
+              <span>Κατάσταση</span>
+              <span>Υπόλοιπο</span>
+              <span className="w-9" />
+            </div>
+          )}
+
           <ul className="divide-y divide-slate-100">
             {visibleItems.map((inv) => {
               const status = inv.status as InvoiceStatusKey;
               const ratio = paidRatio(inv.paidAmount, inv.total);
+              const balance = Math.max(
+                0,
+                Math.round((inv.total - inv.paidAmount) * 100) / 100,
+              );
+              const overdue =
+                Boolean(inv.dueAt) &&
+                balance > 0 &&
+                new Date(inv.dueAt!).getTime() < Date.now() &&
+                status !== "CANCELLED" &&
+                status !== "PAID";
+
               if (useDynamic && config) {
                 return (
                   <li key={inv.id} className="soft-row">
                     <div
                       className={cn(
-                        "flex items-center gap-3 px-4 py-3",
-                        previewId === inv.id && "bg-teal-50/60",
+                        "flex items-center gap-3 transition-colors",
+                        rowPad,
+                        previewId === inv.id && "bg-teal-50/70",
                       )}
                     >
                       <input
@@ -413,7 +794,7 @@ export function InvoicesWorkspace({
                       <button
                         type="button"
                         className="min-w-0 flex-1 text-left"
-                        onClick={() => setPreviewId(inv.id)}
+                        onClick={() => selectPreview(inv.id)}
                       >
                         <DynamicListCells
                           columns={config.columns}
@@ -433,12 +814,14 @@ export function InvoicesWorkspace({
                   </li>
                 );
               }
+
               return (
                 <li key={inv.id} className="soft-row">
                   <div
                     className={cn(
-                      "grid grid-cols-[auto_1fr_auto] gap-3 px-4 py-3 md:grid-cols-[auto_1fr_1.2fr_0.7fr_0.8fr_0.8fr] md:items-center",
-                      previewId === inv.id && "bg-teal-50/60",
+                      "grid grid-cols-[auto_1fr_auto] gap-3 transition-colors md:grid-cols-[auto_minmax(0,1.1fr)_minmax(0,1.2fr)_5.5rem_6.5rem_5.5rem_auto] md:items-center",
+                      rowPad,
+                      previewId === inv.id && "bg-teal-50/70",
                     )}
                   >
                     <input
@@ -451,19 +834,22 @@ export function InvoicesWorkspace({
                     <button
                       type="button"
                       className="min-w-0 text-left"
-                      onClick={() => setPreviewId(inv.id)}
+                      onClick={() => selectPreview(inv.id)}
                     >
-                      <p className="text-sm font-semibold text-ink-950">
+                      <p className="truncate text-sm font-semibold text-ink-950">
                         {inv.number}
                       </p>
-                      {inv.kind && inv.kind !== "SALES_INVOICE" ? (
-                        <p className="text-[11px] font-medium text-amber-800">
-                          {invoiceKindLabel[
-                            inv.kind as keyof typeof invoiceKindLabel
-                          ] ?? inv.kind}
-                        </p>
-                      ) : null}
-                      <p className="text-xs text-slate-500 md:hidden">
+                      <p className="mt-0.5 text-[11px] text-slate-500">
+                        {fmtShortDate(inv.issuedAt ?? inv.createdAt)}
+                        {inv.kind && inv.kind !== "SALES_INVOICE"
+                          ? ` · ${
+                              invoiceKindLabel[
+                                inv.kind as keyof typeof invoiceKindLabel
+                              ] ?? inv.kind
+                            }`
+                          : ""}
+                      </p>
+                      <p className="mt-0.5 truncate text-xs text-slate-500 md:hidden">
                         {inv.customerName}
                       </p>
                     </button>
@@ -477,7 +863,7 @@ export function InvoicesWorkspace({
                     <button
                       type="button"
                       className="hidden min-w-0 text-left md:block"
-                      onClick={() => setPreviewId(inv.id)}
+                      onClick={() => selectPreview(inv.id)}
                     >
                       <p className="truncate text-sm font-medium text-ink-900">
                         {inv.customerName}
@@ -488,7 +874,7 @@ export function InvoicesWorkspace({
                           .join(" · ") || inv.customerCode}
                       </p>
                     </button>
-                    <p className="col-start-2 text-sm font-medium md:col-start-auto md:text-right">
+                    <p className="col-start-2 text-sm font-semibold tabular-nums md:col-start-auto md:text-right">
                       {formatEUR(inv.total)}
                     </p>
                     <div className="col-start-3 row-start-2 justify-self-end md:col-start-auto md:row-start-auto md:justify-self-auto">
@@ -497,35 +883,84 @@ export function InvoicesWorkspace({
                       </Badge>
                     </div>
                     <div className="col-span-2 col-start-2 md:col-span-1 md:col-start-auto">
-                      <div className="mb-1 flex justify-between text-[11px] text-slate-500">
-                        <span>{Math.round(ratio * 100)}%</span>
-                      </div>
-                      <div className="h-1.5 overflow-hidden rounded-full bg-slate-100">
+                      <p
+                        className={cn(
+                          "text-sm font-medium tabular-nums",
+                          balance > 0
+                            ? overdue
+                              ? "text-rose-700"
+                              : "text-amber-700"
+                            : "text-emerald-700",
+                        )}
+                      >
+                        {formatEUR(balance)}
+                      </p>
+                      <div className="mt-1 h-1 overflow-hidden rounded-full bg-slate-100">
                         <div
-                          className="h-full rounded-full bg-teal-500"
+                          className={cn(
+                            "h-full rounded-full",
+                            ratio >= 1
+                              ? "bg-emerald-500"
+                              : ratio > 0
+                                ? "bg-teal-500"
+                                : "bg-slate-300",
+                          )}
                           style={{ width: `${Math.round(ratio * 100)}%` }}
                         />
                       </div>
                     </div>
+                    <Link
+                      href={`/invoices/${inv.id}`}
+                      className="hidden h-9 w-9 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-600 hover:border-teal-200 hover:bg-teal-50 hover:text-teal-700 md:inline-flex"
+                      aria-label={`Επεξεργασία ${inv.number}`}
+                    >
+                      <Pencil size={15} />
+                    </Link>
                   </div>
                 </li>
               );
             })}
             {visibleItems.length === 0 ? (
-              <li className="px-4 py-12 text-center text-sm text-slate-500">
-                Δεν βρέθηκαν τιμολόγια για αυτή την προβολή.
+              <li className="px-4 py-14 text-center">
+                <div className="mx-auto flex size-12 items-center justify-center rounded-2xl bg-slate-100 text-slate-400">
+                  <Receipt size={22} />
+                </div>
+                <p className="mt-3 text-sm font-medium text-ink-900">
+                  Κανένα αποτέλεσμα
+                </p>
+                <p className="mt-1 text-xs text-slate-500">
+                  Δοκιμάστε άλλο tab, είδος ή εύρος ημερομηνιών.
+                </p>
+                {activeFilterCount > 0 ? (
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    className="mt-3"
+                    onClick={clearAdvancedFilters}
+                  >
+                    Καθαρισμός φίλτρων
+                  </Button>
+                ) : null}
               </li>
             ) : null}
           </ul>
-          <div className="flex items-center justify-between border-t border-slate-100 px-4 py-3">
+
+          <div className="flex items-center justify-between gap-3 border-t border-slate-100 px-4 py-3">
             <p className="text-xs text-slate-500">
-              {visibleItems.length} εμφανίζονται · cursor pagination
+              <span className="font-medium text-ink-800">
+                {visibleItems.length}
+              </span>{" "}
+              εμφανίζονται
+              {nextCursor ? " · περισσότερα διαθέσιμα" : ""}
+              <span className="ml-2 tabular-nums text-slate-400">{ms} ms</span>
             </p>
             <Button
               variant="secondary"
               size="sm"
               disabled={!nextCursor || isPending}
-              onClick={() => void loadList(tab, true, nextCursor)}
+              onClick={() =>
+                void loadList({ append: true, cursor: nextCursor })
+              }
             >
               Επόμενα
             </Button>
@@ -533,48 +968,90 @@ export function InvoicesWorkspace({
         </section>
 
         <aside className="soft-panel hidden min-h-0 self-start overflow-hidden xl:sticky xl:top-20 xl:block xl:h-[calc(100dvh-6rem)] xl:max-h-[calc(100dvh-6rem)]">
-          {preview && preview.id === previewId ? (
-            <InvoicePreviewPanel
-              preview={preview}
-              onDone={() => {
-                void loadList(tab, false);
-                void (async () => {
-                  const res = await fetch(`/api/invoices/${preview.id}`, {
-                    cache: "no-store",
-                  });
-                  const data = (await res.json()) as DetailResponse;
-                  if (res.ok && data.item) setPreview(data.item);
-                })();
-              }}
-            />
-          ) : (
-            <div className="flex h-full min-h-[28rem] flex-col items-center justify-center gap-3 px-6 py-16 text-center">
-              <div className="flex size-14 items-center justify-center rounded-2xl bg-slate-100 text-slate-400">
-                <Receipt size={26} strokeWidth={1.5} />
-              </div>
-              <div>
-                <p className="text-sm font-semibold text-ink-900">
-                  Επιλέξτε παραστατικό
-                </p>
-                <p className="mt-1 max-w-[16rem] text-xs leading-relaxed text-slate-500">
-                  Η προεπισκόπηση δείχνει σύνολα, πελάτη, γραμμές, εισπράξεις και
-                  γρήγορες ενέργειες.
-                </p>
-              </div>
-            </div>
-          )}
+          {previewPanel}
         </aside>
       </div>
+
+      {mobilePreviewOpen && previewId ? (
+        <MobilePreviewSheet onClose={() => setMobilePreviewOpen(false)}>
+          {previewPanel}
+        </MobilePreviewSheet>
+      ) : null}
     </div>
+  );
+}
+
+function FilterChip({
+  label,
+  onClear,
+}: {
+  label: string;
+  onClear: () => void;
+}) {
+  return (
+    <span className="inline-flex items-center gap-1 rounded-full bg-teal-50 px-2.5 py-1 font-medium text-teal-800 ring-1 ring-teal-200/80">
+      {label}
+      <button
+        type="button"
+        onClick={onClear}
+        className="rounded-full p-0.5 hover:bg-teal-100"
+        aria-label={`Αφαίρεση ${label}`}
+      >
+        <X size={12} />
+      </button>
+    </span>
+  );
+}
+
+function MobilePreviewSheet({
+  children,
+  onClose,
+}: {
+  children: React.ReactNode;
+  onClose: () => void;
+}) {
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
+  useEffect(() => {
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => {
+      document.body.style.overflow = prev;
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [onClose]);
+  if (!mounted) return null;
+  return createPortal(
+    <div className="fixed inset-0 z-[80] xl:hidden">
+      <button
+        type="button"
+        className="absolute inset-0 bg-ink-950/45"
+        aria-label="Κλείσιμο"
+        onClick={onClose}
+      />
+      <div className="absolute inset-x-0 bottom-0 flex max-h-[88dvh] flex-col overflow-hidden rounded-t-3xl bg-white shadow-2xl">
+        <div className="flex shrink-0 items-center justify-center py-2">
+          <div className="h-1 w-10 rounded-full bg-slate-200" />
+        </div>
+        <div className="min-h-0 flex-1 overflow-hidden">{children}</div>
+      </div>
+    </div>,
+    document.body,
   );
 }
 
 function InvoicePreviewPanel({
   preview,
   onDone,
+  onClose,
 }: {
   preview: DetailItem;
   onDone: () => void;
+  onClose?: () => void;
 }) {
   const status = preview.status as InvoiceStatusKey;
   const balance = Math.max(
@@ -602,7 +1079,6 @@ function InvoicePreviewPanel({
 
   return (
     <div className="flex h-full min-h-0 max-h-full flex-col">
-      {/* Hero header */}
       <div className="relative shrink-0 overflow-hidden border-b border-slate-100 bg-gradient-to-br from-slate-900 via-slate-800 to-teal-900 px-5 pb-5 pt-4 text-white">
         <div
           className="pointer-events-none absolute -right-10 -top-10 size-40 rounded-full bg-teal-400/20 blur-2xl"
@@ -624,12 +1100,24 @@ function InvoicePreviewPanel({
               {preview.customer.name}
             </p>
           </div>
-          <Badge
-            tone={invoiceStatusTone[status] ?? "slate"}
-            className="shrink-0 bg-white/95 shadow-sm"
-          >
-            {invoiceStatusLabel[status] ?? preview.status}
-          </Badge>
+          <div className="flex shrink-0 items-start gap-2">
+            <Badge
+              tone={invoiceStatusTone[status] ?? "slate"}
+              className="bg-white/95 shadow-sm"
+            >
+              {invoiceStatusLabel[status] ?? preview.status}
+            </Badge>
+            {onClose ? (
+              <button
+                type="button"
+                onClick={onClose}
+                className="rounded-lg bg-white/10 p-1.5 text-white/80 ring-1 ring-white/15 hover:bg-white/20 xl:hidden"
+                aria-label="Κλείσιμο"
+              >
+                <X size={14} />
+              </button>
+            ) : null}
+          </div>
         </div>
         <div className="relative mt-3 flex flex-wrap gap-1.5">
           <span className="rounded-lg bg-white/10 px-2 py-0.5 text-[11px] font-medium text-white/90 ring-1 ring-white/15">
@@ -654,7 +1142,6 @@ function InvoicePreviewPanel({
       </div>
 
       <div className="min-h-0 flex-1 space-y-4 overflow-y-auto overscroll-contain px-5 py-4">
-        {/* Amounts + progress */}
         <div className="rounded-2xl border border-slate-100 bg-gradient-to-b from-slate-50 to-white p-4">
           <div className="flex items-end justify-between gap-3">
             <div>
@@ -728,7 +1215,6 @@ function InvoicePreviewPanel({
           </dl>
         </div>
 
-        {/* Customer */}
         <section>
           <SectionLabel>Πελάτης</SectionLabel>
           <div className="mt-2 rounded-2xl border border-slate-100 p-3">
@@ -764,7 +1250,9 @@ function InvoicePreviewPanel({
                     </span>
                   ) : null}
                   {!preview.customer.email && !contactPhone ? (
-                    <span className="text-slate-400">Χωρίς στοιχεία επικοινωνίας</span>
+                    <span className="text-slate-400">
+                      Χωρίς στοιχεία επικοινωνίας
+                    </span>
                   ) : null}
                 </div>
               </div>
@@ -772,7 +1260,6 @@ function InvoicePreviewPanel({
           </div>
         </section>
 
-        {/* Meta */}
         <section>
           <SectionLabel>Στοιχεία</SectionLabel>
           <div className="mt-2 grid grid-cols-2 gap-2">
@@ -804,22 +1291,25 @@ function InvoicePreviewPanel({
               }
               tone={overdue ? "rose" : undefined}
             />
-            <MetaTile
-              icon={Building2}
-              label="Υποκατάστημα"
-              value={preview.branch?.name ?? "—"}
-              hint={preview.branch?.city ?? undefined}
-            />
-            <MetaTile
-              icon={MapPin}
-              label="Χώρος"
-              value={preview.space?.name ?? "—"}
-              hint={preview.space?.code ?? preview.site?.code}
-            />
+            {preview.branch?.name ? (
+              <MetaTile
+                icon={Building2}
+                label="Υποκατάστημα"
+                value={preview.branch.name}
+                hint={preview.branch.city ?? undefined}
+              />
+            ) : null}
+            {preview.space?.name || preview.site?.code ? (
+              <MetaTile
+                icon={MapPin}
+                label="Χώρος"
+                value={preview.space?.name ?? preview.site?.code ?? "—"}
+                hint={preview.space?.code ?? preview.site?.name}
+              />
+            ) : null}
           </div>
         </section>
 
-        {/* Lines */}
         <section>
           <div className="mb-2 flex items-center justify-between">
             <SectionLabel className="mb-0">Γραμμές</SectionLabel>
@@ -872,7 +1362,6 @@ function InvoicePreviewPanel({
           </ul>
         </section>
 
-        {/* Payments */}
         {payments.length > 0 ? (
           <section>
             <SectionLabel>Εισπράξεις</SectionLabel>
@@ -916,7 +1405,6 @@ function InvoicePreviewPanel({
         ) : null}
       </div>
 
-      {/* Footer actions — shrink-0 so the scroll region above stays bounded */}
       <div className="shrink-0 space-y-2 border-t border-slate-100 bg-white px-5 py-3">
         <InvoiceActions
           invoiceId={preview.id}

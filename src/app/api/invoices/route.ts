@@ -36,10 +36,24 @@ const listSchema = listQuerySchema.extend({
     .enum(["DRAFT", "ISSUED", "PARTIAL", "PAID", "OVERDUE", "CANCELLED"])
     .optional(),
   tab: z
-    .enum(["all", "pending", "issued", "overdue", "paid", "draft"])
+    .enum(["all", "pending", "issued", "overdue", "paid", "draft", "partial", "cancelled"])
     .optional(),
   customerId: z.string().min(1).optional(),
   kind: z.enum(["SALES_INVOICE", "SALES_CREDIT", "RETAIL_RECEIPT"]).optional(),
+  /** YYYY-MM-DD — filter on issuedAt (falls back to createdAt when null) */
+  issuedFrom: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/)
+    .optional(),
+  issuedTo: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/)
+    .optional(),
+  /** unpaid balance only (excludes DRAFT / CANCELLED / fully PAID) */
+  unpaid: z
+    .enum(["0", "1", "true", "false"])
+    .optional()
+    .transform((v) => v === "1" || v === "true"),
 });
 
 async function nextInvoiceNumberFallback(
@@ -89,8 +103,18 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: "Invalid query" }, { status: 400 });
     }
 
-    const { limit, cursor: cursorParam, q, status, tab, customerId, kind } =
-      parsed.data;
+    const {
+      limit,
+      cursor: cursorParam,
+      q,
+      status,
+      tab,
+      customerId,
+      kind,
+      issuedFrom,
+      issuedTo,
+      unpaid,
+    } = parsed.data;
     const cursor = cursorParam ? decodeCursor(cursorParam) : null;
     if (cursorParam && !cursor) {
       return NextResponse.json({ error: "Invalid cursor" }, { status: 400 });
@@ -106,11 +130,50 @@ export async function GET(request: NextRequest) {
             ? Prisma.sql`AND i.status = 'OVERDUE'::"InvoiceStatus"`
             : tab === "issued"
               ? Prisma.sql`AND i.status = 'ISSUED'::"InvoiceStatus"`
-              : tab === "pending"
-                ? Prisma.sql`AND i.status IN ('ISSUED'::"InvoiceStatus", 'PARTIAL'::"InvoiceStatus", 'OVERDUE'::"InvoiceStatus")`
-                : Prisma.empty;
+              : tab === "partial"
+                ? Prisma.sql`AND i.status = 'PARTIAL'::"InvoiceStatus"`
+                : tab === "cancelled"
+                  ? Prisma.sql`AND i.status = 'CANCELLED'::"InvoiceStatus"`
+                  : tab === "pending"
+                    ? Prisma.sql`AND i.status IN ('ISSUED'::"InvoiceStatus", 'PARTIAL'::"InvoiceStatus", 'OVERDUE'::"InvoiceStatus")`
+                    : Prisma.empty;
 
     const companyFilter = companySqlAnd(session);
+
+    const issuedDateExpr = Prisma.sql`COALESCE(i."issuedAt", i."createdAt")`;
+    const dateFilter =
+      issuedFrom || issuedTo
+        ? Prisma.sql`
+            ${
+              issuedFrom
+                ? Prisma.sql`AND ${issuedDateExpr} >= ${new Date(`${issuedFrom}T00:00:00.000Z`)}::timestamptz`
+                : Prisma.empty
+            }
+            ${
+              issuedTo
+                ? Prisma.sql`AND ${issuedDateExpr} < ${new Date(`${issuedTo}T00:00:00.000Z`)}::timestamptz + INTERVAL '1 day'`
+                : Prisma.empty
+            }
+          `
+        : Prisma.empty;
+
+    const unpaidFilter = unpaid
+      ? Prisma.sql`AND i."paidAmount" < i.total AND i.status NOT IN ('DRAFT'::"InvoiceStatus", 'CANCELLED'::"InvoiceStatus", 'PAID'::"InvoiceStatus")`
+      : Prisma.empty;
+
+    const kindFilter = kind
+      ? Prisma.sql`AND i.kind = ${kind}::"InvoiceKind"`
+      : Prisma.empty;
+    const customerFilter = customerId
+      ? Prisma.sql`AND i."customerId" = ${customerId}`
+      : Prisma.empty;
+    const qFilter = q
+      ? Prisma.sql`AND (
+          i.number ILIKE ${"%" + q + "%"}
+          OR c.name ILIKE ${"%" + q + "%"}
+          OR c.code ILIKE ${"%" + q + "%"}
+        )`
+      : Prisma.empty;
 
     const rows = await prisma.$queryRaw<
       Array<{
@@ -143,17 +206,11 @@ export async function GET(request: NextRequest) {
       WHERE i."tenantId" = ${session.tenantId}
         ${companyFilter}
         ${statusFilter}
-        ${kind ? Prisma.sql`AND i.kind = ${kind}::"InvoiceKind"` : Prisma.empty}
-        ${customerId ? Prisma.sql`AND i."customerId" = ${customerId}` : Prisma.empty}
-        ${
-          q
-            ? Prisma.sql`AND (
-                i.number ILIKE ${"%" + q + "%"}
-                OR c.name ILIKE ${"%" + q + "%"}
-                OR c.code ILIKE ${"%" + q + "%"}
-              )`
-            : Prisma.empty
-        }
+        ${kindFilter}
+        ${customerFilter}
+        ${qFilter}
+        ${dateFilter}
+        ${unpaidFilter}
         ${
           cursor
             ? Prisma.sql`AND (i."createdAt", i.id) < (${new Date(cursor.createdAt)}::timestamptz, ${cursor.id})`
@@ -171,18 +228,28 @@ export async function GET(request: NextRequest) {
         issued: bigint;
         overdue: bigint;
         paid: bigint;
+        partial: bigint;
+        cancelled: bigint;
       }>
     >`
       SELECT
         COUNT(*)::bigint AS all,
-        COUNT(*) FILTER (WHERE status = 'DRAFT')::bigint AS draft,
-        COUNT(*) FILTER (WHERE status IN ('ISSUED','PARTIAL','OVERDUE'))::bigint AS pending,
-        COUNT(*) FILTER (WHERE status = 'ISSUED')::bigint AS issued,
-        COUNT(*) FILTER (WHERE status = 'OVERDUE')::bigint AS overdue,
-        COUNT(*) FILTER (WHERE status = 'PAID')::bigint AS paid
-      FROM invoices
-      WHERE "tenantId" = ${session.tenantId}
-        AND "legalEntityId" = ${legalEntityId}
+        COUNT(*) FILTER (WHERE i.status = 'DRAFT')::bigint AS draft,
+        COUNT(*) FILTER (WHERE i.status IN ('ISSUED','PARTIAL','OVERDUE'))::bigint AS pending,
+        COUNT(*) FILTER (WHERE i.status = 'ISSUED')::bigint AS issued,
+        COUNT(*) FILTER (WHERE i.status = 'OVERDUE')::bigint AS overdue,
+        COUNT(*) FILTER (WHERE i.status = 'PAID')::bigint AS paid,
+        COUNT(*) FILTER (WHERE i.status = 'PARTIAL')::bigint AS partial,
+        COUNT(*) FILTER (WHERE i.status = 'CANCELLED')::bigint AS cancelled
+      FROM invoices i
+      JOIN customers c ON c.id = i."customerId"
+      WHERE i."tenantId" = ${session.tenantId}
+        AND i."legalEntityId" = ${legalEntityId}
+        ${kindFilter}
+        ${customerFilter}
+        ${qFilter}
+        ${dateFilter}
+        ${unpaidFilter}
     `;
 
     const hasMore = rows.length > limit;
@@ -227,6 +294,8 @@ export async function GET(request: NextRequest) {
         issued: Number(c?.issued ?? 0),
         overdue: Number(c?.overdue ?? 0),
         paid: Number(c?.paid ?? 0),
+        partial: Number(c?.partial ?? 0),
+        cancelled: Number(c?.cancelled ?? 0),
       },
       meta: { ms: Date.now() - started, count: items.length, hasMore },
     });
