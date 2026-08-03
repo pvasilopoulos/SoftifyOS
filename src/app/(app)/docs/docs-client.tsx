@@ -27,6 +27,7 @@ import {
 
 const ICONS: Record<DocSectionId, typeof BookOpen> = {
   overview: LayoutDashboard,
+  roadmap: ClipboardList,
   platform: Settings,
   sales: ShoppingCart,
   customers: Users,

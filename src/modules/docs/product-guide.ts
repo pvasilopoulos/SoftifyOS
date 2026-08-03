@@ -1,5 +1,6 @@
 export type DocSectionId =
   | "overview"
+  | "roadmap"
   | "platform"
   | "sales"
   | "customers"
@@ -54,6 +55,11 @@ export const PRODUCT_DOC_SECTIONS: DocSection[] = [
         text: "Demo login: maria@akropolis.gr / SoftifyOS!2026 — ξεκίνα από Dashboard → Ουρά εργασίας.",
       },
       {
+        type: "callout",
+        tone: "warn",
+        text: "Το SoftifyOS σήμερα είναι ισχυρό θεμέλιο ERP, όχι πλήρης Softone-parity. Δες την ενότητα Roadmap go-live για τη σειρά προτεραιοτήτων προς παραγωγή.",
+      },
+      {
         type: "kv",
         rows: [
           { k: "Πωλήσεις", v: "Προσφορές → Παραγγελίες → Τιμολόγια → Δελτία αποστολής" },
@@ -61,6 +67,42 @@ export const PRODUCT_DOC_SECTIONS: DocSection[] = [
           { k: "Οικονομικά", v: "Ημερολόγιο, ισοζύγιο, Settlement Engine, AR/AP, ΦΠΑ βιβλία, myDATA" },
           { k: "HR", v: "Πλήρες HR: ημερολόγιο αδειών, onboarding, έγγραφα, QR κάρτα, Εργάνη, μισθοδοσία" },
           { k: "Πλατφόρμα", v: "Ρυθμίσεις, Script Hooks, Entity Views, Integrations API" },
+        ],
+      },
+    ],
+  },
+  {
+    id: "roadmap",
+    title: "Roadmap go-live SME",
+    subtitle: "Τι κλείνουμε πρώτα για παραγωγική ελληνική επιχείρηση",
+    group: "Εισαγωγή",
+    blocks: [
+      {
+        type: "p",
+        text: "Προτεραιότητα: νόμιμο/υποχρεωτικό → κύκλος μετρητών → λιανική ΦΗΜ (αν χρειάζεται) → HR/μισθοδοσία → WMS/αγορές → FI βάθος. Παραγωγή/CRM depth αργότερα.",
+      },
+      {
+        type: "ol",
+        items: [
+          "Phase A — myDATA prod, πάροχος e-invoicing, settlements QA, banking recon, ελληνικά books/ΦΠΑ",
+          "Phase B — Card provider live, ΦΗΜ, POS day-end (μόνο αν υπάρχει λιανική)",
+          "Phase C — Ergani live, payroll v1, ΦΜΥ/ΑΠΔ export",
+          "Phase D — 3-way match, mobile picking, stock valuation",
+          "Phase E — Period close, fixed assets batch, consolidation",
+          "Phase F — Παραγωγή, project costing, marketplaces, offline PWA",
+        ],
+      },
+      {
+        type: "callout",
+        tone: "tip",
+        text: "Πλήρες κείμενο: docs/roadmap-sme-golive.md στο repo. v1 go-live = myDATA (ή πάροχος) + σταθερές πωλήσεις/εξοφλήσεις + banking + βασικές αναφορές + σωστό multi-company.",
+      },
+      {
+        type: "kv",
+        rows: [
+          { k: "Τώρα", v: "Δυνατό sales/settlements/platform core" },
+          { k: "Επόμενο κρίσιμο", v: "Phase A — συμμόρφωση & κλείσιμο μετρητών" },
+          { k: "Όχι πρώτα", v: "Παραγωγή, πλήρες CRM, offline PWA" },
         ],
       },
     ],
