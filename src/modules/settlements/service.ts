@@ -110,6 +110,7 @@ type SeriesSettlementPolicy = {
   autoPostSettlementJournal: SettlementPolicy;
   allowVoidSettlement: SettlementPolicy;
   allowBankMatch: SettlementPolicy;
+  autoSettleOnIssue: SettlementPolicy;
   glDebitAccount: string | null;
   id: string;
 };
@@ -136,6 +137,7 @@ const SERIES_SETTLEMENT_SELECT = {
   autoPostSettlementJournal: true,
   allowVoidSettlement: true,
   allowBankMatch: true,
+  autoSettleOnIssue: true,
 } as const;
 
 function policyFromSeries(
@@ -162,6 +164,7 @@ function policyFromSeries(
     autoPostSettlementJournal?: SettlementPolicy | boolean | null;
     allowVoidSettlement?: SettlementPolicy | boolean | null;
     allowBankMatch?: SettlementPolicy | boolean | null;
+    autoSettleOnIssue?: SettlementPolicy | boolean | null;
   } | null,
 ): SeriesSettlementPolicy {
   const clearingRaw =
@@ -201,6 +204,7 @@ function policyFromSeries(
       "YES",
     ),
     allowBankMatch: parseSettlementPolicy(series?.allowBankMatch, "YES"),
+    autoSettleOnIssue: parseSettlementPolicy(series?.autoSettleOnIssue, "NO"),
   };
 }
 
@@ -395,6 +399,119 @@ async function postSettlementJournal(
   } catch (e) {
     if (e instanceof LedgerError) return null;
     throw e;
+  }
+}
+
+/**
+ * Full settle right after issue when series.autoSettleOnIssue = AUTO.
+ * Requires at least one collect payment method (series allow-list or catalog).
+ * Failures are returned as warnings — issue itself must still succeed.
+ */
+export async function tryAutoSettleOnIssue(
+  db: PrismaClient,
+  input: {
+    tenantId: string;
+    userId?: string | null;
+    legalEntityId?: string | null;
+    invoiceId: string;
+    seriesId?: string | null;
+    autoSettleOnIssue?: SettlementPolicy | boolean | null;
+  },
+): Promise<{
+  settled: boolean;
+  settlementId?: string;
+  settlementNumber?: string;
+  paymentMethodId?: string;
+  paymentMethodCode?: string;
+  warning?: string;
+}> {
+  const policy = parseSettlementPolicy(input.autoSettleOnIssue, "NO");
+  if (!policyAllowsAuto(policy)) {
+    return { settled: false };
+  }
+
+  const invoice = await db.invoice.findFirst({
+    where: {
+      id: input.invoiceId,
+      tenantId: input.tenantId,
+      ...(input.legalEntityId ? { legalEntityId: input.legalEntityId } : {}),
+    },
+    select: {
+      id: true,
+      status: true,
+      total: true,
+      paidAmount: true,
+      seriesId: true,
+      kind: true,
+    },
+  });
+  if (!invoice) {
+    return { settled: false, warning: "Αυτόματη εξόφληση: δεν βρέθηκε παραστατικό" };
+  }
+  if (invoice.kind === "SALES_CREDIT") {
+    return { settled: false };
+  }
+  if (invoice.status === "CANCELLED" || invoice.status === "DRAFT") {
+    return {
+      settled: false,
+      warning: "Αυτόματη εξόφληση: το παραστατικό δεν είναι εκδομένο",
+    };
+  }
+
+  const balance = round2(toNumber(invoice.total) - toNumber(invoice.paidAmount));
+  if (balance <= 0.001) {
+    return { settled: false };
+  }
+
+  const seriesId = input.seriesId ?? invoice.seriesId;
+  const methods = await resolveSeriesPaymentMethods(db, {
+    tenantId: input.tenantId,
+    seriesId,
+    collectOnly: true,
+    activeOnly: true,
+  });
+  const tender =
+    methods.find((m) => m.isDefault) ?? methods[0] ?? null;
+  if (!tender) {
+    return {
+      settled: false,
+      warning:
+        "Αυτόματη εξόφληση: δεν υπάρχει τρόπος πληρωμής (Ρυθμίσεις → Τρόποι πληρωμής ή επιλογή στη σειρά).",
+    };
+  }
+
+  try {
+    const { settlement } = await createReceiptSettlement(db, {
+      tenantId: input.tenantId,
+      userId: input.userId,
+      legalEntityId: input.legalEntityId,
+      data: {
+        invoiceId: invoice.id,
+        notes: "Αυτόματη εξόφληση κατά την έκδοση",
+        methods: [
+          {
+            paymentMethodId: tender.id,
+            amount: balance,
+            changeAmount: 0,
+          },
+        ],
+      },
+    });
+    return {
+      settled: true,
+      settlementId: settlement.id,
+      settlementNumber: settlement.number,
+      paymentMethodId: tender.id,
+      paymentMethodCode: tender.code,
+    };
+  } catch (error) {
+    return {
+      settled: false,
+      warning:
+        error instanceof SettlementError
+          ? `Αυτόματη εξόφληση: ${error.message}`
+          : "Αυτόματη εξόφληση απέτυχε",
+    };
   }
 }
 

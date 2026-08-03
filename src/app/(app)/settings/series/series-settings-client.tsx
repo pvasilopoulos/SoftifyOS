@@ -103,6 +103,7 @@ type Series = {
   autoPostSettlementJournal: SettlementPolicyValue;
   allowVoidSettlement: SettlementPolicyValue;
   allowBankMatch: SettlementPolicyValue;
+  autoSettleOnIssue: SettlementPolicyValue;
   isDefault: boolean;
   isActive: boolean;
   allowedPaymentMethodIds: string[];
@@ -180,6 +181,7 @@ function payloadFromForm(
     ),
     allowVoidSettlement: String(form.get("allowVoidSettlement") || "YES"),
     allowBankMatch: String(form.get("allowBankMatch") || "YES"),
+    autoSettleOnIssue: String(form.get("autoSettleOnIssue") || "NO"),
     isDefault: form.get("isDefault") === "on",
     isActive: form.get("isActive") === "on",
     allowedPaymentMethodIds: payments.allowedPaymentMethodIds,
@@ -1004,6 +1006,8 @@ function SeriesDrawer({
               <p className="text-xs leading-relaxed text-slate-500">
                 Περιορίστε τους τρόπους πληρωμής για αυτή τη σειρά (POS /
                 εισπράξεις). Κενό = όλοι οι ενεργοί τρόποι από τον κατάλογο.
+                Για αυτόματη εξόφληση στην έκδοση όρισε Default τρόπο (ή άφησε
+                κατάλογο με τουλάχιστον έναν τρόπο «Εισπράξεις»).
               </p>
               <label className="inline-flex items-center gap-2.5 text-sm">
                 <input
@@ -1220,6 +1224,15 @@ function SeriesDrawer({
                 <strong>Αυτόματα</strong> (το σύστημα όταν πληρούνται οι
                 προϋποθέσεις).
               </p>
+
+              <PolicyGroup title="Κατά την έκδοση">
+                <PolicySelect
+                  name="autoSettleOnIssue"
+                  label="Αυτόματη εξόφληση στην έκδοση"
+                  hint="Αυτόματα = πλήρης είσπραξη με τον default τρόπο πληρωμής της σειράς (ή του καταλόγου). Απαιτεί τουλάχιστον έναν τρόπο με «Εμφάνιση σε εισπράξεις»."
+                  defaultValue={initial?.autoSettleOnIssue ?? "NO"}
+                />
+              </PolicyGroup>
 
               <PolicyGroup title="Ποσά & κατανομή">
                 <PolicySelect

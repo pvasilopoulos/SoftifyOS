@@ -137,6 +137,7 @@ export default async function SeriesSettingsPage() {
           autoPostSettlementJournal: s.autoPostSettlementJournal,
           allowVoidSettlement: s.allowVoidSettlement,
           allowBankMatch: s.allowBankMatch,
+          autoSettleOnIssue: s.autoSettleOnIssue,
           isDefault: s.isDefault,
           isActive: s.isActive,
           allowedPaymentMethodIds: pay.allowedPaymentMethodIds,

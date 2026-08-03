@@ -143,8 +143,14 @@ export function InvoiceActions({
       });
       const data = (await res.json()) as {
         error?: string;
+        warning?: string;
         item?: {
           print?: { copies?: number; printer?: string | null };
+          autoSettle?: {
+            settlementNumber?: string;
+            paymentMethodCode?: string;
+          } | null;
+          status?: string;
         };
       };
       if (!res.ok) {
@@ -152,7 +158,15 @@ export function InvoiceActions({
         setError(data.error || "Αποτυχία έκδοσης");
         return;
       }
-      setMessage("Το τιμολόγιο εκδόθηκε");
+      const settleMsg = data.item?.autoSettle?.settlementNumber
+        ? ` · εξόφληση ${data.item.autoSettle.settlementNumber}${
+            data.item.autoSettle.paymentMethodCode
+              ? ` (${data.item.autoSettle.paymentMethodCode})`
+              : ""
+          }`
+        : "";
+      setMessage(`Το τιμολόγιο εκδόθηκε${settleMsg}`);
+      if (data.warning) setError(data.warning);
       if (data.item?.print) {
         maybeAutoPrintAfterIssue(
           invoiceId,

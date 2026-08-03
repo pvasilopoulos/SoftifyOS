@@ -2208,6 +2208,8 @@ model DocumentSeries {
   allowVoidSettlement  SettlementPolicy  @default(YES)
   /// Επιτρέπει bank statement match σε παραστατικά της σειράς
   allowBankMatch       SettlementPolicy  @default(YES)
+  /// Αυτόματη πλήρης εξόφληση κατά την έκδοση (AUTO = με default τρόπο πληρωμής)
+  autoSettleOnIssue    SettlementPolicy  @default(NO)
   /// Αριθμός αντιτύπων στην εκτύπωση (1–9)
   printCopies          Int               @default(1)
   /// Προορισμός εκτυπωτή: BROWSER | PDF | NETWORK_* | FISCAL | LABEL | custom

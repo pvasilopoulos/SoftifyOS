@@ -212,6 +212,7 @@ export async function POST(request: Request) {
           autoPostSettlementJournal: body.autoPostSettlementJournal ?? "AUTO",
           allowVoidSettlement: body.allowVoidSettlement ?? "YES",
           allowBankMatch: body.allowBankMatch ?? "YES",
+          autoSettleOnIssue: body.autoSettleOnIssue ?? "NO",
           printCopies: body.printCopies ?? 1,
           printPrinter: body.printPrinter ?? null,
           isDefault: body.isDefault ?? false,

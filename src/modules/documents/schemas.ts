@@ -135,6 +135,8 @@ export const seriesCreateSchema = z.object({
     .default("AUTO"),
   allowVoidSettlement: settlementPolicyField.optional().default("YES"),
   allowBankMatch: settlementPolicyField.optional().default("YES"),
+  /** AUTO = πλήρης εξόφληση με default τρόπο πληρωμής κατά την έκδοση */
+  autoSettleOnIssue: settlementPolicyField.optional().default("NO"),
 });
 
 export const seriesUpdateSchema = seriesCreateSchema.partial();

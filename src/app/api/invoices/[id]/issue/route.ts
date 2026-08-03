@@ -43,6 +43,7 @@ export async function POST(
             myDataVatCategory: true,
             printCopies: true,
             printPrinter: true,
+            autoSettleOnIssue: true,
           },
         },
         lines: {
@@ -241,32 +242,65 @@ export async function POST(
       printer: invoice.series?.printPrinter ?? null,
     };
 
-    if (after.failed) {
-      return NextResponse.json({
-        item: {
-          id: updated.id,
-          status: updated.status,
-          journalId,
-          cogsJournalId,
-          stock: stockMeta,
-          myDataId,
-          print,
+    const { tryAutoSettleOnIssue } = await import(
+      "@/modules/settlements/service"
+    );
+    const autoSettle = await tryAutoSettleOnIssue(prisma, {
+      tenantId: session.tenantId,
+      userId: session.sub,
+      legalEntityId: invoice.legalEntityId ?? session.legalEntityId,
+      invoiceId: updated.id,
+      seriesId: invoice.seriesId,
+      autoSettleOnIssue: invoice.series?.autoSettleOnIssue,
+    });
+
+    if (autoSettle.settled) {
+      await writeAuditEvent({
+        tenantId: session.tenantId,
+        userId: session.sub,
+        action: "invoice.autoSettle",
+        entity: "invoice",
+        entityId: updated.id,
+        meta: {
+          settlementId: autoSettle.settlementId,
+          settlementNumber: autoSettle.settlementNumber,
+          paymentMethodCode: autoSettle.paymentMethodCode,
         },
-        warning: after.failed.message,
-        script: after.failed.scriptCode,
       });
     }
+
+    const refreshed = await prisma.invoice.findFirst({
+      where: { id: updated.id },
+      select: { status: true, paidAmount: true },
+    });
+
+    const warnings = [
+      after.failed?.message,
+      autoSettle.warning,
+    ].filter(Boolean) as string[];
 
     return NextResponse.json({
       item: {
         id: updated.id,
-        status: updated.status,
+        status: refreshed?.status ?? updated.status,
+        paidAmount: refreshed ? toNumber(refreshed.paidAmount) : 0,
         journalId,
         cogsJournalId,
         stock: stockMeta,
         myDataId,
         print,
+        autoSettle: autoSettle.settled
+          ? {
+              settlementId: autoSettle.settlementId,
+              settlementNumber: autoSettle.settlementNumber,
+              paymentMethodCode: autoSettle.paymentMethodCode,
+            }
+          : null,
       },
+      ...(warnings.length
+        ? { warning: warnings.join(" · ") }
+        : {}),
+      ...(after.failed ? { script: after.failed.scriptCode } : {}),
     });
   } catch (error) {
     return NextResponse.json(

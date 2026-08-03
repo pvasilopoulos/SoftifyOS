@@ -540,6 +540,52 @@ export async function POST(request: Request) {
       })),
     };
 
+    let autoSettleWarning: string | undefined;
+    let autoSettleMeta: {
+      settlementId?: string;
+      settlementNumber?: string;
+      paymentMethodCode?: string;
+    } | null = null;
+
+    if (status === "ISSUED" && series) {
+      const { tryAutoSettleOnIssue } = await import(
+        "@/modules/settlements/service"
+      );
+      const autoSettle = await tryAutoSettleOnIssue(prisma, {
+        tenantId: session.tenantId,
+        userId: session.sub,
+        legalEntityId,
+        invoiceId: invoice.id,
+        seriesId: series.id,
+        autoSettleOnIssue: series.autoSettleOnIssue,
+      });
+      if (autoSettle.settled) {
+        autoSettleMeta = {
+          settlementId: autoSettle.settlementId,
+          settlementNumber: autoSettle.settlementNumber,
+          paymentMethodCode: autoSettle.paymentMethodCode,
+        };
+        await writeAuditEvent({
+          tenantId: session.tenantId,
+          userId: session.sub,
+          action: "invoice.autoSettle",
+          entity: "invoice",
+          entityId: invoice.id,
+          meta: autoSettleMeta,
+        });
+        const refreshed = await prisma.invoice.findFirst({
+          where: { id: invoice.id },
+          select: { status: true, paidAmount: true },
+        });
+        if (refreshed) {
+          item.status = refreshed.status;
+          item.paidAmount = toNumber(refreshed.paidAmount);
+        }
+      } else if (autoSettle.warning) {
+        autoSettleWarning = autoSettle.warning;
+      }
+    }
+
     const after = await dispatchScriptEvent(prisma, {
       tenantId: session.tenantId,
       module: "INVOICES",
@@ -548,7 +594,7 @@ export async function POST(request: Request) {
         id: invoice.id,
         number: invoice.number,
         kind: invoice.kind,
-        status: invoice.status,
+        status: item.status,
         customerId: invoice.customerId,
         total: item.total,
         notes: invoice.notes,
@@ -556,18 +602,18 @@ export async function POST(request: Request) {
       user: scriptActorFromSession(session),
     });
 
-    if (after.failed) {
-      return NextResponse.json(
-        {
-          item,
-          warning: after.failed.message,
-          script: after.failed.scriptCode,
-        },
-        { status: 201 },
-      );
-    }
+    const warnings = [after.failed?.message, autoSettleWarning].filter(
+      Boolean,
+    ) as string[];
 
-    return NextResponse.json({ item }, { status: 201 });
+    return NextResponse.json(
+      {
+        item: { ...item, autoSettle: autoSettleMeta },
+        ...(warnings.length ? { warning: warnings.join(" · ") } : {}),
+        ...(after.failed ? { script: after.failed.scriptCode } : {}),
+      },
+      { status: 201 },
+    );
   } catch (error) {
     if (isCompanyScopeError(error)) {
       return NextResponse.json({ error: error.message }, { status: error.status });
