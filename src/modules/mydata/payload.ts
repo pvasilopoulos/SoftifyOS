@@ -4,7 +4,7 @@ import { escapeXml } from "./client";
 type Db = PrismaClient | Prisma.TransactionClient;
 
 /** AADE keeps the typo "Classificaton" in official XSD namespaces. */
-const NS_INVOICE = "https://www.aade.gr/myDATA/invoice/v1.0";
+const NS_INVOICE = "http://www.aade.gr/myDATA/invoice/v1.0";
 const NS_INCOME = "https://www.aade.gr/myDATA/incomeClassificaton/v1.0";
 const NS_EXPENSES = "https://www.aade.gr/myDATA/expensesClassificaton/v1.0";
 
@@ -286,7 +286,6 @@ ${invoicesDocOpen()}
       <branch>0</branch>
     </issuer>
     ${counterpart}
-    ${paymentsXml}
     <invoiceHeader>
       <series>${escapeXml(seriesCode)}</series>
       <aa>${aa}</aa>
@@ -310,6 +309,7 @@ ${invoicesDocOpen()}
         amount: net,
       })}
     </invoiceSummary>
+    ${paymentsXml}
   </invoice>
 </InvoicesDoc>`;
 }
