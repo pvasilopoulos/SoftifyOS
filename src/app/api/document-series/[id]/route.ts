@@ -176,8 +176,12 @@ export async function PATCH(
           ...(body.requireExternalRef !== undefined
             ? { requireExternalRef: body.requireExternalRef }
             : {}),
-          ...(body.settlementClearingMode !== undefined
-            ? { settlementClearingMode: body.settlementClearingMode }
+          ...(body.cardClearingPolicy !== undefined ||
+          body.settlementClearingMode !== undefined
+            ? {
+                cardClearingPolicy:
+                  body.cardClearingPolicy ?? body.settlementClearingMode,
+              }
             : {}),
           ...(body.settlementValueDateMode !== undefined
             ? { settlementValueDateMode: body.settlementValueDateMode }

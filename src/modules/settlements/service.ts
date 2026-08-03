@@ -16,6 +16,13 @@ import type {
   CreatePaymentSettlementInput,
   CreateReceiptSettlementInput,
 } from "./schemas";
+import {
+  parseSettlementPolicy,
+  policyAllowsAuto,
+  policyAllowsManual,
+  policyForbidden,
+  type SettlementPolicy,
+} from "./policy";
 
 type Db = PrismaClient | Prisma.TransactionClient;
 
@@ -84,25 +91,25 @@ type ResolvedMethod = {
 };
 
 type SeriesSettlementPolicy = {
-  allowPartialSettlement: boolean;
-  allowOverpayment: boolean;
+  allowPartialSettlement: SettlementPolicy;
+  allowOverpayment: SettlementPolicy;
   allowMultiTender: boolean;
   maxTenderLines: number;
   allowMultiDocumentSettlement: boolean;
   allowCreditNoteOffset: boolean;
-  allowOnAccount: boolean;
-  allowWriteOff: boolean;
+  allowOnAccount: SettlementPolicy;
+  allowWriteOff: SettlementPolicy;
   writeOffMaxAmount: number;
   settlementTolerance: number;
   allowCashChange: boolean;
   allowGiftCardTender: boolean;
   allowLoyaltyTender: boolean;
   requireExternalRef: boolean;
-  settlementClearingMode: string;
+  cardClearingPolicy: SettlementPolicy;
   settlementValueDateMode: string;
-  autoPostSettlementJournal: boolean;
-  allowVoidSettlement: boolean;
-  allowBankMatch: boolean;
+  autoPostSettlementJournal: SettlementPolicy;
+  allowVoidSettlement: SettlementPolicy;
+  allowBankMatch: SettlementPolicy;
   glDebitAccount: string | null;
   id: string;
 };
@@ -124,7 +131,7 @@ const SERIES_SETTLEMENT_SELECT = {
   allowGiftCardTender: true,
   allowLoyaltyTender: true,
   requireExternalRef: true,
-  settlementClearingMode: true,
+  cardClearingPolicy: true,
   settlementValueDateMode: true,
   autoPostSettlementJournal: true,
   allowVoidSettlement: true,
@@ -135,49 +142,65 @@ function policyFromSeries(
   series: {
     id: string;
     glDebitAccount: string | null;
-    allowPartialSettlement: boolean;
-    allowOverpayment?: boolean;
+    allowPartialSettlement?: SettlementPolicy | boolean | null;
+    allowOverpayment?: SettlementPolicy | boolean | null;
     allowMultiTender: boolean;
     maxTenderLines?: number;
     allowMultiDocumentSettlement: boolean;
     allowCreditNoteOffset?: boolean;
-    allowOnAccount: boolean;
-    allowWriteOff?: boolean;
+    allowOnAccount?: SettlementPolicy | boolean | null;
+    allowWriteOff?: SettlementPolicy | boolean | null;
     writeOffMaxAmount?: unknown;
     settlementTolerance?: unknown;
     allowCashChange?: boolean;
     allowGiftCardTender?: boolean;
     allowLoyaltyTender?: boolean;
     requireExternalRef?: boolean;
-    settlementClearingMode: string;
+    cardClearingPolicy?: SettlementPolicy | string | null;
+    settlementClearingMode?: string | null;
     settlementValueDateMode?: string;
-    autoPostSettlementJournal?: boolean;
-    allowVoidSettlement?: boolean;
-    allowBankMatch?: boolean;
+    autoPostSettlementJournal?: SettlementPolicy | boolean | null;
+    allowVoidSettlement?: SettlementPolicy | boolean | null;
+    allowBankMatch?: SettlementPolicy | boolean | null;
   } | null,
 ): SeriesSettlementPolicy {
+  const clearingRaw =
+    series?.cardClearingPolicy ?? series?.settlementClearingMode ?? "NO";
   return {
     id: series?.id ?? "",
     glDebitAccount: series?.glDebitAccount ?? null,
-    allowPartialSettlement: series?.allowPartialSettlement ?? true,
-    allowOverpayment: series?.allowOverpayment ?? false,
+    allowPartialSettlement: parseSettlementPolicy(
+      series?.allowPartialSettlement,
+      "YES",
+    ),
+    allowOverpayment: parseSettlementPolicy(series?.allowOverpayment, "NO"),
     allowMultiTender: series?.allowMultiTender ?? true,
     maxTenderLines: series?.maxTenderLines ?? 10,
     allowMultiDocumentSettlement: series?.allowMultiDocumentSettlement ?? false,
     allowCreditNoteOffset: series?.allowCreditNoteOffset ?? true,
-    allowOnAccount: series?.allowOnAccount ?? false,
-    allowWriteOff: series?.allowWriteOff ?? false,
+    allowOnAccount: parseSettlementPolicy(series?.allowOnAccount, "NO"),
+    allowWriteOff: parseSettlementPolicy(series?.allowWriteOff, "NO"),
     writeOffMaxAmount: toNumber(series?.writeOffMaxAmount ?? 0),
     settlementTolerance: toNumber(series?.settlementTolerance ?? 0.01),
     allowCashChange: series?.allowCashChange ?? true,
     allowGiftCardTender: series?.allowGiftCardTender ?? true,
     allowLoyaltyTender: series?.allowLoyaltyTender ?? true,
     requireExternalRef: series?.requireExternalRef ?? false,
-    settlementClearingMode: series?.settlementClearingMode ?? "IMMEDIATE",
+    cardClearingPolicy: parseSettlementPolicy(clearingRaw, "NO"),
     settlementValueDateMode: series?.settlementValueDateMode ?? "PAYMENT_DATE",
-    autoPostSettlementJournal: series?.autoPostSettlementJournal ?? true,
-    allowVoidSettlement: series?.allowVoidSettlement ?? true,
-    allowBankMatch: series?.allowBankMatch ?? true,
+    autoPostSettlementJournal: parseSettlementPolicy(
+      series?.autoPostSettlementJournal === true
+        ? "AUTO"
+        : series?.autoPostSettlementJournal === false
+          ? "NO"
+          : series?.autoPostSettlementJournal,
+      "AUTO",
+    ),
+    allowVoidSettlement: parseSettlementPolicy(
+      series?.allowVoidSettlement,
+      "YES",
+    ),
+    allowBankMatch: parseSettlementPolicy(series?.allowBankMatch, "YES"),
   };
 }
 
@@ -260,10 +283,12 @@ async function resolveMethods(
         400,
       );
     }
-    const useClearing =
-      input.policy.settlementClearingMode === "CLEARING" &&
+    // AUTO: clearing όταν υπάρχει glClearingAccount · YES: ίδιο για κάρτες · NO/NONE: άμεση
+    const applyClearing =
+      policyAllowsManual(input.policy.cardClearingPolicy) &&
       Boolean(pm?.glClearingAccount) &&
-      (pm?.kind === "CARD" || Boolean(pm?.glClearingAccount));
+      (policyAllowsAuto(input.policy.cardClearingPolicy) ||
+        pm?.kind === "CARD");
     resolved.push({
       paymentMethodId: method.id,
       methodCode: method.code,
@@ -274,7 +299,7 @@ async function resolveMethods(
       loyaltyAccountId: m.loyaltyAccountId ?? null,
       glCashCode: pm?.glAccount || "38.00.00",
       glClearingCode: pm?.glClearingAccount ?? null,
-      usesClearing: useClearing,
+      usesClearing: applyClearing,
     });
   }
   return resolved;
@@ -474,7 +499,7 @@ export async function createReceiptSettlement(
 
   for (const a of allocations) {
     if (a.targetType === "ON_ACCOUNT" || !a.invoiceId) {
-      if (!policy.allowOnAccount) {
+      if (policyForbidden(policy.allowOnAccount)) {
         throw new SettlementError(
           "Η σειρά δεν επιτρέπει πίστωση σε λογαριασμό πελάτη",
           400,
@@ -485,7 +510,10 @@ export async function createReceiptSettlement(
     const inv = invoices.find((i) => i.id === a.invoiceId)!;
     const balance = round2(toNumber(inv.total) - toNumber(inv.paidAmount));
     if (a.amount > balance + tol) {
-      if (!policy.allowOverpayment && !policy.allowOnAccount) {
+      const overpayOk =
+        policyAllowsManual(policy.allowOverpayment) ||
+        policyAllowsManual(policy.allowOnAccount);
+      if (!overpayOk) {
         throw new SettlementError(
           `Ποσό υπερβαίνει υπόλοιπο ${inv.number} (${balance.toFixed(2)})`,
           400,
@@ -493,13 +521,11 @@ export async function createReceiptSettlement(
       }
     }
     const shortfall = round2(balance - a.amount);
-    if (shortfall > tol && !policy.allowPartialSettlement) {
-      if (
-        !(
-          policy.allowWriteOff &&
-          shortfall <= policy.writeOffMaxAmount + 0.0001
-        )
-      ) {
+    if (shortfall > tol && policyForbidden(policy.allowPartialSettlement)) {
+      const writeOffOk =
+        policyAllowsManual(policy.allowWriteOff) &&
+        shortfall <= policy.writeOffMaxAmount + 0.0001;
+      if (!writeOffOk) {
         throw new SettlementError("Η σειρά απαιτεί ολική εξόφληση", 400);
       }
     }
@@ -627,7 +653,8 @@ export async function createReceiptSettlement(
 
   let journalId: string | null = null;
   try {
-    if (!policy.autoPostSettlementJournal) {
+    // AUTO posts immediately; YES leaves journal optional (no auto); NO/NONE skip
+    if (!policyAllowsAuto(policy.autoPostSettlementJournal)) {
       return { settlement, journalId: null };
     }
     const journal = await postSettlementJournal(db, {
@@ -952,7 +979,11 @@ export async function voidSettlement(
           series: { select: { allowVoidSettlement: true } },
         },
       });
-      if (inv?.series && inv.series.allowVoidSettlement === false) {
+      const voidPolicy = parseSettlementPolicy(
+        inv?.series?.allowVoidSettlement,
+        "YES",
+      );
+      if (policyForbidden(voidPolicy)) {
         throw new SettlementError(
           "Η σειρά δεν επιτρέπει ακύρωση εξόφλησης",
           400,
@@ -1408,7 +1439,8 @@ export async function finalizePosCheckoutAccounting(
           glDebitAccount: true,
           glCreditAccount: true,
           glVatAccount: true,
-          settlementClearingMode: true,
+          cardClearingPolicy: true,
+          autoPostSettlementJournal: true,
         },
       },
       payments: {
@@ -1448,13 +1480,16 @@ export async function finalizePosCheckoutAccounting(
     };
   }
 
-  const clearingMode = invoice.series?.settlementClearingMode ?? "IMMEDIATE";
+  const clearingPolicy = parseSettlementPolicy(
+    invoice.series?.cardClearingPolicy,
+    "NO",
+  );
   const resolvedMethods: ResolvedMethod[] = invoice.payments.map((p) => {
     const pm = p.paymentMethod;
     const useClearing =
-      clearingMode === "CLEARING" &&
+      policyAllowsManual(clearingPolicy) &&
       Boolean(pm?.glClearingAccount) &&
-      (pm?.kind === "CARD" || Boolean(pm?.glClearingAccount));
+      (policyAllowsAuto(clearingPolicy) || pm?.kind === "CARD");
     return {
       paymentMethodId: p.paymentMethodId,
       methodCode: p.method,

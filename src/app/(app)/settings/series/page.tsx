@@ -129,8 +129,7 @@ export default async function SeriesSettingsPage() {
           allowGiftCardTender: s.allowGiftCardTender,
           allowLoyaltyTender: s.allowLoyaltyTender,
           requireExternalRef: s.requireExternalRef,
-          settlementClearingMode:
-            s.settlementClearingMode === "CLEARING" ? "CLEARING" : "IMMEDIATE",
+          cardClearingPolicy: s.cardClearingPolicy,
           settlementValueDateMode:
             s.settlementValueDateMode === "DOCUMENT_DATE"
               ? "DOCUMENT_DATE"

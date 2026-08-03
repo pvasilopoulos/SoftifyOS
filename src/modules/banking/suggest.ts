@@ -87,7 +87,13 @@ export async function suggestBankMatches(
       },
     });
     for (const inv of invoices) {
-      if (inv.series && inv.series.allowBankMatch === false) continue;
+      if (
+        inv.series &&
+        (inv.series.allowBankMatch === "NO" ||
+          inv.series.allowBankMatch === "NONE")
+      ) {
+        continue;
+      }
       const balance = Math.max(
         0,
         toNumber(inv.total) - toNumber(inv.paidAmount),
@@ -100,14 +106,20 @@ export async function suggestBankMatches(
         needle,
       });
       if (score < 20) continue;
+      // AUTO bank-match series get a small boost in suggestions
+      const autoBoost =
+        inv.series?.allowBankMatch === "AUTO" ? 8 : 0;
       suggestions.push({
         kind: "AR",
         id: inv.id,
         number: inv.number,
         party: inv.customer.name,
         balance,
-        score,
-        reason,
+        score: score + autoBoost,
+        reason:
+          autoBoost > 0
+            ? `${reason}${reason ? " · " : ""}σειρά AUTO`
+            : reason,
       });
     }
   } else if (input.amount < 0) {

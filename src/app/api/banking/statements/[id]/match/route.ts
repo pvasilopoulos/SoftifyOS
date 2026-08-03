@@ -192,7 +192,11 @@ export async function POST(
     if (!invoice) {
       return NextResponse.json({ error: "Τιμολόγιο δεν βρέθηκε" }, { status: 404 });
     }
-    if (invoice.series && invoice.series.allowBankMatch === false) {
+    const bankPolicy = invoice.series?.allowBankMatch ?? "YES";
+    if (
+      invoice.series &&
+      (bankPolicy === "NO" || bankPolicy === "NONE")
+    ) {
       return NextResponse.json(
         { error: "Η σειρά δεν επιτρέπει συμψηφισμό τραπεζικής κίνησης" },
         { status: 400 },

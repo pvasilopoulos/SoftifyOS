@@ -2171,9 +2171,9 @@ model DocumentSeries {
   glCreditAccount      String?
   glVatAccount         String?
   /// Εξοφλήσεις: επιτρέπει ποσό < υπόλοιπο παραστατικού
-  allowPartialSettlement Boolean         @default(true)
+  allowPartialSettlement SettlementPolicy @default(YES)
   /// Ποσοστό/ποσό άνω του υπολοίπου (υπερπληρωμή)
-  allowOverpayment     Boolean           @default(false)
+  allowOverpayment     SettlementPolicy @default(NO)
   /// Πολλαπλοί τρόποι πληρωμής στην ίδια εξόφληση
   allowMultiTender     Boolean           @default(true)
   /// Μέγιστος αριθμός τρόπων σε μία εξόφληση
@@ -2183,9 +2183,9 @@ model DocumentSeries {
   /// Συμψηφισμός πιστωτικών στην ίδια εξόφληση
   allowCreditNoteOffset Boolean          @default(true)
   /// Προκαταβολή / υπόλοιπο υπέρ πελάτη (on-account)
-  allowOnAccount       Boolean           @default(false)
+  allowOnAccount       SettlementPolicy  @default(NO)
   /// Διαγραφή μικροϋπολοίπου (write-off)
-  allowWriteOff        Boolean           @default(false)
+  allowWriteOff        SettlementPolicy  @default(NO)
   /// Μέγιστο ποσό write-off (€)
   writeOffMaxAmount    Decimal           @default(0) @db.Decimal(14, 2)
   /// Ανοχή στρογγυλοποίησης (€) μεταξύ τρόπων και κατανομών
@@ -2198,16 +2198,16 @@ model DocumentSeries {
   allowLoyaltyTender   Boolean           @default(true)
   /// Υποχρεωτικό externalRef / auth code σε κάθε τρόπο
   requireExternalRef   Boolean           @default(false)
-  /// IMMEDIATE | CLEARING (κάρτα μέσω glClearingAccount)
-  settlementClearingMode String          @default("IMMEDIATE")
+  /// NONE/NO=άμεση · YES/AUTO=εκκαθάριση όταν ο τρόπος έχει glClearingAccount
+  cardClearingPolicy   SettlementPolicy  @default(NO)
   /// PAYMENT_DATE | DOCUMENT_DATE — ημερομηνία αξίας εξόφλησης
   settlementValueDateMode String         @default("PAYMENT_DATE")
-  /// Αυτόματο λογιστικό άρθρο εξόφλησης
-  autoPostSettlementJournal Boolean      @default(true)
+  /// Αυτόματο λογιστικό άρθρο εξόφλησης (AUTO=post, YES=επιτρέπεται χειροκίνητα, NO/NONE=χωρίς)
+  autoPostSettlementJournal SettlementPolicy @default(AUTO)
   /// Επιτρέπει ακύρωση (void) εξόφλησης
-  allowVoidSettlement  Boolean           @default(true)
+  allowVoidSettlement  SettlementPolicy  @default(YES)
   /// Επιτρέπει bank statement match σε παραστατικά της σειράς
-  allowBankMatch       Boolean           @default(true)
+  allowBankMatch       SettlementPolicy  @default(YES)
   isDefault            Boolean           @default(false)
   isActive             Boolean           @default(true)
   createdAt            DateTime          @default(now())
@@ -2248,6 +2248,17 @@ model DocumentSeriesPaymentMethod {
   @@index([tenantId, seriesId])
   @@index([tenantId, paymentMethodId])
   @@map("document_series_payment_methods")
+}
+
+enum SettlementPolicy {
+  /// Δεν εφαρμόζεται στη σειρά (κρύβει UI / skip)
+  NONE
+  /// Απαγορεύεται ρητά
+  NO
+  /// Επιτρέπεται χειροκίνητα
+  YES
+  /// Το σύστημα το εφαρμόζει αυτόματα όταν πληρούνται προϋποθέσεις
+  AUTO
 }
 
 enum SettlementKind {

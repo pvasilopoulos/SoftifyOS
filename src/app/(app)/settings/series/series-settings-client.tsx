@@ -15,7 +15,13 @@ import {
   inventoryEffectLabel,
 } from "@/modules/documents/series";
 import { MYDATA_INVOICE_TYPES } from "@/modules/documents/schemas";
+import {
+  SETTLEMENT_POLICY_LABELS,
+  SETTLEMENT_POLICY_VALUES,
+  type SettlementPolicy,
+} from "@/modules/settlements/policy";
 
+type SettlementPolicyValue = SettlementPolicy;
 type Kind = keyof typeof documentKindLabel;
 type KindGroup = keyof typeof documentKindGroupLabel;
 
@@ -72,25 +78,25 @@ type Series = {
   glDebitAccount: string | null;
   glCreditAccount: string | null;
   glVatAccount: string | null;
-  allowPartialSettlement: boolean;
-  allowOverpayment: boolean;
+  allowPartialSettlement: SettlementPolicyValue;
+  allowOverpayment: SettlementPolicyValue;
   allowMultiTender: boolean;
   maxTenderLines: number;
   allowMultiDocumentSettlement: boolean;
   allowCreditNoteOffset: boolean;
-  allowOnAccount: boolean;
-  allowWriteOff: boolean;
+  allowOnAccount: SettlementPolicyValue;
+  allowWriteOff: SettlementPolicyValue;
   writeOffMaxAmount: number;
   settlementTolerance: number;
   allowCashChange: boolean;
   allowGiftCardTender: boolean;
   allowLoyaltyTender: boolean;
   requireExternalRef: boolean;
-  settlementClearingMode: "IMMEDIATE" | "CLEARING";
+  cardClearingPolicy: SettlementPolicyValue;
   settlementValueDateMode: "PAYMENT_DATE" | "DOCUMENT_DATE";
-  autoPostSettlementJournal: boolean;
-  allowVoidSettlement: boolean;
-  allowBankMatch: boolean;
+  autoPostSettlementJournal: SettlementPolicyValue;
+  allowVoidSettlement: SettlementPolicyValue;
+  allowBankMatch: SettlementPolicyValue;
   isDefault: boolean;
   isActive: boolean;
   allowedPaymentMethodIds: string[];
@@ -138,34 +144,34 @@ function payloadFromForm(
     glDebitAccount: String(form.get("glDebitAccount") || "") || null,
     glCreditAccount: String(form.get("glCreditAccount") || "") || null,
     glVatAccount: String(form.get("glVatAccount") || "") || null,
-    allowPartialSettlement: form.get("allowPartialSettlement") === "on",
-    allowOverpayment: form.get("allowOverpayment") === "on",
+    allowPartialSettlement: String(
+      form.get("allowPartialSettlement") || "YES",
+    ),
+    allowOverpayment: String(form.get("allowOverpayment") || "NO"),
     allowMultiTender: form.get("allowMultiTender") === "on",
     maxTenderLines: Number(form.get("maxTenderLines") || 10),
     allowMultiDocumentSettlement:
       form.get("allowMultiDocumentSettlement") === "on",
     allowCreditNoteOffset: form.get("allowCreditNoteOffset") === "on",
-    allowOnAccount: form.get("allowOnAccount") === "on",
-    allowWriteOff: form.get("allowWriteOff") === "on",
+    allowOnAccount: String(form.get("allowOnAccount") || "NO"),
+    allowWriteOff: String(form.get("allowWriteOff") || "NO"),
     writeOffMaxAmount: Number(form.get("writeOffMaxAmount") || 0),
     settlementTolerance: Number(form.get("settlementTolerance") || 0.01),
     allowCashChange: form.get("allowCashChange") === "on",
     allowGiftCardTender: form.get("allowGiftCardTender") === "on",
     allowLoyaltyTender: form.get("allowLoyaltyTender") === "on",
     requireExternalRef: form.get("requireExternalRef") === "on",
-    settlementClearingMode:
-      String(form.get("settlementClearingMode") || "IMMEDIATE") === "CLEARING"
-        ? "CLEARING"
-        : "IMMEDIATE",
+    cardClearingPolicy: String(form.get("cardClearingPolicy") || "NO"),
     settlementValueDateMode:
       String(form.get("settlementValueDateMode") || "PAYMENT_DATE") ===
       "DOCUMENT_DATE"
         ? "DOCUMENT_DATE"
         : "PAYMENT_DATE",
-    autoPostSettlementJournal:
-      form.get("autoPostSettlementJournal") === "on",
-    allowVoidSettlement: form.get("allowVoidSettlement") === "on",
-    allowBankMatch: form.get("allowBankMatch") === "on",
+    autoPostSettlementJournal: String(
+      form.get("autoPostSettlementJournal") || "AUTO",
+    ),
+    allowVoidSettlement: String(form.get("allowVoidSettlement") || "YES"),
+    allowBankMatch: String(form.get("allowBankMatch") || "YES"),
     isDefault: form.get("isDefault") === "on",
     isActive: form.get("isActive") === "on",
     allowedPaymentMethodIds: payments.allowedPaymentMethodIds,
@@ -454,10 +460,16 @@ export function SeriesSettingsClient({
                         : s.paymentMethods.map((p) => p.code).join(", ")}
                       <span className="mx-1.5">·</span>
                       {[
-                        s.allowPartialSettlement ? "μερική" : "μόνο ολική",
+                        s.allowPartialSettlement === "YES" ||
+                        s.allowPartialSettlement === "AUTO"
+                          ? s.allowPartialSettlement === "AUTO"
+                            ? "μερική·auto"
+                            : "μερική"
+                          : "μόνο ολική",
                         s.allowMultiTender ? "multi-tender" : null,
                         s.allowMultiDocumentSettlement ? "πολλαπλά παρ." : null,
-                        s.settlementClearingMode === "CLEARING"
+                        s.cardClearingPolicy === "AUTO" ||
+                        s.cardClearingPolicy === "YES"
                           ? "εκκαθάριση καρτών"
                           : "άμεση κάρτα",
                       ]
@@ -1144,35 +1156,37 @@ function SeriesDrawer({
 
             <Section title="Κανόνες εξόφλησης">
               <p className="rounded-xl border border-slate-100 bg-slate-50 px-3 py-2 text-xs leading-relaxed text-slate-600">
-                Ορίζουν τι επιτρέπεται όταν εισπράττεις ή εξοφλείς παραστατικά
-                αυτής της σειράς (ποσά, τρόποι, σύνθετες εξοφλήσεις, κάρτες,
-                λογιστική).
+                Τετραδική πολιτική ανά κανόνα:{" "}
+                <strong>Καθόλου</strong> (εκτός scope), <strong>Όχι</strong>{" "}
+                (απαγόρευση), <strong>Ναι</strong> (χειροκίνητα),{" "}
+                <strong>Αυτόματα</strong> (το σύστημα όταν πληρούνται οι
+                προϋποθέσεις).
               </p>
 
               <PolicyGroup title="Ποσά & κατανομή">
-                <Option
+                <PolicySelect
                   name="allowPartialSettlement"
                   label="Μερική εξόφληση"
-                  hint="Επιτρέπει είσπραξη μικρότερη από το ανοιχτό υπόλοιπο."
-                  defaultChecked={initial?.allowPartialSettlement ?? true}
+                  hint="Καθόλου/Όχι = μόνο ολική · Ναι = χειροκίνητα · Αυτόματα = επιτρέπεται και στο pipeline."
+                  defaultValue={initial?.allowPartialSettlement ?? "YES"}
                 />
-                <Option
+                <PolicySelect
                   name="allowOverpayment"
                   label="Υπερπληρωμή"
-                  hint="Ποσό μεγαλύτερο από το υπόλοιπο του παραστατικού."
-                  defaultChecked={initial?.allowOverpayment ?? false}
+                  hint="Ποσό > υπόλοιπο παραστατικού."
+                  defaultValue={initial?.allowOverpayment ?? "NO"}
                 />
-                <Option
+                <PolicySelect
                   name="allowOnAccount"
                   label="Πίστωση σε λογαριασμό πελάτη"
-                  hint="Το περίσσευμα (ή είσπραξη χωρίς παραστατικό) μένει ως προκαταβολή / on-account."
-                  defaultChecked={initial?.allowOnAccount ?? false}
+                  hint="Περίσσευμα / είσπραξη χωρίς παραστατικό ως προκαταβολή."
+                  defaultValue={initial?.allowOnAccount ?? "NO"}
                 />
-                <Option
+                <PolicySelect
                   name="allowWriteOff"
                   label="Διαγραφή μικροϋπολοίπου"
-                  hint="Κλείνει μικρή διαφορά υπόλοιπου ως έξοδο/έσοδο write-off."
-                  defaultChecked={initial?.allowWriteOff ?? false}
+                  hint="Αυτόματα: κλείνει shortfall ≤ μέγ. write-off χωρίς μερική πολιτική."
+                  defaultValue={initial?.allowWriteOff ?? "NO"}
                 />
                 <div className="grid gap-2 sm:grid-cols-2">
                   <label className="block text-sm">
@@ -1269,30 +1283,12 @@ function SeriesDrawer({
               </PolicyGroup>
 
               <PolicyGroup title="Κάρτες, ημερομηνία & λογιστική">
-                <label className="block text-sm">
-                  <span className="mb-1 block text-xs font-medium text-slate-600">
-                    Εκκαθάριση καρτών / POS
-                  </span>
-                  <select
-                    name="settlementClearingMode"
-                    defaultValue={
-                      initial?.settlementClearingMode ?? "IMMEDIATE"
-                    }
-                    className="h-10 w-full rounded-xl border border-slate-200 px-3 text-sm"
-                  >
-                    <option value="IMMEDIATE">
-                      Άμεση — χρέωση ταμείου/τράπεζας αμέσως
-                    </option>
-                    <option value="CLEARING">
-                      Διβάθμια — μέσω λογαριασμού εκκαθάρισης (33.90.xx) και
-                      μετά τράπεζα
-                    </option>
-                  </select>
-                  <span className="mt-1 block text-[11px] text-slate-500">
-                    Στη διβάθμια, το Finance → Εξοφλήσεις δείχνει τις εκκρεμείς
-                    κάρτες για βήμα 2.
-                  </span>
-                </label>
+                <PolicySelect
+                  name="cardClearingPolicy"
+                  label="Εκκαθάριση καρτών / POS"
+                  hint="Αυτόματα/Ναι: μέσω glClearingAccount όταν υπάρχει · Όχι/Καθόλου: άμεση χρέωση ταμείου/τράπεζας."
+                  defaultValue={initial?.cardClearingPolicy ?? "NO"}
+                />
                 <label className="block text-sm">
                   <span className="mb-1 block text-xs font-medium text-slate-600">
                     Ημερομηνία αξίας εξόφλησης
@@ -1312,23 +1308,23 @@ function SeriesDrawer({
                     </option>
                   </select>
                 </label>
-                <Option
+                <PolicySelect
                   name="autoPostSettlementJournal"
-                  label="Αυτόματο λογιστικό άρθρο"
-                  hint="Δημιουργεί άρθρο GL με κάθε εξόφληση (ταμείο/εκκαθάριση ↔ πελάτες)."
-                  defaultChecked={initial?.autoPostSettlementJournal ?? true}
+                  label="Λογιστικό άρθρο εξόφλησης"
+                  hint="Αυτόματα = post στο collect · Ναι = επιτρέπεται χωρίς auto · Όχι/Καθόλου = χωρίς GL."
+                  defaultValue={initial?.autoPostSettlementJournal ?? "AUTO"}
                 />
-                <Option
+                <PolicySelect
                   name="allowVoidSettlement"
                   label="Ακύρωση εξόφλησης"
-                  hint="Επιτρέπει void με αντιστροφή άρθρου και επαναφορά υπολοίπων."
-                  defaultChecked={initial?.allowVoidSettlement ?? true}
+                  hint="Void με αντιστροφή άρθρου και επαναφορά υπολοίπων."
+                  defaultValue={initial?.allowVoidSettlement ?? "YES"}
                 />
-                <Option
+                <PolicySelect
                   name="allowBankMatch"
                   label="Συμψηφισμός τραπεζικής κίνησης"
-                  hint="Bank matching μπορεί να δημιουργήσει είσπραξη σε τιμολόγια της σειράς."
-                  defaultChecked={initial?.allowBankMatch ?? true}
+                  hint="Ναι/Αυτόματα = match & suggest · Όχι/Καθόλου = αποκλεισμός σειράς."
+                  defaultValue={initial?.allowBankMatch ?? "YES"}
                 />
               </PolicyGroup>
             </Section>
@@ -1404,6 +1400,42 @@ function PolicyGroup({
       </p>
       <div className="flex flex-col gap-2.5 text-sm">{children}</div>
     </div>
+  );
+}
+
+function PolicySelect({
+  name,
+  label,
+  hint,
+  defaultValue,
+}: {
+  name: string;
+  label: string;
+  hint?: string;
+  defaultValue?: SettlementPolicyValue;
+}) {
+  return (
+    <label className="block text-sm">
+      <span className="mb-1 block text-xs font-medium text-slate-700">
+        {label}
+      </span>
+      <select
+        name={name}
+        defaultValue={defaultValue ?? "NO"}
+        className="h-10 w-full rounded-xl border border-slate-200 px-3 text-sm"
+      >
+        {SETTLEMENT_POLICY_VALUES.map((v) => (
+          <option key={v} value={v}>
+            {SETTLEMENT_POLICY_LABELS[v]}
+          </option>
+        ))}
+      </select>
+      {hint ? (
+        <span className="mt-1 block text-[11px] leading-snug text-slate-500">
+          {hint}
+        </span>
+      ) : null}
+    </label>
   );
 }
 

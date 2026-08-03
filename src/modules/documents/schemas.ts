@@ -1,4 +1,32 @@
 import { z } from "zod";
+import { SETTLEMENT_POLICY_VALUES } from "@/modules/settlements/policy";
+
+const settlementPolicyField = z
+  .union([z.enum(SETTLEMENT_POLICY_VALUES), z.boolean()])
+  .transform((v): (typeof SETTLEMENT_POLICY_VALUES)[number] => {
+    if (v === true) return "YES";
+    if (v === false) return "NO";
+    return v;
+  });
+
+const settlementJournalPolicyField = z
+  .union([z.enum(SETTLEMENT_POLICY_VALUES), z.boolean()])
+  .transform((v): (typeof SETTLEMENT_POLICY_VALUES)[number] => {
+    if (v === true) return "AUTO";
+    if (v === false) return "NO";
+    return v;
+  });
+
+const cardClearingPolicyField = z
+  .union([
+    z.enum(SETTLEMENT_POLICY_VALUES),
+    z.enum(["IMMEDIATE", "CLEARING"]),
+  ])
+  .transform((v): (typeof SETTLEMENT_POLICY_VALUES)[number] => {
+    if (v === "IMMEDIATE") return "NO";
+    if (v === "CLEARING") return "AUTO";
+    return v;
+  });
 
 export const DOCUMENT_KINDS = [
   "SALES_ORDER",
@@ -60,15 +88,15 @@ export const seriesCreateSchema = z.object({
   /** Empty / omitted = default form for document kind */
   allowedPrintFormIds: z.array(z.string().min(1)).max(50).optional(),
   defaultPrintFormId: z.string().min(1).nullable().optional(),
-  /** Settlement Engine (Φ2) — πλήρης πολιτική εξόφλησης ανά σειρά */
-  allowPartialSettlement: z.boolean().optional().default(true),
-  allowOverpayment: z.boolean().optional().default(false),
+  /** Settlement Engine — τετραδική πολιτική (NONE/NO/YES/AUTO) */
+  allowPartialSettlement: settlementPolicyField.optional().default("YES"),
+  allowOverpayment: settlementPolicyField.optional().default("NO"),
   allowMultiTender: z.boolean().optional().default(true),
   maxTenderLines: z.coerce.number().int().min(1).max(20).optional().default(10),
   allowMultiDocumentSettlement: z.boolean().optional().default(false),
   allowCreditNoteOffset: z.boolean().optional().default(true),
-  allowOnAccount: z.boolean().optional().default(false),
-  allowWriteOff: z.boolean().optional().default(false),
+  allowOnAccount: settlementPolicyField.optional().default("NO"),
+  allowWriteOff: settlementPolicyField.optional().default("NO"),
   writeOffMaxAmount: z.coerce
     .number()
     .min(0)
@@ -85,17 +113,18 @@ export const seriesCreateSchema = z.object({
   allowGiftCardTender: z.boolean().optional().default(true),
   allowLoyaltyTender: z.boolean().optional().default(true),
   requireExternalRef: z.boolean().optional().default(false),
-  settlementClearingMode: z
-    .enum(["IMMEDIATE", "CLEARING"])
-    .optional()
-    .default("IMMEDIATE"),
+  cardClearingPolicy: cardClearingPolicyField.optional().default("NO"),
+  /** @deprecated accept old payload key */
+  settlementClearingMode: cardClearingPolicyField.optional(),
   settlementValueDateMode: z
     .enum(["PAYMENT_DATE", "DOCUMENT_DATE"])
     .optional()
     .default("PAYMENT_DATE"),
-  autoPostSettlementJournal: z.boolean().optional().default(true),
-  allowVoidSettlement: z.boolean().optional().default(true),
-  allowBankMatch: z.boolean().optional().default(true),
+  autoPostSettlementJournal: settlementJournalPolicyField
+    .optional()
+    .default("AUTO"),
+  allowVoidSettlement: settlementPolicyField.optional().default("YES"),
+  allowBankMatch: settlementPolicyField.optional().default("YES"),
 });
 
 export const seriesUpdateSchema = seriesCreateSchema.partial();
