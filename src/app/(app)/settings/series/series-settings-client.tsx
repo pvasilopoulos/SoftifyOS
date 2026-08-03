@@ -20,6 +20,12 @@ import {
   SETTLEMENT_POLICY_VALUES,
   type SettlementPolicy,
 } from "@/modules/settlements/policy";
+import {
+  DEFAULT_PRINT_COPIES,
+  DEFAULT_PRINT_PRINTER,
+  PRINT_PRINTER_OPTIONS,
+  printPrinterLabel,
+} from "@/modules/print-forms/printers";
 
 type SettlementPolicyValue = SettlementPolicy;
 type Kind = keyof typeof documentKindLabel;
@@ -111,6 +117,8 @@ type Series = {
   }[];
   allowedPrintFormIds: string[];
   defaultPrintFormId: string | null;
+  printCopies: number;
+  printPrinter: string | null;
   printForms: {
     id: string;
     code: string;
@@ -178,6 +186,8 @@ function payloadFromForm(
     defaultPaymentMethodId: payments.defaultPaymentMethodId,
     allowedPrintFormIds: prints.allowedPrintFormIds,
     defaultPrintFormId: prints.defaultPrintFormId,
+    printCopies: Number(form.get("printCopies") || DEFAULT_PRINT_COPIES),
+    printPrinter: String(form.get("printPrinter") || DEFAULT_PRINT_PRINTER) || null,
   };
 }
 
@@ -497,6 +507,10 @@ export function SeriesSettingsClient({
                           {s.printForms.find((p) => p.isDefault)?.code ?? "—"}
                         </>
                       ) : null}
+                      <span className="mx-1.5">·</span>
+                      {s.printCopies ?? 1}×
+                      <span className="mx-1.5">·</span>
+                      {printPrinterLabel(s.printPrinter)}
                     </p>
                   </div>
                   <Button
@@ -1070,6 +1084,49 @@ function SeriesDrawer({
                 Επιλέξτε ποιες φόρμες Print Builder τρέχει αυτή η σειρά. Κενό =
                 προεπιλογή του τύπου παραστατικού.
               </p>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <label className="block text-sm">
+                  <span className="mb-1.5 block font-medium">Αντίτυπα</span>
+                  <input
+                    name="printCopies"
+                    type="number"
+                    min={1}
+                    max={9}
+                    defaultValue={initial?.printCopies ?? DEFAULT_PRINT_COPIES}
+                    className="h-11 w-full rounded-xl border border-slate-200 px-3"
+                  />
+                  <span className="mt-1 block text-[11px] text-slate-400">
+                    Πόσες φορές στέλνεται το job (1–9).
+                  </span>
+                </label>
+                <label className="block text-sm">
+                  <span className="mb-1.5 block font-medium">Εκτυπωτής</span>
+                  <select
+                    name="printPrinter"
+                    className="h-11 w-full rounded-xl border border-slate-200 px-3"
+                    defaultValue={
+                      initial?.printPrinter ?? DEFAULT_PRINT_PRINTER
+                    }
+                  >
+                    {PRINT_PRINTER_OPTIONS.map((p) => (
+                      <option key={p.code} value={p.code}>
+                        {p.label}
+                      </option>
+                    ))}
+                    {initial?.printPrinter &&
+                    !PRINT_PRINTER_OPTIONS.some(
+                      (p) => p.code === initial.printPrinter,
+                    ) ? (
+                      <option value={initial.printPrinter}>
+                        {printPrinterLabel(initial.printPrinter)}
+                      </option>
+                    ) : null}
+                  </select>
+                  <span className="mt-1 block text-[11px] text-slate-400">
+                    Προορισμός εκτύπωσης για τη σειρά.
+                  </span>
+                </label>
+              </div>
               <label className="inline-flex items-center gap-2.5 text-sm">
                 <input
                   type="checkbox"

@@ -88,6 +88,16 @@ export const seriesCreateSchema = z.object({
   /** Empty / omitted = default form for document kind */
   allowedPrintFormIds: z.array(z.string().min(1)).max(50).optional(),
   defaultPrintFormId: z.string().min(1).nullable().optional(),
+  /** Print copies (1-9) */
+  printCopies: z.coerce.number().int().min(1).max(9).optional().default(1),
+  /** Printer destination code; null means Browser */
+  printPrinter: z
+    .string()
+    .trim()
+    .max(80)
+    .nullable()
+    .optional()
+    .transform((v) => (v && v !== "BROWSER" ? v : null)),
   /** Settlement Engine — τετραδική πολιτική (NONE/NO/YES/AUTO) */
   allowPartialSettlement: settlementPolicyField.optional().default("YES"),
   allowOverpayment: settlementPolicyField.optional().default("NO"),

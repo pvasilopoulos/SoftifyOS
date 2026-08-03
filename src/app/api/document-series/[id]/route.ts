@@ -195,6 +195,12 @@ export async function PATCH(
           ...(body.allowBankMatch !== undefined
             ? { allowBankMatch: body.allowBankMatch }
             : {}),
+          ...(body.printCopies !== undefined
+            ? { printCopies: body.printCopies }
+            : {}),
+          ...(body.printPrinter !== undefined
+            ? { printPrinter: body.printPrinter }
+            : {}),
           ...(body.isDefault !== undefined ? { isDefault: body.isDefault } : {}),
           ...(body.isActive !== undefined ? { isActive: body.isActive } : {}),
         },

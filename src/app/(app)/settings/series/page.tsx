@@ -144,6 +144,8 @@ export default async function SeriesSettingsPage() {
           paymentMethods: pay.paymentMethods,
           allowedPrintFormIds: forms.allowedPrintFormIds,
           defaultPrintFormId: forms.defaultPrintFormId,
+          printCopies: s.printCopies ?? 1,
+          printPrinter: s.printPrinter ?? null,
           printForms: forms.printForms,
         };
       })}

@@ -47,7 +47,14 @@ export default async function InvoicePrintPage({
         space: true,
         lines: { orderBy: { position: "asc" } },
         tenant: true,
-        series: { select: { id: true, kind: true } },
+        series: {
+          select: {
+            id: true,
+            kind: true,
+            printCopies: true,
+            printPrinter: true,
+          },
+        },
       },
     }),
     prisma.tenantSettings.findUnique({
@@ -100,67 +107,74 @@ export default async function InvoicePrintPage({
 
   return (
     <div className="min-h-screen bg-slate-100 text-ink-950 print:bg-white">
-      <PrintControls invoiceNumber={invoice.number} />
-
-      <InvoicePrintArticle
-        body={body}
-        paper={printForm?.paper ?? "A4"}
-        orientation={printForm?.orientation ?? "PORTRAIT"}
-        invoice={{
-          id: invoice.id,
-          number: invoice.number,
-          status,
-          kindLabel,
-          currency: invoice.currency,
-          notes: invoice.notes,
-          issuedAt: invoice.issuedAt,
-          dueAt: invoice.dueAt,
-          subtotal: toNumber(invoice.subtotal),
-          vatAmount: toNumber(invoice.vatAmount),
-          total: toNumber(invoice.total),
-          paid: toNumber(invoice.paidAmount),
-          tenantName: company?.legalName || invoice.tenant.name,
-          tenantCode: invoice.tenant.slug ?? invoice.tenant.id,
-          formName: printForm?.name ?? "Τιμολόγιο πώλησης",
-          company: {
-            vatNumber: company?.vatNumber ?? null,
-            address: addressParts.join(", ") || null,
-            phone: company?.phone ?? null,
-            email: company?.email ?? null,
-            bankName: typeof bank.name === "string" ? bank.name : null,
-            iban: typeof bank.iban === "string" ? bank.iban : null,
-            bic: typeof bank.bic === "string" ? bank.bic : null,
-          },
-          paymentTerms:
-            typeof integrations.paymentTerms === "string"
-              ? integrations.paymentTerms
-              : "Καθαρό 30 ημέρες",
-          shippingAddress: [
-            invoice.branch?.address,
-            invoice.branch?.city,
-            invoice.branch?.postalCode,
-          ]
-            .filter(Boolean)
-            .join(", ") || null,
-          customer: {
-            name: invoice.customer.name,
-            code: invoice.customer.code,
-            vatNumber: invoice.customer.vatNumber,
-            email: invoice.customer.email,
-            phone: invoice.customer.phone,
-          },
-          branchName: invoice.branch?.name ?? null,
-          spaceName: invoice.space?.name ?? null,
-          lines: invoice.lines.map((line) => ({
-            id: line.id,
-            description: line.description,
-            quantity: toNumber(line.quantity),
-            unitPrice: toNumber(line.unitPrice),
-            vatRate: toNumber(line.vatRate),
-            lineTotal: toNumber(line.lineTotal),
-          })),
-        }}
+      <PrintControls
+        invoiceNumber={invoice.number}
+        defaultCopies={invoice.series?.printCopies ?? 1}
+        defaultPrinter={invoice.series?.printPrinter ?? null}
       />
+
+      <div id="invoice-print-root">
+        <InvoicePrintArticle
+          body={body}
+          paper={printForm?.paper ?? "A4"}
+          orientation={printForm?.orientation ?? "PORTRAIT"}
+          invoice={{
+            id: invoice.id,
+            number: invoice.number,
+            status,
+            kindLabel,
+            currency: invoice.currency,
+            notes: invoice.notes,
+            issuedAt: invoice.issuedAt,
+            dueAt: invoice.dueAt,
+            subtotal: toNumber(invoice.subtotal),
+            vatAmount: toNumber(invoice.vatAmount),
+            total: toNumber(invoice.total),
+            paid: toNumber(invoice.paidAmount),
+            tenantName: company?.legalName || invoice.tenant.name,
+            tenantCode: invoice.tenant.slug ?? invoice.tenant.id,
+            formName: printForm?.name ?? "Τιμολόγιο πώλησης",
+            company: {
+              vatNumber: company?.vatNumber ?? null,
+              address: addressParts.join(", ") || null,
+              phone: company?.phone ?? null,
+              email: company?.email ?? null,
+              bankName: typeof bank.name === "string" ? bank.name : null,
+              iban: typeof bank.iban === "string" ? bank.iban : null,
+              bic: typeof bank.bic === "string" ? bank.bic : null,
+            },
+            paymentTerms:
+              typeof integrations.paymentTerms === "string"
+                ? integrations.paymentTerms
+                : "Καθαρό 30 ημέρες",
+            shippingAddress: [
+              invoice.branch?.address,
+              invoice.branch?.city,
+              invoice.branch?.postalCode,
+            ]
+              .filter(Boolean)
+              .join(", ") || null,
+            customer: {
+              name: invoice.customer.name,
+              code: invoice.customer.code,
+              vatNumber: invoice.customer.vatNumber,
+              email: invoice.customer.email,
+              phone: invoice.customer.phone,
+            },
+            branchName: invoice.branch?.name ?? null,
+            spaceName: invoice.space?.name ?? null,
+            lines: invoice.lines.map((line) => ({
+              id: line.id,
+              description: line.description,
+              quantity: toNumber(line.quantity),
+              unitPrice: toNumber(line.unitPrice),
+              vatRate: toNumber(line.vatRate),
+              lineTotal: toNumber(line.lineTotal),
+            })),
+          }}
+        />
+      </div>
+      <div id="invoice-print-copies-host" aria-hidden />
     </div>
   );
 }
