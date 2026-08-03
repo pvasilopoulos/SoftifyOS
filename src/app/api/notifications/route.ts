@@ -295,7 +295,7 @@ export async function GET() {
         tone: m.status === "REJECTED" ? "rose" : "amber",
         title: `myDATA ${m.status === "REJECTED" ? "απόρριψη" : "εκκρεμές"}`,
         body: `${m.entityNumber || m.entityType}${m.errorMessage ? ` · ${m.errorMessage}` : ""}`,
-        href: "/finance",
+        href: "/mydata",
         entityLabel: m.entityNumber || m.entityType,
         tags: ["myDATA", m.status],
         meta: [
@@ -306,7 +306,7 @@ export async function GET() {
             : []),
         ],
         actions: [
-          { id: "finance", label: "Ουρά myDATA", href: "/finance", primary: true },
+          { id: "mydata", label: "myDATA Live", href: "/mydata", primary: true },
         ],
         createdAt: iso(m.updatedAt ?? m.createdAt),
       });
