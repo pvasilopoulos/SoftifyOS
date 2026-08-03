@@ -146,6 +146,14 @@ export function PosClient({
     change: number;
     invoiceId: string;
   } | null>(null);
+  const [zClose, setZClose] = useState<{
+    expectedCash: number;
+    invoiceCount: number;
+    grossTotal: number;
+    tenderTotals: Array<{ method: string; count: number; amount: number }>;
+    countedCash: string;
+  } | null>(null);
+  const [zCloseBusy, setZCloseBusy] = useState(false);
 
   const totals = useMemo(
     () =>
@@ -314,9 +322,10 @@ export function PosClient({
     setMessage("Η βάρδια ταμείου είναι ανοιχτή");
   }
 
-  async function closeSession() {
+  async function openZClose() {
     if (!sessionId) return;
     setError(null);
+    setMessage(null);
     const zRes = await fetch(`/api/pos/sessions/${sessionId}/z-report`);
     const zData = (await zRes.json()) as {
       item?: {
@@ -327,44 +336,57 @@ export function PosClient({
       };
       error?: string;
     };
-    if (!zRes.ok) {
+    if (!zRes.ok || !zData.item) {
       setError(zData.error || "Αποτυχία Z-report");
       return;
     }
-    const expected = zData.item?.expectedCash ?? 0;
-    const countedRaw = window.prompt(
-      `Κλείσιμο βάρδιας (Z)\nΑναμενόμενα μετρητά: ${formatEUR(expected)}\nΠληκτρολόγησε μετρητά στο συρτάρι:`,
-      String(expected),
-    );
-    if (countedRaw == null) return;
-    const closingCash = Number(countedRaw.replace(",", "."));
+    const expected = zData.item.expectedCash ?? 0;
+    setZClose({
+      expectedCash: expected,
+      invoiceCount: zData.item.invoiceCount ?? 0,
+      grossTotal: zData.item.grossTotal ?? 0,
+      tenderTotals: zData.item.tenderTotals ?? [],
+      countedCash: String(expected),
+    });
+  }
+
+  async function confirmZClose() {
+    if (!sessionId || !zClose) return;
+    const closingCash = Number(zClose.countedCash.replace(",", "."));
     if (!Number.isFinite(closingCash) || closingCash < 0) {
       setError("Μη έγκυρο ποσό κλεισίματος");
       return;
     }
-    const res = await fetch("/api/pos/sessions", {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ id: sessionId, closingCash }),
-    });
-    const data = (await res.json()) as {
-      error?: string;
-      zReport?: { cashVariance: number | null; expectedCash: number };
-    };
-    if (!res.ok) {
-      setError(data.error || "Αποτυχία κλεισίματος");
-      return;
+    setZCloseBusy(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/pos/sessions", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: sessionId, closingCash }),
+      });
+      const data = (await res.json()) as {
+        error?: string;
+        zReport?: { cashVariance: number | null; expectedCash: number };
+      };
+      if (!res.ok) {
+        setError(data.error || "Αποτυχία κλεισίματος");
+        return;
+      }
+      const variance = data.zReport?.cashVariance;
+      const tenders = zClose.tenderTotals
+        .map((t) => `${t.method}: ${formatEUR(t.amount)} (${t.count})`)
+        .join(" · ");
+      setSessionId(null);
+      setZClose(null);
+      setMessage(
+        `Z-report · ${zClose.invoiceCount} αποδείξεις · ${formatEUR(zClose.grossTotal)}${
+          variance != null ? ` · απόκλιση ταμείου ${formatEUR(variance)}` : ""
+        }${tenders ? ` · ${tenders}` : ""}`,
+      );
+    } finally {
+      setZCloseBusy(false);
     }
-    const variance = data.zReport?.cashVariance;
-    const tenders = (zData.item?.tenderTotals ?? [])
-      .map((t) => `${t.method}: ${formatEUR(t.amount)} (${t.count})`)
-      .join(" · ");
-    setSessionId(null);
-    setMessage(
-      `Z-report · ${zData.item?.invoiceCount ?? 0} αποδείξεις · ${formatEUR(zData.item?.grossTotal ?? 0)}${
-        variance != null ? ` · απόκλιση ταμείου ${formatEUR(variance)}` : ""
-      }${tenders ? ` · ${tenders}` : ""}`,
-    );
   }
 
   async function lookupGift() {
@@ -653,6 +675,90 @@ export function PosClient({
 
   return (
     <div className="space-y-5">
+      {zClose ? (
+        <div
+          className="fixed inset-0 z-50 flex items-end justify-center bg-slate-900/40 p-4 sm:items-center"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="z-close-title"
+        >
+          <div className="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-5 shadow-xl">
+            <h2 id="z-close-title" className="text-base font-semibold text-ink-900">
+              Κλείσιμο βάρδιας (Z)
+            </h2>
+            <p className="mt-1 text-sm text-slate-600">
+              {zClose.invoiceCount} αποδείξεις · σύνολο{" "}
+              {formatEUR(zClose.grossTotal)}
+            </p>
+            {zClose.tenderTotals.length > 0 ? (
+              <ul className="mt-3 space-y-1 rounded-xl bg-slate-50 px-3 py-2 text-sm text-slate-700">
+                {zClose.tenderTotals.map((t) => (
+                  <li key={t.method} className="flex justify-between gap-3">
+                    <span>
+                      {t.method}{" "}
+                      <span className="text-xs text-slate-500">×{t.count}</span>
+                    </span>
+                    <span className="tabular-nums font-medium">
+                      {formatEUR(t.amount)}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            ) : null}
+            <div className="mt-4 rounded-xl border border-emerald-100 bg-emerald-50 px-3 py-2 text-sm">
+              Αναμενόμενα μετρητά:{" "}
+              <span className="font-semibold tabular-nums">
+                {formatEUR(zClose.expectedCash)}
+              </span>
+            </div>
+            <label className="mt-4 block text-sm">
+              <span className="mb-1.5 block font-medium">Μετρητά στο συρτάρι</span>
+              <input
+                type="number"
+                min={0}
+                step="0.01"
+                autoFocus
+                value={zClose.countedCash}
+                onChange={(e) =>
+                  setZClose((z) =>
+                    z ? { ...z, countedCash: e.target.value } : z,
+                  )
+                }
+                className="h-11 w-full rounded-xl border border-slate-200 px-3 tabular-nums"
+              />
+            </label>
+            <p className="mt-2 text-xs text-slate-500">
+              Απόκλιση:{" "}
+              <span className="font-medium tabular-nums text-ink-900">
+                {formatEUR(
+                  (Number(zClose.countedCash.replace(",", ".")) || 0) -
+                    zClose.expectedCash,
+                )}
+              </span>
+            </p>
+            <div className="mt-5 flex justify-end gap-2">
+              <Button
+                type="button"
+                size="sm"
+                variant="secondary"
+                disabled={zCloseBusy}
+                onClick={() => setZClose(null)}
+              >
+                Άκυρο
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                disabled={zCloseBusy}
+                onClick={() => void confirmZClose()}
+              >
+                {zCloseBusy ? "Κλείσιμο…" : "Επιβεβαίωση Z"}
+              </Button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
       <PageHeader
         title="POS Λιανικής"
         description="Καλάθι · πολλαπλοί τρόποι πληρωμής · αυτόματο πληρωτέο"
@@ -664,7 +770,7 @@ export function PosClient({
                 <Button
                   size="sm"
                   variant="secondary"
-                  onClick={() => void closeSession()}
+                  onClick={() => void openZClose()}
                 >
                   Κλείσιμο / Z
                 </Button>
