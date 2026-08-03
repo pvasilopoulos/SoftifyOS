@@ -41,6 +41,8 @@ export async function POST(
             myDataEnabled: true,
             myDataInvoiceType: true,
             myDataVatCategory: true,
+            printCopies: true,
+            printPrinter: true,
           },
         },
         lines: {
@@ -234,6 +236,11 @@ export async function POST(
       user: scriptActorFromSession(session),
     });
 
+    const print = {
+      copies: invoice.series?.printCopies ?? 1,
+      printer: invoice.series?.printPrinter ?? null,
+    };
+
     if (after.failed) {
       return NextResponse.json({
         item: {
@@ -243,6 +250,7 @@ export async function POST(
           cogsJournalId,
           stock: stockMeta,
           myDataId,
+          print,
         },
         warning: after.failed.message,
         script: after.failed.scriptCode,
@@ -257,6 +265,7 @@ export async function POST(
         cogsJournalId,
         stock: stockMeta,
         myDataId,
+        print,
       },
     });
   } catch (error) {

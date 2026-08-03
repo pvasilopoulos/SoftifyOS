@@ -6,6 +6,11 @@ import { createPortal } from "react-dom";
 import { Ban, CheckCircle2, FileDown, Send, Wallet, X } from "lucide-react";
 import { Button } from "@/shared/ui/button";
 import { formatEUR } from "@/modules/sales/invoice-utils";
+import {
+  maybeAutoPrintAfterIssue,
+  openInvoicePrint,
+  preparePrintWindow,
+} from "@/modules/print-forms/open-invoice-print";
 
 type Props = {
   invoiceId: string;
@@ -131,19 +136,39 @@ export function InvoiceActions({
     setBusy("issue");
     setError(null);
     setMessage(null);
+    const printWin = preparePrintWindow();
     try {
       const res = await fetch(`/api/invoices/${invoiceId}/issue`, {
         method: "POST",
       });
-      const data = (await res.json()) as { error?: string };
+      const data = (await res.json()) as {
+        error?: string;
+        item?: {
+          print?: { copies?: number; printer?: string | null };
+        };
+      };
       if (!res.ok) {
+        printWin?.close();
         setError(data.error || "Αποτυχία έκδοσης");
         return;
       }
       setMessage("Το τιμολόγιο εκδόθηκε");
+      if (data.item?.print) {
+        maybeAutoPrintAfterIssue(
+          invoiceId,
+          {
+            printPrinter: data.item.print.printer,
+            printCopies: data.item.print.copies,
+          },
+          printWin,
+        );
+      } else {
+        printWin?.close();
+      }
       router.refresh();
       onDone?.();
     } catch {
+      printWin?.close();
       setError("Αποτυχία έκδοσης");
     } finally {
       setBusy(null);
@@ -191,9 +216,7 @@ export function InvoiceActions({
           <Button
             size={size}
             variant={size === "sm" && !canIssue ? "primary" : "secondary"}
-            onClick={() =>
-              window.open(`/invoices/${invoiceId}/print`, "_blank", "noopener")
-            }
+            onClick={() => openInvoicePrint(invoiceId, { auto: true })}
           >
             <FileDown size={14} />
             PDF

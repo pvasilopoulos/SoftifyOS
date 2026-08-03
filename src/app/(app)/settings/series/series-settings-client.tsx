@@ -1123,7 +1123,8 @@ function SeriesDrawer({
                     ) : null}
                   </select>
                   <span className="mt-1 block text-[11px] text-slate-400">
-                    Προορισμός εκτύπωσης για τη σειρά.
+                    PDF/δικτυακός: μετά την έκδοση ανοίγει αυτόματα η εκτύπωση.
+                    Στο Browser επίλεξε «Αποθήκευση ως PDF».
                   </span>
                 </label>
               </div>

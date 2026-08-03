@@ -31,6 +31,7 @@ import {
 } from "@/modules/sales/invoice-utils";
 import { invoiceKindLabel } from "@/modules/documents/series";
 import { InvoiceActions } from "./invoice-actions";
+import { openInvoicePrint } from "@/modules/print-forms/open-invoice-print";
 import { ViewSwitcher } from "@/modules/entity-views/view-switcher";
 import {
   DynamicListCells,
@@ -348,7 +349,7 @@ export function InvoicesWorkspace({
             className="bg-white/10 text-white hover:bg-white/20"
             onClick={() => {
               for (const id of selectedIds.slice(0, 5)) {
-                window.open(`/invoices/${id}/print`, "_blank", "noopener");
+                openInvoicePrint(id, { auto: true });
               }
             }}
           >

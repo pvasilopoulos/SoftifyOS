@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Printer } from "lucide-react";
 import { Button } from "@/shared/ui/button";
 import {
@@ -8,6 +8,8 @@ import {
   DEFAULT_PRINT_PRINTER,
   MAX_PRINT_COPIES,
   PRINT_PRINTER_OPTIONS,
+  effectivePrintPrinter,
+  isBrowserPrintDestination,
   normalizePrintCopies,
   printPrinterLabel,
 } from "@/modules/print-forms/printers";
@@ -16,22 +18,26 @@ export function PrintControls({
   invoiceNumber,
   defaultCopies = DEFAULT_PRINT_COPIES,
   defaultPrinter = DEFAULT_PRINT_PRINTER,
+  autoPrint = false,
 }: {
   invoiceNumber: string;
   defaultCopies?: number;
   defaultPrinter?: string | null;
+  /** When true (e.g. after issue), open the print dialog once loaded. */
+  autoPrint?: boolean;
 }) {
   const [copies, setCopies] = useState(() =>
     normalizePrintCopies(defaultCopies),
   );
-  const [printer, setPrinter] = useState(
-    () => defaultPrinter || DEFAULT_PRINT_PRINTER,
+  const [printer, setPrinter] = useState(() =>
+    effectivePrintPrinter(defaultPrinter),
   );
   const [hint, setHint] = useState<string | null>(null);
+  const autoDone = useRef(false);
 
   const printerOptions = useMemo(() => {
-    const codes = new Set(PRINT_PRINTER_OPTIONS.map((p) => p.code));
-    if (printer && !codes.has(printer as (typeof PRINT_PRINTER_OPTIONS)[number]["code"])) {
+    const codes = new Set(PRINT_PRINTER_OPTIONS.map((p) => p.code as string));
+    if (printer && !codes.has(printer)) {
       return [
         ...PRINT_PRINTER_OPTIONS,
         { code: printer, label: printPrinterLabel(printer) },
@@ -40,22 +46,15 @@ export function PrintControls({
     return PRINT_PRINTER_OPTIONS;
   }, [printer]);
 
-  const onPrint = () => {
+  const runPrint = () => {
     setHint(null);
     const n = normalizePrintCopies(copies);
-    const dest = printer || DEFAULT_PRINT_PRINTER;
-
-    if (dest === "FISCAL" || dest.startsWith("NETWORK_") || dest === "LABEL") {
-      setHint(
-        `Ουρά προς ${printPrinterLabel(dest)} · ${n} αντίτυπ${n === 1 ? "ο" : "α"} (agent/spooler).`,
-      );
-      return;
-    }
+    const dest = effectivePrintPrinter(printer);
 
     // Clone preview N times for physical multi-copy print sets.
     const root = document.getElementById("invoice-print-root");
     const host = document.getElementById("invoice-print-copies-host");
-    if (root && host && n > 1) {
+    if (root && host && n > 1 && isBrowserPrintDestination(dest)) {
       host.innerHTML = "";
       for (let i = 1; i < n; i += 1) {
         const clone = root.cloneNode(true) as HTMLElement;
@@ -81,11 +80,29 @@ export function PrintControls({
       root?.querySelector(".print-copy-badge")?.remove();
     }
 
+    if (!isBrowserPrintDestination(dest)) {
+      setHint(
+        `Ουρά προς ${printPrinterLabel(dest)} · ${n} αντίτυπ${n === 1 ? "ο" : "α"} (απαιτείται print agent/spooler).`,
+      );
+      return;
+    }
+
     if (dest === "PDF") {
-      setHint("Επίλεξε «Αποθήκευση ως PDF» στον διάλογο εκτύπωσης.");
+      setHint(
+        "Στον διάλογο εκτύπωσης επίλεξε προορισμό «Αποθήκευση ως PDF» / Save as PDF.",
+      );
     }
     window.print();
   };
+
+  useEffect(() => {
+    if (!autoPrint || autoDone.current) return;
+    autoDone.current = true;
+    const t = window.setTimeout(() => runPrint(), 450);
+    return () => window.clearTimeout(t);
+    // Intentionally once on mount when autoPrint is set.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoPrint]);
 
   return (
     <div className="sticky top-0 z-10 border-b border-slate-200 bg-white/95 px-4 py-3 backdrop-blur print:hidden">
@@ -120,7 +137,7 @@ export function PrintControls({
               ))}
             </select>
           </label>
-          <Button size="sm" onClick={onPrint}>
+          <Button size="sm" onClick={runPrint}>
             <Printer size={14} />
             Εκτύπωση
           </Button>

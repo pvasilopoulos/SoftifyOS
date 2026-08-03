@@ -13,6 +13,7 @@ import {
 } from "@/modules/sales/invoice-utils";
 import { SeriesPicker } from "@/modules/documents/series-picker";
 import { invoiceKindLabel } from "@/modules/documents/series";
+import { maybeAutoPrintAfterIssue, preparePrintWindow } from "@/modules/print-forms/open-invoice-print";
 
 export type InvoiceDocKind = "SALES_INVOICE" | "SALES_CREDIT" | "RETAIL_RECEIPT";
 
@@ -178,6 +179,7 @@ export function NewInvoiceForm({ kind }: { kind: InvoiceDocKind }) {
       return;
     }
 
+    const printWin = issuesNow ? preparePrintWindow() : null;
     const res = await fetch("/api/invoices", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -198,13 +200,30 @@ export function NewInvoiceForm({ kind }: { kind: InvoiceDocKind }) {
         })),
       }),
     });
-    const data = (await res.json()) as { item?: { id: string }; error?: string };
+    const data = (await res.json()) as {
+      item?: {
+        id: string;
+        status?: string;
+        series?: {
+          printPrinter?: string | null;
+          printCopies?: number | null;
+        } | null;
+      };
+      error?: string;
+    };
     setPending(false);
     if (!res.ok) {
+      printWin?.close();
       setError(data.error || "Αποτυχία δημιουργίας");
       return;
     }
-    router.push(`/invoices/${data.item!.id}`);
+    const created = data.item!;
+    if (created.status === "ISSUED" || issuesNow) {
+      maybeAutoPrintAfterIssue(created.id, created.series, printWin);
+    } else {
+      printWin?.close();
+    }
+    router.push(`/invoices/${created.id}`);
     router.refresh();
   }
 

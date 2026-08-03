@@ -28,13 +28,17 @@ export async function generateMetadata({
 
 export default async function InvoicePrintPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ id: string }>;
+  searchParams?: Promise<{ auto?: string }>;
 }) {
   const session = await getSession();
   if (!session) redirect("/login");
 
   const { id } = await params;
+  const sp = searchParams ? await searchParams : {};
+  const autoPrint = sp.auto === "1";
   const companyFilter = session.legalEntityId
     ? { legalEntityId: session.legalEntityId }
     : {};
@@ -111,6 +115,7 @@ export default async function InvoicePrintPage({
         invoiceNumber={invoice.number}
         defaultCopies={invoice.series?.printCopies ?? 1}
         defaultPrinter={invoice.series?.printPrinter ?? null}
+        autoPrint={autoPrint}
       />
 
       <div id="invoice-print-root">
