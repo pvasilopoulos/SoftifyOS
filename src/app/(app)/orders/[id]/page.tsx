@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { getSession } from "@/platform/auth/session";
-import { requireCompanyId } from "@/platform/tenancy/company-scope";
+import { requireCompanyIdForPage } from "@/platform/tenancy/company-scope";
 import { prisma } from "@/server/db";
 import { toNumber } from "@/modules/sales/invoice-utils";
 import {
@@ -40,7 +40,7 @@ export default async function OrderDetailPage({
 }) {
   const session = await getSession();
   if (!session) redirect("/login");
-  const legalEntityId = requireCompanyId(session);
+  const legalEntityId = requireCompanyIdForPage(session);
 
   const { id } = await params;
   const order = await prisma.order.findFirst({

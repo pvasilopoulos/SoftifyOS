@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
 import { getSession } from "@/platform/auth/session";
-import { requireCompanyId } from "@/platform/tenancy/company-scope";
+import { requireCompanyIdForPage } from "@/platform/tenancy/company-scope";
 import { prisma } from "@/server/db";
 import { toNumber } from "@/modules/sales/invoice-utils";
 import { listPaymentMethods } from "@/modules/payments/service";
@@ -12,7 +12,7 @@ export const dynamic = "force-dynamic";
 export default async function PosPage() {
   const session = await getSession();
   if (!session) redirect("/login");
-  const legalEntityId = requireCompanyId(session);
+  const legalEntityId = requireCompanyIdForPage(session);
 
   const [sites, customers, products, terminals, paymentMethods, retailSeries] =
     await Promise.all([

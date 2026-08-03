@@ -33,8 +33,9 @@ export default function AppError({
       </span>
       <h1 className="text-xl font-semibold text-ink-950">Κάτι πήγε στραβά</h1>
       <p className="mt-2 text-sm text-slate-500">
-        Η οθόνη δεν φορτώθηκε σωστά. Μετά από deploy δοκίμασε hard refresh
-        (Ctrl+Shift+R) — συχνά είναι παλιά chunks.
+        {/εταιρεία|LegalEntity|CompanyScope/i.test(error.message)
+          ? "Επιλέξτε εταιρεία από το header και δοκιμάστε ξανά."
+          : "Η οθόνη δεν φορτώθηκε σωστά. Μετά από deploy δοκίμασε hard refresh (Ctrl+Shift+R) — συχνά είναι παλιά chunks."}
       </p>
       {error.digest ? (
         <p className="mt-2 font-mono text-[11px] text-slate-400">

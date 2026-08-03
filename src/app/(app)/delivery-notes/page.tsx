@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
 import { getSession } from "@/platform/auth/session";
-import { requireCompanyId } from "@/platform/tenancy/company-scope";
+import { requireCompanyIdForPage } from "@/platform/tenancy/company-scope";
 import { prisma } from "@/server/db";
 import { toNumber } from "@/modules/sales/invoice-utils";
 import { DeliveryNotesClient } from "./delivery-notes-client";
@@ -11,7 +11,7 @@ export const dynamic = "force-dynamic";
 export default async function DeliveryNotesPage() {
   const session = await getSession();
   if (!session) redirect("/login");
-  const legalEntityId = requireCompanyId(session);
+  const legalEntityId = requireCompanyIdForPage(session);
 
   const [notes, customers, products, sites] = await Promise.all([
     prisma.deliveryNote.findMany({

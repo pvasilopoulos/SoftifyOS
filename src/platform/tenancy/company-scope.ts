@@ -1,3 +1,4 @@
+import { redirect } from "next/navigation";
 import { Prisma } from "@/generated/prisma/client";
 import type { SessionPayload } from "@/platform/auth/session";
 
@@ -10,13 +11,24 @@ export class CompanyScopeError extends Error {
   }
 }
 
-/** Active company (B) is required for operational documents. */
+const COMPANY_REQUIRED_MSG =
+  "Επιλέξτε εταιρεία (LegalEntity) από το header πριν συνεχίσετε";
+
+/** Active company (B) is required for operational documents / APIs. */
 export function requireCompanyId(session: SessionPayload): string {
   if (!session.legalEntityId) {
-    throw new CompanyScopeError(
-      "Επιλέξτε εταιρεία (LegalEntity) από το header πριν συνεχίσετε",
-      400,
-    );
+    throw new CompanyScopeError(COMPANY_REQUIRED_MSG, 400);
+  }
+  return session.legalEntityId;
+}
+
+/**
+ * Server Components / pages: redirect instead of opaque production error boundary.
+ * APIs should keep using `requireCompanyId` (JSON 400).
+ */
+export function requireCompanyIdForPage(session: SessionPayload): string {
+  if (!session.legalEntityId) {
+    redirect("/?selectCompany=1");
   }
   return session.legalEntityId;
 }

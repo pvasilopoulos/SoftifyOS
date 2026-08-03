@@ -43,9 +43,15 @@ const statusTone: Record<string, "slate" | "teal" | "amber" | "rose" | "emerald"
   CANCELLED: "rose",
 };
 
-export default async function DashboardPage() {
+export default async function DashboardPage({
+  searchParams,
+}: {
+  searchParams?: Promise<{ selectCompany?: string }>;
+}) {
   const session = await getSession();
   const firstName = session?.name?.split(/\s+/)[0] ?? "εκεί";
+  const sp = searchParams ? await searchParams : {};
+  const needCompany = sp.selectCompany === "1";
 
   if (!session) {
     return (
@@ -270,6 +276,23 @@ export default async function DashboardPage() {
 
   return (
     <div className="space-y-6">
+      {needCompany || !session.legalEntityId ? (
+        <div
+          role="status"
+          className="flex flex-col gap-2 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950 sm:flex-row sm:items-center sm:justify-between"
+        >
+          <p>
+            Επιλέξτε <strong className="font-semibold">εταιρεία (Legal Entity)</strong> από το
+            header πάνω δεξιά για να ανοίξετε τιμολόγια, παραγγελίες και POS.
+          </p>
+          {!session.legalEntityId ? (
+            <span className="shrink-0 text-xs font-medium text-amber-800">
+              Δεν έχει οριστεί ενεργή εταιρεία
+            </span>
+          ) : null}
+        </div>
+      ) : null}
+
       <PageHeader
         title={`Καλημέρα, ${firstName}`}
         description={`Τι χρειάζεται ενέργεια σήμερα στην ${session.tenantName}.`}

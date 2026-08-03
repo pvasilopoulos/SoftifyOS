@@ -2,7 +2,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { Plus } from "lucide-react";
 import { getSession } from "@/platform/auth/session";
-import { requireCompanyId } from "@/platform/tenancy/company-scope";
+import { requireCompanyIdForPage } from "@/platform/tenancy/company-scope";
 import { prisma } from "@/server/db";
 import { encodeCursor } from "@/shared/lib/cursor";
 import { PageHeader } from "@/shared/ui/page-header";
@@ -60,7 +60,7 @@ async function loadOrders(tenantId: string, legalEntityId: string) {
 export default async function OrdersPage() {
   const session = await getSession();
   if (!session) redirect("/login");
-  const legalEntityId = requireCompanyId(session);
+  const legalEntityId = requireCompanyIdForPage(session);
 
   const [first, listViews, customFields] = await Promise.all([
     loadOrders(session.tenantId, legalEntityId),

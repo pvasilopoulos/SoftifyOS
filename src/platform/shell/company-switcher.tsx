@@ -84,15 +84,16 @@ export function CompanySwitcher({
               legalEntityId,
             }),
           });
-          const data = await res.json();
+          const data = await res.json().catch(() => ({}));
           if (!res.ok) {
             setError(data.error || "Αποτυχία εναλλαγής");
-            setSwitchingId(null);
             return;
           }
-          window.location.href = "/";
+          // Stay on current route when possible (invoice/order deep links).
+          window.location.assign(window.location.pathname + window.location.search);
         } catch {
           setError("Αποτυχία εναλλαγής");
+        } finally {
           setSwitchingId(null);
         }
       })();
