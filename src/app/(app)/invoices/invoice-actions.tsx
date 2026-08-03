@@ -238,13 +238,15 @@ export function InvoiceActions({
         ) : null}
         {showSend ? (
           <Button
-            size={size}
+            size="icon"
             variant="secondary"
             disabled={!canSend || busy === "send"}
             onClick={() => void sendInvoice()}
+            title="Αποστολή"
+            aria-label={busy === "send" ? "Αποστολή…" : "Αποστολή"}
+            className={size === "sm" ? "h-8 w-8" : undefined}
           >
             <Send size={14} />
-            {busy === "send" ? "..." : "Αποστολή"}
           </Button>
         ) : null}
         {showCollect ? (
