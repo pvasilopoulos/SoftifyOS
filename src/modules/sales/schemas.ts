@@ -37,6 +37,18 @@ export const invoiceCreateSchema = z.object({
   dueAt: dueAtSchema,
   notes: z.string().trim().max(2000).optional().nullable(),
   lines: z.array(invoiceLineCreateSchema).min(1).max(100),
+  /** POS-style tenders on create — forces issue + settlement when present */
+  settleMethods: z
+    .array(
+      z.object({
+        paymentMethodId: z.string().min(1),
+        amount: z.coerce.number().positive().max(10_000_000),
+        changeAmount: z.coerce.number().min(0).max(10_000_000).optional().default(0),
+        externalRef: z.string().trim().max(120).optional().nullable(),
+      }),
+    )
+    .max(20)
+    .optional(),
 });
 
 export const creditFromInvoiceSchema = z.object({

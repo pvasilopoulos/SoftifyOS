@@ -3,9 +3,10 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { ArrowLeft, Plus, Trash2 } from "lucide-react";
+import { ArrowLeft, Plus, Trash2, Wallet, X } from "lucide-react";
 import { PageHeader } from "@/shared/ui/page-header";
 import { Button } from "@/shared/ui/button";
+import { cn } from "@/shared/lib/cn";
 import {
   calcInvoiceTotals,
   calcLineTotals,
@@ -31,6 +32,18 @@ type LineDraft = {
   unitPrice: string;
   vatRate: string;
 };
+type PayMethod = {
+  id: string;
+  code: string;
+  name: string;
+  kind: string;
+  isDefault?: boolean;
+};
+type TenderLine = {
+  key: string;
+  paymentMethodId: string;
+  amount: string;
+};
 
 function newLine(): LineDraft {
   return {
@@ -40,6 +53,10 @@ function newLine(): LineDraft {
     unitPrice: "",
     vatRate: "24",
   };
+}
+
+function round2(n: number) {
+  return Math.round(n * 100) / 100;
 }
 
 export function NewInvoiceForm({ kind }: { kind: InvoiceDocKind }) {
@@ -63,12 +80,70 @@ export function NewInvoiceForm({ kind }: { kind: InvoiceDocKind }) {
   const [lines, setLines] = useState<LineDraft[]>([newLine()]);
   const [loadingCustomers, setLoadingCustomers] = useState(true);
   const [loadingHierarchy, setLoadingHierarchy] = useState(false);
+  const [settleNow, setSettleNow] = useState(kind === "RETAIL_RECEIPT");
+  const [payMethods, setPayMethods] = useState<PayMethod[]>([]);
+  const [loadingPay, setLoadingPay] = useState(false);
+  const [tenders, setTenders] = useState<TenderLine[]>([]);
 
   const selectedStatus = useMemo(
     () => statusOptions.find((s) => s.id === statusOptionId) ?? null,
     [statusOptions, statusOptionId],
   );
-  const issuesNow = selectedStatus?.workflow === "ISSUED";
+  const issuesNow =
+    selectedStatus?.workflow === "ISSUED" ||
+    (settleNow && kind !== "SALES_CREDIT");
+  const canSettle = kind !== "SALES_CREDIT";
+
+  useEffect(() => {
+    setSettleNow(kind === "RETAIL_RECEIPT");
+    setTenders([]);
+  }, [kind]);
+
+  useEffect(() => {
+    if (!seriesId || !canSettle) {
+      setPayMethods([]);
+      setTenders([]);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      setLoadingPay(true);
+      try {
+        const res = await fetch(
+          `/api/settings/payment-methods?seriesId=${encodeURIComponent(seriesId)}&collect=1`,
+        );
+        const data = (await res.json()) as {
+          items?: PayMethod[];
+          error?: string;
+        };
+        if (cancelled) return;
+        const items = data.items ?? [];
+        setPayMethods(items);
+        const preferred =
+          items.find((m) => m.isDefault)?.id ?? items[0]?.id ?? "";
+        setTenders((prev) => {
+          if (!preferred) return [];
+          if (prev.length && items.some((m) => m.id === prev[0]?.paymentMethodId)) {
+            return prev;
+          }
+          return [
+            {
+              key: "t0",
+              paymentMethodId: preferred,
+              amount: "",
+            },
+          ];
+        });
+      } catch {
+        if (!cancelled) setPayMethods([]);
+      } finally {
+        if (!cancelled) setLoadingPay(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [seriesId, canSettle]);
 
   useEffect(() => {
     let cancelled = false;
@@ -153,6 +228,27 @@ export function NewInvoiceForm({ kind }: { kind: InvoiceDocKind }) {
     return calcInvoiceTotals(parsed);
   }, [lines]);
 
+  const tenderPaid = useMemo(() => {
+    return round2(
+      tenders.reduce((s, t) => {
+        const n = Number(t.amount);
+        return s + (Number.isFinite(n) && n > 0 ? n : 0);
+      }, 0),
+    );
+  }, [tenders]);
+  const tenderRemaining = round2(Math.max(0, totals.total - tenderPaid));
+
+  // Keep first tender filled with remaining when settle is on and amount empty
+  useEffect(() => {
+    if (!settleNow || !canSettle || totals.total <= 0) return;
+    setTenders((prev) => {
+      if (prev.length !== 1) return prev;
+      const only = prev[0]!;
+      if (only.amount.trim() !== "") return prev;
+      return [{ ...only, amount: String(totals.total) }];
+    });
+  }, [settleNow, canSettle, totals.total]);
+
   function updateLine(key: string, patch: Partial<LineDraft>) {
     setLines((prev) =>
       prev.map((line) => (line.key === key ? { ...line, ...patch } : line)),
@@ -179,7 +275,37 @@ export function NewInvoiceForm({ kind }: { kind: InvoiceDocKind }) {
       return;
     }
 
-    const printWin = issuesNow ? preparePrintWindow() : null;
+    const settlePayload =
+      settleNow && canSettle
+        ? tenders
+            .map((t) => ({
+              paymentMethodId: t.paymentMethodId,
+              amount: Number(t.amount),
+            }))
+            .filter(
+              (t) =>
+                t.paymentMethodId &&
+                Number.isFinite(t.amount) &&
+                t.amount > 0,
+            )
+        : [];
+
+    if (settleNow && canSettle) {
+      if (settlePayload.length === 0) {
+        setError("Επιλέξτε τρόπο πληρωμής και ποσό");
+        setPending(false);
+        return;
+      }
+      if (round2(settlePayload.reduce((s, m) => s + m.amount, 0)) > totals.total + 0.001) {
+        setError("Το ποσό εξόφλησης υπερβαίνει το σύνολο");
+        setPending(false);
+        return;
+      }
+    }
+
+    const willIssue =
+      issuesNow || settlePayload.length > 0;
+    const printWin = willIssue ? preparePrintWindow() : null;
     const res = await fetch("/api/invoices", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -198,6 +324,7 @@ export function NewInvoiceForm({ kind }: { kind: InvoiceDocKind }) {
           unitPrice: Number(line.unitPrice),
           vatRate: Number(line.vatRate),
         })),
+        ...(settlePayload.length ? { settleMethods: settlePayload } : {}),
       }),
     });
     const data = (await res.json()) as {
@@ -208,8 +335,13 @@ export function NewInvoiceForm({ kind }: { kind: InvoiceDocKind }) {
           printPrinter?: string | null;
           printCopies?: number | null;
         } | null;
+        autoSettle?: {
+          settlementNumber?: string;
+          paymentMethodCode?: string;
+        } | null;
       };
       error?: string;
+      warning?: string;
     };
     setPending(false);
     if (!res.ok) {
@@ -217,8 +349,9 @@ export function NewInvoiceForm({ kind }: { kind: InvoiceDocKind }) {
       setError(data.error || "Αποτυχία δημιουργίας");
       return;
     }
+    if (data.warning) setError(data.warning);
     const created = data.item!;
-    if (created.status === "ISSUED" || issuesNow) {
+    if (created.status === "ISSUED" || willIssue || settlePayload.length) {
       maybeAutoPrintAfterIssue(created.id, created.series, printWin);
     } else {
       printWin?.close();
@@ -238,7 +371,7 @@ export function NewInvoiceForm({ kind }: { kind: InvoiceDocKind }) {
       </Link>
       <PageHeader
         title={`Νέο ${kindTitle.toLowerCase()}`}
-        description="Επιλέξτε σειρά αρίθμησης, πελάτη και γραμμές."
+        description="Σειρά, πελάτης, γραμμές — και προαιρετικά εξόφληση όπως στο POS."
       />
 
       <div className="flex flex-wrap gap-2 text-sm">
@@ -514,6 +647,208 @@ export function NewInvoiceForm({ kind }: { kind: InvoiceDocKind }) {
           </div>
         </section>
 
+        {canSettle ? (
+          <section className="soft-panel space-y-4 p-5">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <h2 className="flex items-center gap-2 text-sm font-semibold text-ink-900">
+                  <Wallet size={16} className="text-teal-700" />
+                  Τρόποι πληρωμής
+                </h2>
+                <p className="mt-1 text-xs text-slate-500">
+                  Όπως στο POS: αν ενεργοποιήσεις εξόφληση, το παραστατικό
+                  εκδίδεται και εισπράττεται μαζί.
+                </p>
+              </div>
+              <label className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm">
+                <input
+                  type="checkbox"
+                  checked={settleNow}
+                  onChange={(e) => {
+                    const on = e.target.checked;
+                    setSettleNow(on);
+                    if (on && tenders.length === 1 && !tenders[0]?.amount) {
+                      setTenders((prev) =>
+                        prev.map((t, i) =>
+                          i === 0
+                            ? { ...t, amount: String(totals.total || "") }
+                            : t,
+                        ),
+                      );
+                    }
+                  }}
+                  className="size-4 rounded border-slate-300 text-teal-600 focus:ring-teal-500"
+                />
+                Εξόφληση τώρα
+              </label>
+            </div>
+
+            {settleNow ? (
+              <div className="space-y-3">
+                <div className="flex flex-wrap gap-2">
+                  {loadingPay ? (
+                    <p className="text-sm text-slate-500">Φόρτωση τρόπων…</p>
+                  ) : payMethods.length === 0 ? (
+                    <p className="text-sm text-amber-800">
+                      Δεν υπάρχουν τρόποι εισπράξεων —{" "}
+                      <Link
+                        href="/settings/payment-methods"
+                        className="font-medium text-teal-700 hover:underline"
+                      >
+                        Ρυθμίσεις → Τρόποι πληρωμής
+                      </Link>
+                    </p>
+                  ) : (
+                    payMethods.map((pm) => {
+                      const active = tenders.some(
+                        (t) => t.paymentMethodId === pm.id,
+                      );
+                      return (
+                        <button
+                          key={pm.id}
+                          type="button"
+                          onClick={() => {
+                            setTenders((prev) => {
+                              if (prev.some((t) => t.paymentMethodId === pm.id)) {
+                                return prev;
+                              }
+                              const rem = tenderRemaining > 0
+                                ? tenderRemaining
+                                : totals.total;
+                              if (prev.length === 1 && !prev[0]?.amount) {
+                                return [
+                                  {
+                                    key: prev[0]!.key,
+                                    paymentMethodId: pm.id,
+                                    amount: String(rem || totals.total || ""),
+                                  },
+                                ];
+                              }
+                              return [
+                                ...prev,
+                                {
+                                  key: `t${Date.now()}`,
+                                  paymentMethodId: pm.id,
+                                  amount: String(rem > 0 ? rem : ""),
+                                },
+                              ];
+                            });
+                          }}
+                          className={cn(
+                            "rounded-xl border px-3 py-2 text-sm font-medium transition",
+                            active
+                              ? "border-teal-300 bg-teal-50 text-teal-900"
+                              : "border-slate-200 bg-white text-slate-700 hover:border-teal-200",
+                          )}
+                        >
+                          {pm.name}
+                        </button>
+                      );
+                    })
+                  )}
+                </div>
+
+                <div className="space-y-2">
+                  {tenders.map((line, idx) => (
+                    <div
+                      key={line.key}
+                      className="grid grid-cols-[1fr_7rem_auto] gap-2"
+                    >
+                      <select
+                        value={line.paymentMethodId}
+                        onChange={(e) =>
+                          setTenders((prev) =>
+                            prev.map((t) =>
+                              t.key === line.key
+                                ? { ...t, paymentMethodId: e.target.value }
+                                : t,
+                            ),
+                          )
+                        }
+                        className="h-11 w-full rounded-xl border border-slate-200 px-3 text-sm"
+                      >
+                        {payMethods.map((m) => (
+                          <option key={m.id} value={m.id}>
+                            {m.name} ({m.code})
+                          </option>
+                        ))}
+                      </select>
+                      <input
+                        type="number"
+                        min="0.01"
+                        step="0.01"
+                        value={line.amount}
+                        onChange={(e) =>
+                          setTenders((prev) =>
+                            prev.map((t) =>
+                              t.key === line.key
+                                ? { ...t, amount: e.target.value }
+                                : t,
+                            ),
+                          )
+                        }
+                        className="h-11 w-full rounded-xl border border-slate-200 px-3 text-sm tabular-nums"
+                        aria-label={`Ποσό τρόπου ${idx + 1}`}
+                      />
+                      <button
+                        type="button"
+                        disabled={tenders.length <= 1}
+                        onClick={() =>
+                          setTenders((prev) =>
+                            prev.filter((t) => t.key !== line.key),
+                          )
+                        }
+                        className="rounded-xl px-2 text-slate-400 hover:bg-slate-100 hover:text-ink-900 disabled:opacity-30"
+                        aria-label="Αφαίρεση"
+                      >
+                        <X size={14} />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+
+                <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-slate-500">
+                  <button
+                    type="button"
+                    className="font-medium text-teal-700 hover:underline disabled:opacity-40"
+                    disabled={
+                      payMethods.length === 0 || tenderRemaining <= 0
+                    }
+                    onClick={() => {
+                      const preferred =
+                        payMethods.find((m) => m.isDefault)?.id ??
+                        payMethods[0]?.id ??
+                        "";
+                      if (!preferred) return;
+                      setTenders((prev) => [
+                        ...prev,
+                        {
+                          key: `t${Date.now()}`,
+                          paymentMethodId: preferred,
+                          amount: String(tenderRemaining),
+                        },
+                      ]);
+                    }}
+                  >
+                    + Προσθήκη τρόπου
+                  </button>
+                  <p>
+                    Εισπρακτέα {formatEUR(tenderPaid)}
+                    {tenderRemaining > 0.001
+                      ? ` · υπόλοιπο ${formatEUR(tenderRemaining)}`
+                      : " · πλήρες"}
+                  </p>
+                </div>
+              </div>
+            ) : (
+              <p className="rounded-xl border border-dashed border-slate-200 bg-slate-50/80 px-3 py-3 text-xs text-slate-500">
+                Χωρίς εξόφληση τώρα το παραστατικό μένει ανοιχτό — είσπραξη
+                αργότερα από την κάρτα ή με αυτόματη πολιτική σειράς.
+              </p>
+            )}
+          </section>
+        ) : null}
+
         {error ? (
           <p className="rounded-xl bg-rose-50 px-3 py-2 text-sm text-rose-700">
             {error}
@@ -524,9 +859,11 @@ export function NewInvoiceForm({ kind }: { kind: InvoiceDocKind }) {
           <Button type="submit" disabled={pending || !seriesId}>
             {pending
               ? "Αποθήκευση..."
-              : issuesNow
-                ? `Έκδοση ${kindTitle.toLowerCase()}`
-                : "Αποθήκευση πρόχειρου"}
+              : settleNow && canSettle
+                ? `Έκδοση & εξόφληση`
+                : issuesNow
+                  ? `Έκδοση ${kindTitle.toLowerCase()}`
+                  : "Αποθήκευση πρόχειρου"}
           </Button>
           <Button
             type="button"

@@ -310,11 +310,18 @@ export async function POST(request: Request) {
     }
 
     const totals = calcInvoiceTotals(body.lines);
+    const docKind = body.kind ?? "SALES_INVOICE";
+    const settleMethods = (body.settleMethods ?? []).filter((m) => m.amount > 0);
+    const wantsSettleNow =
+      settleMethods.length > 0 && docKind !== "SALES_CREDIT";
+
     let statusOption;
     try {
       statusOption = await resolveInvoiceStatusOption(prisma, session.tenantId, {
         statusOptionId: body.statusOptionId,
-        statusCode: body.status ?? "DRAFT",
+        statusCode: wantsSettleNow
+          ? "ISSUED"
+          : (body.status ?? "DRAFT"),
         forCreate: true,
       });
     } catch (err) {
@@ -326,8 +333,19 @@ export async function POST(request: Request) {
       }
       throw err;
     }
-    const status = statusOption.workflow === "ISSUED" ? "ISSUED" : "DRAFT";
-    const docKind = body.kind ?? "SALES_INVOICE";
+    // Tender lines on create always issue (like POS) so settlement can run.
+    let status: "DRAFT" | "ISSUED" =
+      wantsSettleNow || statusOption.workflow === "ISSUED" ? "ISSUED" : "DRAFT";
+    if (wantsSettleNow && statusOption.workflow !== "ISSUED") {
+      try {
+        statusOption = await resolveInvoiceStatusOption(prisma, session.tenantId, {
+          statusCode: "ISSUED",
+          forCreate: true,
+        });
+      } catch {
+        // keep previous option; status still ISSUED via workflow override
+      }
+    }
     const issuedAt = status === "ISSUED" ? new Date() : null;
     const dueAt = parseDueAt(body.dueAt ?? null);
 
@@ -547,7 +565,64 @@ export async function POST(request: Request) {
       paymentMethodCode?: string;
     } | null = null;
 
-    if (status === "ISSUED" && series) {
+    if (status === "ISSUED" && series && wantsSettleNow) {
+      try {
+        const { createReceiptSettlement } = await import(
+          "@/modules/settlements/service"
+        );
+        const { settlement } = await createReceiptSettlement(prisma, {
+          tenantId: session.tenantId,
+          userId: session.sub,
+          legalEntityId,
+          data: {
+            invoiceId: invoice.id,
+            notes: "Εξόφληση κατά την καταχώρηση",
+            methods: settleMethods.map((m) => ({
+              paymentMethodId: m.paymentMethodId,
+              amount: m.amount,
+              changeAmount: m.changeAmount ?? 0,
+              externalRef: m.externalRef ?? null,
+            })),
+          },
+        });
+        autoSettleMeta = {
+          settlementId: settlement.id,
+          settlementNumber: settlement.number,
+        };
+        const firstPm = settleMethods[0]?.paymentMethodId;
+        if (firstPm) {
+          const pm = await prisma.paymentMethod.findFirst({
+            where: { id: firstPm, tenantId: session.tenantId },
+            select: { code: true },
+          });
+          if (pm?.code) autoSettleMeta.paymentMethodCode = pm.code;
+        }
+        await writeAuditEvent({
+          tenantId: session.tenantId,
+          userId: session.sub,
+          action: "invoice.settleOnCreate",
+          entity: "invoice",
+          entityId: invoice.id,
+          meta: autoSettleMeta,
+        });
+        const refreshed = await prisma.invoice.findFirst({
+          where: { id: invoice.id },
+          select: { status: true, paidAmount: true },
+        });
+        if (refreshed) {
+          item.status = refreshed.status;
+          item.paidAmount = toNumber(refreshed.paidAmount);
+        }
+      } catch (error) {
+        const { SettlementError: SettleErr } = await import(
+          "@/modules/settlements/service"
+        );
+        autoSettleWarning =
+          error instanceof SettleErr
+            ? `Εξόφληση: ${error.message}`
+            : "Η εξόφληση κατά την καταχώρηση απέτυχε";
+      }
+    } else if (status === "ISSUED" && series) {
       const { tryAutoSettleOnIssue } = await import(
         "@/modules/settlements/service"
       );

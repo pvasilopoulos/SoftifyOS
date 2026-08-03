@@ -13,13 +13,36 @@ import {
 
 export const dynamic = "force-dynamic";
 
-export async function GET() {
+export async function GET(request: Request) {
   try {
     const session = await getSession();
     if (!session) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
-    const items = await listPaymentMethods(prisma, session.tenantId);
+    const url = new URL(request.url);
+    const seriesId = url.searchParams.get("seriesId");
+    const collectOnly = url.searchParams.get("collect") === "1";
+    const posOnly = url.searchParams.get("pos") === "1";
+
+    if (seriesId) {
+      const { resolveSeriesPaymentMethods } = await import(
+        "@/modules/documents/series-payments"
+      );
+      const items = await resolveSeriesPaymentMethods(prisma, {
+        tenantId: session.tenantId,
+        seriesId,
+        collectOnly: collectOnly || undefined,
+        posOnly: posOnly || undefined,
+        activeOnly: true,
+      });
+      return NextResponse.json({ items });
+    }
+
+    const items = await listPaymentMethods(prisma, session.tenantId, {
+      activeOnly: true,
+      collectOnly: collectOnly || undefined,
+      posOnly: posOnly || undefined,
+    });
     return NextResponse.json({ items });
   } catch (error) {
     return NextResponse.json(
