@@ -3,6 +3,39 @@ import { escapeXml } from "./client";
 
 type Db = PrismaClient | Prisma.TransactionClient;
 
+/** AADE keeps the typo "Classificaton" in official XSD namespaces. */
+const NS_INVOICE = "http://www.aade.gr/myDATA/invoice/v1.0";
+const NS_INCOME = "https://www.aade.gr/myDATA/incomeClassificaton/v1.0";
+const NS_EXPENSES = "https://www.aade.gr/myDATA/expensesClassificaton/v1.0";
+
+function invoicesDocOpen() {
+  return `<InvoicesDoc xmlns="${NS_INVOICE}" xmlns:icls="${NS_INCOME}" xmlns:ecls="${NS_EXPENSES}" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">`;
+}
+
+function incomeClassificationXml(input: {
+  classificationType: string;
+  classificationCategory: string;
+  amount: number;
+}) {
+  return `<incomeClassification>
+    <icls:classificationType>${escapeXml(input.classificationType)}</icls:classificationType>
+    <icls:classificationCategory>${escapeXml(input.classificationCategory)}</icls:classificationCategory>
+    <icls:amount>${input.amount.toFixed(2)}</icls:amount>
+  </incomeClassification>`;
+}
+
+function expensesClassificationXml(input: {
+  classificationType: string;
+  classificationCategory: string;
+  amount: number;
+}) {
+  return `<expensesClassification>
+    <ecls:classificationType>${escapeXml(input.classificationType)}</ecls:classificationType>
+    <ecls:classificationCategory>${escapeXml(input.classificationCategory)}</ecls:classificationCategory>
+    <ecls:amount>${input.amount.toFixed(2)}</ecls:amount>
+  </expensesClassification>`;
+}
+
 function fmtDate(d: Date) {
   return d.toISOString().slice(0, 10);
 }
@@ -131,11 +164,11 @@ export async function buildInvoiceInvoicesDocXml(
   <netValue>${lineNet.toFixed(2)}</netValue>
   <vatCategory>${escapeXml(vatCategory)}</vatCategory>
   <vatAmount>${lineVat.toFixed(2)}</vatAmount>
-  <incomeClassification>
-    <classificationType>E3_561_001</classificationType>
-    <classificationCategory>category1_1</classificationCategory>
-    <amount>${lineNet.toFixed(2)}</amount>
-  </incomeClassification>
+  ${incomeClassificationXml({
+    classificationType: "E3_561_001",
+    classificationCategory: "category1_1",
+    amount: lineNet,
+  })}
 </invoiceDetails>`;
     })
     .join("\n");
@@ -151,7 +184,7 @@ export async function buildInvoiceInvoicesDocXml(
       : "";
 
   return `<?xml version="1.0" encoding="UTF-8"?>
-<InvoicesDoc xmlns="http://www.aade.gr/myDATA/invoice/v1.0">
+${invoicesDocOpen()}
   <invoice>
     <issuer>
       <vatNumber>${escapeXml(issuer.issuerVat)}</vatNumber>
@@ -176,6 +209,11 @@ export async function buildInvoiceInvoicesDocXml(
       <totalOtherTaxesAmount>0.00</totalOtherTaxesAmount>
       <totalDeductionsAmount>0.00</totalDeductionsAmount>
       <totalGrossValue>${total.toFixed(2)}</totalGrossValue>
+      ${incomeClassificationXml({
+        classificationType: "E3_561_001",
+        classificationCategory: "category1_1",
+        amount: net,
+      })}
     </invoiceSummary>
   </invoice>
 </InvoicesDoc>`;
@@ -228,11 +266,11 @@ export async function buildDeliveryNoteInvoicesDocXml(
   <vatCategory>8</vatCategory>
   <vatAmount>0.00</vatAmount>
   <quantity>${Number(l.quantity).toFixed(3)}</quantity>
-  <incomeClassification>
-    <classificationType>E3_561_001</classificationType>
-    <classificationCategory>category1_1</classificationCategory>
-    <amount>0.00</amount>
-  </incomeClassification>
+  ${incomeClassificationXml({
+    classificationType: "E3_561_001",
+    classificationCategory: "category1_1",
+    amount: 0,
+  })}
 </invoiceDetails>`;
     })
     .join("\n");
@@ -248,7 +286,7 @@ export async function buildDeliveryNoteInvoicesDocXml(
       : "";
 
   return `<?xml version="1.0" encoding="UTF-8"?>
-<InvoicesDoc xmlns="http://www.aade.gr/myDATA/invoice/v1.0">
+${invoicesDocOpen()}
   <invoice>
     <issuer>
       <vatNumber>${escapeXml(issuer.issuerVat)}</vatNumber>
@@ -273,6 +311,11 @@ export async function buildDeliveryNoteInvoicesDocXml(
       <totalOtherTaxesAmount>0.00</totalOtherTaxesAmount>
       <totalDeductionsAmount>0.00</totalDeductionsAmount>
       <totalGrossValue>0.00</totalGrossValue>
+      ${incomeClassificationXml({
+        classificationType: "E3_561_001",
+        classificationCategory: "category1_1",
+        amount: 0,
+      })}
     </invoiceSummary>
   </invoice>
 </InvoicesDoc>`;
@@ -331,11 +374,11 @@ export async function buildPurchaseInvoiceInvoicesDocXml(
   <netValue>${lineNet.toFixed(2)}</netValue>
   <vatCategory>${escapeXml(vatCategory)}</vatCategory>
   <vatAmount>${lineVat.toFixed(2)}</vatAmount>
-  <expensesClassification>
-    <classificationType>E3_102_001</classificationType>
-    <classificationCategory>category2_1</classificationCategory>
-    <amount>${lineNet.toFixed(2)}</amount>
-  </expensesClassification>
+  ${expensesClassificationXml({
+    classificationType: "E3_102_001",
+    classificationCategory: "category2_1",
+    amount: lineNet,
+  })}
 </invoiceDetails>`;
     })
     .join("\n");
@@ -351,7 +394,7 @@ export async function buildPurchaseInvoiceInvoicesDocXml(
       : "";
 
   return `<?xml version="1.0" encoding="UTF-8"?>
-<InvoicesDoc xmlns="http://www.aade.gr/myDATA/invoice/v1.0">
+${invoicesDocOpen()}
   <invoice>
     <issuer>
       <vatNumber>${escapeXml(issuer.issuerVat)}</vatNumber>
@@ -376,6 +419,11 @@ export async function buildPurchaseInvoiceInvoicesDocXml(
       <totalOtherTaxesAmount>0.00</totalOtherTaxesAmount>
       <totalDeductionsAmount>0.00</totalDeductionsAmount>
       <totalGrossValue>${total.toFixed(2)}</totalGrossValue>
+      ${expensesClassificationXml({
+        classificationType: "E3_102_001",
+        classificationCategory: "category2_1",
+        amount: net,
+      })}
     </invoiceSummary>
   </invoice>
 </InvoicesDoc>`;

@@ -46,9 +46,31 @@ export function myDataEndpoint(env: Exclude<MyDataEnv, "simulator">) {
 }
 
 export function extractXmlTag(xml: string, tag: string): string | null {
-  const re = new RegExp(`<${tag}[^>]*>([\\s\\S]*?)</${tag}>`, "i");
+  const re = new RegExp(
+    `<(?:\\w+:)?${tag}[^>]*>([\\s\\S]*?)</(?:\\w+:)?${tag}>`,
+    "i",
+  );
   const m = xml.match(re);
   return m?.[1]?.trim() ?? null;
+}
+
+/** AADE often wraps ResponseDoc as HTML-encoded content inside a WCF `<string>`. */
+export function unwrapAadeResponseXml(raw: string): string {
+  const trimmed = raw.trim();
+  const stringInner = extractXmlTag(trimmed, "string");
+  if (stringInner && /&lt;|&gt;|&amp;/.test(stringInner)) {
+    return stringInner
+      .replace(/&lt;/g, "<")
+      .replace(/&gt;/g, ">")
+      .replace(/&quot;/g, '"')
+      .replace(/&apos;/g, "'")
+      .replace(/&amp;/g, "&")
+      .trim();
+  }
+  if (stringInner && stringInner.includes("<ResponseDoc")) {
+    return stringInner.trim();
+  }
+  return trimmed;
 }
 
 export function parseSendInvoicesResponse(xml: string): {
@@ -57,21 +79,24 @@ export function parseSendInvoicesResponse(xml: string): {
   errors: Array<{ code?: string; message: string }>;
   accepted: boolean;
 } {
+  const body = unwrapAadeResponseXml(xml);
   const mark =
-    extractXmlTag(xml, "invoiceMark") ??
-    extractXmlTag(xml, "mark") ??
+    extractXmlTag(body, "invoiceMark") ??
+    extractXmlTag(body, "mark") ??
     null;
-  const uid = extractXmlTag(xml, "invoiceUid") ?? extractXmlTag(xml, "uid") ?? null;
+  const uid =
+    extractXmlTag(body, "invoiceUid") ?? extractXmlTag(body, "uid") ?? null;
   const statusCode =
-    extractXmlTag(xml, "statusCode") ?? extractXmlTag(xml, "StatusCode");
+    extractXmlTag(body, "statusCode") ?? extractXmlTag(body, "StatusCode");
   const errors: Array<{ code?: string; message: string }> = [];
 
-  const errorBlocks = xml.matchAll(
-    /<error>([\s\S]*?)<\/error>/gi,
+  const errorBlocks = body.matchAll(
+    /<(?:\w+:)?error>([\s\S]*?)<\/(?:\w+:)?error>/gi,
   );
   for (const block of errorBlocks) {
     const inner = block[1] ?? "";
-    const code = extractXmlTag(inner, "code") ?? extractXmlTag(inner, "errorCode");
+    const code =
+      extractXmlTag(inner, "code") ?? extractXmlTag(inner, "errorCode");
     const message =
       extractXmlTag(inner, "message") ??
       extractXmlTag(inner, "errorMessage") ??
