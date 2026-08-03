@@ -277,6 +277,10 @@ export async function buildInvoiceInvoicesDocXml(
         : [];
   const paymentsXml = paymentMethodsXml(paymentRows);
 
+  // AADE AadeBookInvoiceType XSD order (strict):
+  // uid?, mark?, cancelledByMark?, authenticationCode?,
+  // issuer?, counterpart?, paymentMethods?, invoiceHeader,
+  // invoiceDetails+, taxesTotals?, invoiceSummary, …
   return `<?xml version="1.0" encoding="UTF-8"?>
 ${invoicesDocOpen()}
   <invoice>
@@ -286,6 +290,7 @@ ${invoicesDocOpen()}
       <branch>0</branch>
     </issuer>
     ${counterpart}
+    ${paymentsXml}
     <invoiceHeader>
       <series>${escapeXml(seriesCode)}</series>
       <aa>${aa}</aa>
@@ -309,7 +314,6 @@ ${invoicesDocOpen()}
         amount: net,
       })}
     </invoiceSummary>
-    ${paymentsXml}
   </invoice>
 </InvoicesDoc>`;
 }
