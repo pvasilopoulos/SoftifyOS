@@ -84,9 +84,9 @@ export const PRODUCT_DOC_SECTIONS: DocSection[] = [
       {
         type: "ol",
         items: [
-          "Phase A — myDATA prod, πάροχος e-invoicing, settlements QA, banking recon, ελληνικά books/ΦΠΑ",
-          "Phase B — Card provider live, ΦΗΜ, POS day-end (μόνο αν υπάρχει λιανική)",
-          "Phase C — Ergani live, payroll v1, ΦΜΥ/ΑΠΔ export",
+          "Phase A — myDATA prod, πάροχος e-invoicing, settlements QA, banking recon, ελληνικά books/ΦΠΑ (foundation shipped)",
+          "Phase B — Card provider live, ΦΗΜ, POS day-end (μόνο αν υπάρχει λιανική) — adapters + Z-report shipped · live Viva/ΦΗΜ pending",
+          "Phase C — Ergani live, payroll v1, ΦΜΥ/ΑΠΔ export — rates/export/fail-closed shipped · live Ergani pending",
           "Phase D — 3-way match, mobile picking, stock valuation",
           "Phase E — Period close, fixed assets batch, consolidation",
           "Phase F — Παραγωγή, project costing, marketplaces, offline PWA",
@@ -101,7 +101,7 @@ export const PRODUCT_DOC_SECTIONS: DocSection[] = [
         type: "kv",
         rows: [
           { k: "Τώρα", v: "Δυνατό sales/settlements/platform core" },
-          { k: "Επόμενο κρίσιμο", v: "Phase A — συμμόρφωση & κλείσιμο μετρητών" },
+          { k: "Επόμενο κρίσιμο", v: "Live credentials ΑΑΔΕ / πάροχος / Ergani · Phase D WMS" },
           { k: "Όχι πρώτα", v: "Παραγωγή, πλήρες CRM, offline PWA" },
         ],
       },

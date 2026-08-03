@@ -6,6 +6,7 @@ import { BankingPanel } from "./banking-panel";
 import { toast } from "@/shared/ui/toaster";
 import { Button } from "@/shared/ui/button";
 import { Badge } from "@/shared/ui/badge";
+import { downloadCsvClient, rowsToCsv } from "@/shared/lib/csv";
 
 type ArRow = {
   id: string;
@@ -299,6 +300,34 @@ export function FinanceOpsClient({
     [filteredPurchases],
   );
 
+  async function previewMyData(id: string) {
+    setBusyId(id);
+    setError(null);
+    try {
+      const res = await fetch(`/api/mydata/submissions/${id}/preview`);
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || "Αποτυχία preview");
+      const xml = data.item?.xml as string | undefined;
+      if (!xml) throw new Error("Κενό XML");
+      const w = window.open("", "_blank");
+      if (w) {
+        w.document.write(
+          `<pre style="white-space:pre-wrap;font:12px/1.4 ui-monospace,monospace;padding:16px">${xml
+            .replace(/&/g, "&amp;")
+            .replace(/</g, "&lt;")
+            .replace(/>/g, "&gt;")}</pre>`,
+        );
+        w.document.title = `myDATA XML · ${data.item?.entityNumber || id}`;
+      } else {
+        toast.success("Επίτρεψε pop-ups για προεπισκόπηση XML");
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Σφάλμα");
+    } finally {
+      setBusyId(null);
+    }
+  }
+
   async function processMyData(id: string) {
     setBusyId(id);
     setError(null);
@@ -443,6 +472,41 @@ export function FinanceOpsClient({
       ) : null}
 
       {tab === "ar" ? (
+        <div className="space-y-2">
+          <div className="flex justify-end">
+            <Button
+              size="sm"
+              variant="secondary"
+              disabled={filteredAr.length === 0}
+              onClick={() => {
+                const rows: Array<Array<string | number>> = [
+                  [
+                    "number",
+                    "customerCode",
+                    "customerName",
+                    "dueAt",
+                    "bucket",
+                    "balance",
+                    "total",
+                    "paid",
+                  ],
+                  ...filteredAr.map((r) => [
+                    r.number,
+                    r.customer.code,
+                    r.customer.name,
+                    r.dueAt ? new Date(r.dueAt).toISOString().slice(0, 10) : "",
+                    r.bucket,
+                    r.balance,
+                    r.total,
+                    r.paid,
+                  ]),
+                ];
+                downloadCsvClient("ar-aging.csv", rowsToCsv(rows));
+              }}
+            >
+              CSV
+            </Button>
+          </div>
         <div className="overflow-hidden rounded-xl border border-slate-200 bg-white">
           <table className="w-full text-left text-sm">
             <thead className="bg-slate-50 text-xs uppercase text-slate-500">
@@ -494,11 +558,13 @@ export function FinanceOpsClient({
             </tbody>
           </table>
         </div>
+        </div>
       ) : null}
 
       {tab === "ap" ? (
         <div className="space-y-4">
-          <div className="grid gap-2 sm:grid-cols-2">
+          <div className="flex flex-wrap items-start justify-between gap-2">
+          <div className="grid flex-1 gap-2 sm:grid-cols-2">
             <div className="rounded-xl border border-slate-100 bg-slate-50 px-3 py-2">
               <p className="text-xs text-slate-500">
                 AP aging (φίλτρο {filteredAp.length}/{apRows.length})
@@ -515,6 +581,39 @@ export function FinanceOpsClient({
                 {money(filteredPurchaseOpen)}
               </p>
             </div>
+          </div>
+            <Button
+              size="sm"
+              variant="secondary"
+              disabled={filteredAp.length === 0}
+              onClick={() => {
+                const rows: Array<Array<string | number>> = [
+                  [
+                    "number",
+                    "supplierCode",
+                    "supplierName",
+                    "dueAt",
+                    "bucket",
+                    "balance",
+                    "total",
+                    "paid",
+                  ],
+                  ...filteredAp.map((r) => [
+                    r.number,
+                    r.supplier.code,
+                    r.supplier.name,
+                    r.dueAt ? new Date(r.dueAt).toISOString().slice(0, 10) : "",
+                    r.bucket,
+                    r.balance,
+                    r.total,
+                    r.paid,
+                  ]),
+                ];
+                downloadCsvClient("ap-aging.csv", rowsToCsv(rows));
+              }}
+            >
+              CSV
+            </Button>
           </div>
 
           <div className="overflow-hidden rounded-xl border border-slate-200 bg-white">
@@ -839,6 +938,14 @@ export function FinanceOpsClient({
                           Διαβίβαση
                         </button>
                       ) : null}
+                      <button
+                        type="button"
+                        disabled={busyId === r.id}
+                        onClick={() => void previewMyData(r.id)}
+                        className="rounded-md border border-slate-200 bg-white px-2 py-1 text-xs font-medium text-slate-700 disabled:opacity-50"
+                      >
+                        XML
+                      </button>
                       {canWrite && r.status === "ACCEPTED" && r.mark ? (
                         <button
                           type="button"

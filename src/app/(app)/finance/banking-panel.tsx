@@ -136,7 +136,11 @@ export function BankingPanel({
         toast.error(data.error || "Αποτυχία import");
         return;
       }
-      toast.success(`Εισήχθησαν ${data.imported} κινήσεις`);
+      const skipped =
+        typeof data.skipped === "number" && data.skipped > 0
+          ? ` · αγνοήθηκαν ${data.skipped} (ήδη υπήρχαν)`
+          : "";
+      toast.success(`Εισήχθησαν ${data.imported} κινήσεις${skipped}`);
       void load();
     });
   }

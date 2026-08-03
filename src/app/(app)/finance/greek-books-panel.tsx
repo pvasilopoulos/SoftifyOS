@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { Button } from "@/shared/ui/button";
 import { toast } from "@/shared/ui/toaster";
+import { downloadCsvClient, rowsToCsv } from "@/shared/lib/csv";
 import type { FinanceFilters } from "./finance-filters";
 import { filtersToReportQuery } from "./finance-filters";
 
@@ -220,7 +221,45 @@ export function GreekBooksPanel({
 
       {tab === "vat" ? (
         <div className="space-y-3">
-          <div className="flex justify-end">
+          <div className="flex justify-end gap-2">
+            <Button
+              size="sm"
+              variant="secondary"
+              disabled={busy || vatRows.length === 0}
+              onClick={() => {
+                const rows: Array<Array<string | number>> = [
+                  [
+                    "vatRate",
+                    "salesNet",
+                    "salesVat",
+                    "purchaseNet",
+                    "purchaseVat",
+                    "netVat",
+                  ],
+                  ...vatRows.map((r) => [
+                    r.vatRate,
+                    r.salesNet,
+                    r.salesVat,
+                    r.purchaseNet,
+                    r.purchaseVat,
+                    r.netVat,
+                  ]),
+                ];
+                if (vatTotals) {
+                  rows.push([
+                    "TOTAL",
+                    vatTotals.salesNet,
+                    vatTotals.salesVat,
+                    vatTotals.purchaseNet,
+                    vatTotals.purchaseVat,
+                    vatTotals.netVat,
+                  ]);
+                }
+                downloadCsvClient("vat-books.csv", rowsToCsv(rows));
+              }}
+            >
+              CSV
+            </Button>
             <Button size="sm" variant="secondary" disabled={busy} onClick={() => void loadVat()}>
               Ανανέωση
             </Button>

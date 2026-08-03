@@ -30,16 +30,31 @@ export async function GET(request: Request) {
     if (!session) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
-    const status = new URL(request.url).searchParams.get("status");
+    const url = new URL(request.url);
+    const status = url.searchParams.get("status");
+    const bankAccountId = url.searchParams.get("bankAccountId");
     const items = await prisma.bankStatementLine.findMany({
       where: {
         tenantId: session.tenantId,
         ...(status ? { status: status as "UNMATCHED" | "MATCHED" | "IGNORED" } : {}),
+        ...(bankAccountId ? { bankAccountId } : {}),
+        ...(session.legalEntityId
+          ? {
+              bankAccount: {
+                OR: [
+                  { legalEntityId: session.legalEntityId },
+                  { legalEntityId: null },
+                ],
+              },
+            }
+          : {}),
       },
       orderBy: { bookedAt: "desc" },
       take: 200,
       include: {
-        bankAccount: { select: { code: true, name: true } },
+        bankAccount: {
+          select: { code: true, name: true, legalEntityId: true },
+        },
       },
     });
     return NextResponse.json({
@@ -99,8 +114,44 @@ export async function POST(request: Request) {
       );
     }
 
+    // Dedup OFX FITID / reference already imported for this account
+    const refs = [
+      ...new Set(
+        lines
+          .map((l) => l.reference?.trim())
+          .filter((r): r is string => Boolean(r)),
+      ),
+    ];
+    const existingRefs =
+      refs.length > 0
+        ? await prisma.bankStatementLine.findMany({
+            where: {
+              tenantId: session.tenantId,
+              bankAccountId: account.id,
+              reference: { in: refs },
+            },
+            select: { reference: true },
+          })
+        : [];
+    const skip = new Set(
+      existingRefs.map((r) => r.reference).filter(Boolean) as string[],
+    );
+    const toCreate = lines.filter(
+      (l) => !l.reference || !skip.has(l.reference.trim()),
+    );
+    const skipped = lines.length - toCreate.length;
+
+    if (toCreate.length === 0) {
+      return NextResponse.json({
+        items: [],
+        imported: 0,
+        skipped,
+        message: "Όλες οι κινήσεις υπήρχαν ήδη (FITID/reference)",
+      });
+    }
+
     const created = await prisma.$transaction(
-      lines.map((line) =>
+      toCreate.map((line) =>
         prisma.bankStatementLine.create({
           data: {
             tenantId: session.tenantId,
@@ -123,11 +174,15 @@ export async function POST(request: Request) {
       entityId: account.id,
       meta: {
         lines: created.length,
+        skipped,
         format: body.ofxText ? "ofx" : "csv",
       },
     });
 
-    return NextResponse.json({ imported: created.length }, { status: 201 });
+    return NextResponse.json(
+      { imported: created.length, skipped },
+      { status: 201 },
+    );
   } catch (error) {
     if (error instanceof z.ZodError) {
       return NextResponse.json({ error: "Μη έγκυρα δεδομένα" }, { status: 400 });

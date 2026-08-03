@@ -124,12 +124,13 @@ A3 Settlements QA  ─┼─► A4 Banking ─► A5 Books ─► A2 Πάροχ�
 
 | Περιοχή | Κατάσταση |
 |---------|-----------|
-| Sales / settlements / series / print | Δυνατό core |
-| myDATA | Ουρά + XML — χρειάζεται prod hardening |
-| Banking | Match υπάρχει — βάθος/λειτουργική σταθερότητα |
-| POS | Soft POS — MOCK providers, όχι ΦΗΜ |
-| HR | Ops UI — Ergani/payroll stub |
+| Sales / settlements / series / print | Δυνατό core + AUTO settle / POS tenders σε έκδοση |
+| myDATA | Ουρά + live test/prod HTTP + XML preview + purchase 14.1 · πάροχος adapter (MOCK / fail-closed live) |
+| Banking | Match + LE filter + OFX FITID dedup |
+| Greek books | ΦΠΑ περίοδος + CSV · AR/AP aging CSV |
+| POS | Soft POS · card/ΦΗΜ adapter shells · Z-report / day-end |
+| HR | Ergani fail-closed σε prod · payroll rates από integrations · bank/ΦΜΥ export |
 | WMS | Lite — όχι RF |
 | Platform | Πολύ δυνατό για το στάδιο |
 
-**Σύνοψη:** SoftifyOS είναι **foundation**. Το Phase A είναι το επόμενο κρίσιμο άλμα προς πραγματικό go-live.
+**Σύνοψη:** SoftifyOS έχει πλέον **Phase A/B/C foundation slices** στο branch. Live credentials (ΑΑΔΕ / Viva / Ergani / πιστοποιημένος πάροχος) παραμένουν απαραίτητα για πραγματικό go-live.

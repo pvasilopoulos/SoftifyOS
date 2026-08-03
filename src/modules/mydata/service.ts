@@ -6,6 +6,10 @@ import {
   buildPurchaseInvoiceInvoicesDocXml,
   readMyDataConfig,
 } from "./payload";
+import {
+  readEInvoicingProvider,
+  resolveEInvoicingAdapter,
+} from "@/modules/einvoicing/provider";
 
 type Db = PrismaClient | Prisma.TransactionClient;
 
@@ -14,7 +18,47 @@ async function resolveMyDataConfig(db: Db, tenantId: string) {
     where: { tenantId },
     select: { integrationsJson: true },
   });
-  return readMyDataConfig(settings?.integrationsJson);
+  return {
+    ...readMyDataConfig(settings?.integrationsJson),
+    integrationsJson: settings?.integrationsJson ?? null,
+  };
+}
+
+async function buildSubmissionXml(
+  db: Db,
+  input: { tenantId: string; row: { entityType: string; entityId: string; invoiceType: string | null; vatCategory: string | null } },
+) {
+  const { row } = input;
+  if (row.entityType === "invoice") {
+    return buildInvoiceInvoicesDocXml(db, {
+      tenantId: input.tenantId,
+      invoiceId: row.entityId,
+      invoiceType: row.invoiceType,
+      vatCategory: row.vatCategory,
+    });
+  }
+  if (
+    row.entityType === "delivery_note" ||
+    row.entityType === "deliveryNote"
+  ) {
+    return buildDeliveryNoteInvoicesDocXml(db, {
+      tenantId: input.tenantId,
+      deliveryNoteId: row.entityId,
+      invoiceType: row.invoiceType,
+    });
+  }
+  if (
+    row.entityType === "purchase_invoice" ||
+    row.entityType === "purchaseInvoice"
+  ) {
+    return buildPurchaseInvoiceInvoicesDocXml(db, {
+      tenantId: input.tenantId,
+      purchaseInvoiceId: row.entityId,
+      invoiceType: row.invoiceType,
+      vatCategory: row.vatCategory,
+    });
+  }
+  throw new Error(`Live myDATA: μη υποστηριζόμενο entityType=${row.entityType}`);
 }
 
 /** Enqueue a document for myDATA when series has myDataEnabled. */
@@ -114,7 +158,117 @@ export async function processMyDataSubmission(
     });
   }
 
-  // Live AADE for test + prod
+  // Optional πάροχος e-invoicing (Phase A2) — routes before direct AADE when configured
+  const providerId = readEInvoicingProvider(config.integrationsJson);
+  const providerAdapter = resolveEInvoicingAdapter(providerId);
+  if (providerAdapter) {
+    if (providerId === "MOCK" && env === "prod") {
+      return db.myDataSubmission.update({
+        where: { id: row.id },
+        data: {
+          status: "REJECTED",
+          attempts,
+          lastAttemptAt: now,
+          errorMessage:
+            "Πάροχος MOCK απαγορεύεται σε myDataEnv=prod — βάλε NOVAON/IMPACT live ή AADE",
+          response: {
+            mode: env,
+            channel: "provider",
+            provider: "MOCK",
+            accepted: false,
+            failClosed: true,
+            processedAt: now.toISOString(),
+          },
+        },
+      });
+    }
+    try {
+      const xml = await buildSubmissionXml(db, {
+        tenantId: input.tenantId,
+        row,
+      });
+      const result = await providerAdapter.send({
+        invoicesDocXml: xml,
+        entityType: row.entityType,
+        entityId: row.entityId,
+        entityNumber: row.entityNumber,
+        env: env === "prod" ? "prod" : "sandbox",
+      });
+      if (!result.ok) {
+        return db.myDataSubmission.update({
+          where: { id: row.id },
+          data: {
+            status: "REJECTED",
+            attempts,
+            lastAttemptAt: now,
+            errorMessage:
+              result.errors.map((e) => e.message).join("; ") ||
+              `Απόρριψη παρόχου ${result.provider}`,
+            response: {
+              mode: env,
+              channel: "provider",
+              provider: result.provider,
+              accepted: false,
+              errors: result.errors,
+              raw: result.raw as Prisma.InputJsonValue,
+              processedAt: now.toISOString(),
+            },
+            payload: {
+              ...((row.payload as object) || {}),
+              requestXml: xml.slice(0, 8000),
+            },
+          },
+        });
+      }
+      return db.myDataSubmission.update({
+        where: { id: row.id },
+        data: {
+          status: "ACCEPTED",
+          attempts,
+          lastAttemptAt: now,
+          mark: result.mark,
+          uid: result.uid,
+          errorMessage: null,
+          response: {
+            mode: env,
+            channel: "provider",
+            provider: result.provider,
+            accepted: true,
+            mark: result.mark,
+            uid: result.uid,
+            raw: result.raw as Prisma.InputJsonValue,
+            processedAt: now.toISOString(),
+          },
+          payload: {
+            ...((row.payload as object) || {}),
+            requestXml: xml.slice(0, 8000),
+          },
+        },
+      });
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Σφάλμα παρόχου e-invoicing";
+      return db.myDataSubmission.update({
+        where: { id: row.id },
+        data: {
+          status: "REJECTED",
+          attempts,
+          lastAttemptAt: now,
+          errorMessage: message,
+          response: {
+            mode: env,
+            channel: "provider",
+            provider: providerId,
+            accepted: false,
+            errors: [{ message }],
+            processedAt: now.toISOString(),
+          },
+        },
+      });
+    }
+  }
+
+  // Live AADE ERP API for test + prod
   if (env === "test" || env === "prod") {
     const userId = config.myDataUserId?.trim();
     const subscriptionKey = config.myDataSubscriptionKey?.trim();
@@ -139,38 +293,10 @@ export async function processMyDataSubmission(
     }
 
     try {
-      let xml: string;
-      if (row.entityType === "invoice") {
-        xml = await buildInvoiceInvoicesDocXml(db, {
-          tenantId: input.tenantId,
-          invoiceId: row.entityId,
-          invoiceType: row.invoiceType,
-          vatCategory: row.vatCategory,
-        });
-      } else if (
-        row.entityType === "delivery_note" ||
-        row.entityType === "deliveryNote"
-      ) {
-        xml = await buildDeliveryNoteInvoicesDocXml(db, {
-          tenantId: input.tenantId,
-          deliveryNoteId: row.entityId,
-          invoiceType: row.invoiceType,
-        });
-      } else if (
-        row.entityType === "purchase_invoice" ||
-        row.entityType === "purchaseInvoice"
-      ) {
-        xml = await buildPurchaseInvoiceInvoicesDocXml(db, {
-          tenantId: input.tenantId,
-          purchaseInvoiceId: row.entityId,
-          invoiceType: row.invoiceType,
-          vatCategory: row.vatCategory,
-        });
-      } else {
-        throw new Error(
-          `Live myDATA: μη υποστηριζόμενο entityType=${row.entityType}`,
-        );
-      }
+      const xml = await buildSubmissionXml(db, {
+        tenantId: input.tenantId,
+        row,
+      });
 
       const result = await sendInvoicesXml(env, { userId, subscriptionKey }, xml);
 
@@ -186,6 +312,7 @@ export async function processMyDataSubmission(
               `Απόρριψη ΑΑΔΕ HTTP ${result.status}`,
             response: {
               mode: env,
+              channel: "aade",
               live: true,
               accepted: false,
               endpoint: result.endpoint,
@@ -213,6 +340,7 @@ export async function processMyDataSubmission(
           errorMessage: null,
           response: {
             mode: env,
+            channel: "aade",
             live: true,
             accepted: true,
             endpoint: result.endpoint,
@@ -240,6 +368,7 @@ export async function processMyDataSubmission(
           errorMessage: message,
           response: {
             mode: env,
+            channel: "aade",
             live: true,
             accepted: false,
             errors: [{ message }],

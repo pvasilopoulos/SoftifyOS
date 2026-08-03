@@ -155,13 +155,23 @@ export async function PATCH(request: Request) {
       },
     });
 
+    const { buildPosSessionZReport } = await import("@/modules/pos/z-report");
+    const zReport = await buildPosSessionZReport(prisma, {
+      tenantId: session.tenantId,
+      sessionId: closed.id,
+    });
+
     await writeAuditEvent({
       tenantId: session.tenantId,
       userId: session.sub,
       action: "pos.session.close",
       entity: "pos_session",
       entityId: closed.id,
-      meta: { closingCash: body.closingCash },
+      meta: {
+        closingCash: body.closingCash,
+        expectedCash: zReport?.expectedCash,
+        cashVariance: zReport?.cashVariance,
+      },
     });
 
     return NextResponse.json({
@@ -170,6 +180,7 @@ export async function PATCH(request: Request) {
         openingFloat: toNumber(closed.openingFloat),
         closingCash: closed.closingCash != null ? toNumber(closed.closingCash) : null,
       },
+      zReport,
     });
   } catch (error) {
     if (error instanceof z.ZodError) {

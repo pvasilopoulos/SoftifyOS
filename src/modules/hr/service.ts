@@ -48,11 +48,52 @@ function businessDaysInclusive(from: Date, to: Date): number {
   return Math.max(days, 0.5);
 }
 
-/** Indicative Greek payroll split (EFKA employee ~13.87%, employer ~22.12%, tax ~10%) */
-export function estimatePayrollSplits(gross: number) {
-  const employeeEfka = Math.round(gross * 0.1387 * 100) / 100;
-  const employerEfka = Math.round(gross * 0.2212 * 100) / 100;
-  const tax = Math.round(gross * 0.1 * 100) / 100;
+/** Indicative Greek payroll split — rates overridable via tenant integrationsJson.payrollRates */
+export type PayrollRateTable = {
+  employeeEfkaRate: number;
+  employerEfkaRate: number;
+  taxRate: number;
+};
+
+export const DEFAULT_PAYROLL_RATES: PayrollRateTable = {
+  employeeEfkaRate: 0.1387,
+  employerEfkaRate: 0.2212,
+  taxRate: 0.1,
+};
+
+export function readPayrollRates(
+  integrationsJson: unknown,
+): PayrollRateTable {
+  if (
+    !integrationsJson ||
+    typeof integrationsJson !== "object" ||
+    Array.isArray(integrationsJson)
+  ) {
+    return DEFAULT_PAYROLL_RATES;
+  }
+  const raw = (integrationsJson as Record<string, unknown>).payrollRates;
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    return DEFAULT_PAYROLL_RATES;
+  }
+  const r = raw as Record<string, unknown>;
+  const num = (v: unknown, fallback: number) => {
+    const n = typeof v === "number" ? v : Number(v);
+    return Number.isFinite(n) && n >= 0 && n < 1 ? n : fallback;
+  };
+  return {
+    employeeEfkaRate: num(r.employeeEfkaRate, DEFAULT_PAYROLL_RATES.employeeEfkaRate),
+    employerEfkaRate: num(r.employerEfkaRate, DEFAULT_PAYROLL_RATES.employerEfkaRate),
+    taxRate: num(r.taxRate, DEFAULT_PAYROLL_RATES.taxRate),
+  };
+}
+
+export function estimatePayrollSplits(
+  gross: number,
+  rates: PayrollRateTable = DEFAULT_PAYROLL_RATES,
+) {
+  const employeeEfka = Math.round(gross * rates.employeeEfkaRate * 100) / 100;
+  const employerEfka = Math.round(gross * rates.employerEfkaRate * 100) / 100;
+  const tax = Math.round(gross * rates.taxRate * 100) / 100;
   const net = Math.round((gross - employeeEfka - tax) * 100) / 100;
   return { employeeEfka, employerEfka, tax, net };
 }
@@ -1254,7 +1295,35 @@ export async function processErganiSubmission(
   }
 
   const prefix =
-    env === "prod" ? "ERG-STUB" : env === "test" ? "ERG-TEST" : "ERG-SIM";
+    env === "test" ? "ERG-TEST" : "ERG-SIM";
+
+  // Prod without live client must fail closed — never fake ACCEPTED.
+  if (env === "prod") {
+    const rejected = await db.erganiSubmission.update({
+      where: { id: row.id },
+      data: {
+        status: "REJECTED",
+        attempts,
+        lastError:
+          "Ergani live client δεν είναι συνδεδεμένος — βάλε simulator/test ή σύνδεσε client",
+        processedAt: now,
+        payload: {
+          ...((row.payload as object) ?? {}),
+          mode: env,
+          accepted: false,
+          failClosed: true,
+        } as Prisma.InputJsonValue,
+      },
+    });
+    if (row.entityType === "work_card_event") {
+      await db.workCardEvent.updateMany({
+        where: { id: row.entityId, tenantId: input.tenantId },
+        data: { erganiStatus: "REJECTED" },
+      });
+    }
+    return rejected;
+  }
+
   const externalRef = `${prefix}-${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, "0")}${String(now.getDate()).padStart(2, "0")}-${row.id.slice(-8).toUpperCase()}`;
 
   const accepted = await db.erganiSubmission.update({
@@ -1270,10 +1339,7 @@ export async function processErganiSubmission(
         mode: env,
         accepted: true,
         externalRef,
-        note:
-          env === "prod"
-            ? "Stub — δεν υπάρχει ακόμα live Ergani client"
-            : "Local simulator (ψηφιακή κάρτα εργασίας)",
+        note: "Local Ergani simulator (ψηφιακή κάρτα εργασίας)",
       } as Prisma.InputJsonValue,
     },
   });
@@ -1390,6 +1456,12 @@ export async function createPayrollPeriod(
     select: { id: true, baseGross: true, monthlyAllowance: true },
   });
 
+  const settings = await db.tenantSettings.findUnique({
+    where: { tenantId: input.tenantId },
+    select: { integrationsJson: true },
+  });
+  const rates = readPayrollRates(settings?.integrationsJson);
+
   return db.payrollPeriod.create({
     data: {
       tenantId: input.tenantId,
@@ -1405,7 +1477,7 @@ export async function createPayrollPeriod(
           const base = e.baseGross != null ? Number(e.baseGross) : defaultGross;
           const allowance = Number(e.monthlyAllowance ?? 0);
           const gross = Math.round((base + allowance) * 100) / 100;
-          const splits = estimatePayrollSplits(gross);
+          const splits = estimatePayrollSplits(gross, rates);
           return {
             tenantId: input.tenantId,
             employeeId: e.id,
@@ -1472,7 +1544,12 @@ export async function upsertPayrollLine(
   });
   if (!employee) throw new HrError("Ο εργαζόμενος δεν βρέθηκε", 404);
 
-  const splits = estimatePayrollSplits(input.gross);
+  const settings = await db.tenantSettings.findUnique({
+    where: { tenantId: input.tenantId },
+    select: { integrationsJson: true },
+  });
+  const rates = readPayrollRates(settings?.integrationsJson);
+  const splits = estimatePayrollSplits(input.gross, rates);
   return db.payrollLine.upsert({
     where: {
       periodId_employeeId: {

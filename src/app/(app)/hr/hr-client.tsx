@@ -3473,7 +3473,31 @@ function PayrollPanel({
               <div className="text-sm font-semibold">
                 Περίοδος {payrollDetail.code}
               </div>
-              <div className="flex gap-2">
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  onClick={() => {
+                    window.open(
+                      `/api/hr/payroll/periods/${payrollDetail.id}/export?format=bank`,
+                      "_blank",
+                    );
+                  }}
+                >
+                  Export τράπεζας
+                </Button>
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  onClick={() => {
+                    window.open(
+                      `/api/hr/payroll/periods/${payrollDetail.id}/export?format=fmy`,
+                      "_blank",
+                    );
+                  }}
+                >
+                  ΦΜΥ / ΑΠΔ lite
+                </Button>
                 {canWrite && payrollDetail.status === "DRAFT" ? (
                   <Button
                     size="sm"

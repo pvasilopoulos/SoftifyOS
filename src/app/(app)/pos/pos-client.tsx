@@ -314,6 +314,59 @@ export function PosClient({
     setMessage("Η βάρδια ταμείου είναι ανοιχτή");
   }
 
+  async function closeSession() {
+    if (!sessionId) return;
+    setError(null);
+    const zRes = await fetch(`/api/pos/sessions/${sessionId}/z-report`);
+    const zData = (await zRes.json()) as {
+      item?: {
+        expectedCash: number;
+        tenderTotals: Array<{ method: string; count: number; amount: number }>;
+        invoiceCount: number;
+        grossTotal: number;
+      };
+      error?: string;
+    };
+    if (!zRes.ok) {
+      setError(zData.error || "Αποτυχία Z-report");
+      return;
+    }
+    const expected = zData.item?.expectedCash ?? 0;
+    const countedRaw = window.prompt(
+      `Κλείσιμο βάρδιας (Z)\nΑναμενόμενα μετρητά: ${formatEUR(expected)}\nΠληκτρολόγησε μετρητά στο συρτάρι:`,
+      String(expected),
+    );
+    if (countedRaw == null) return;
+    const closingCash = Number(countedRaw.replace(",", "."));
+    if (!Number.isFinite(closingCash) || closingCash < 0) {
+      setError("Μη έγκυρο ποσό κλεισίματος");
+      return;
+    }
+    const res = await fetch("/api/pos/sessions", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: sessionId, closingCash }),
+    });
+    const data = (await res.json()) as {
+      error?: string;
+      zReport?: { cashVariance: number | null; expectedCash: number };
+    };
+    if (!res.ok) {
+      setError(data.error || "Αποτυχία κλεισίματος");
+      return;
+    }
+    const variance = data.zReport?.cashVariance;
+    const tenders = (zData.item?.tenderTotals ?? [])
+      .map((t) => `${t.method}: ${formatEUR(t.amount)} (${t.count})`)
+      .join(" · ");
+    setSessionId(null);
+    setMessage(
+      `Z-report · ${zData.item?.invoiceCount ?? 0} αποδείξεις · ${formatEUR(zData.item?.grossTotal ?? 0)}${
+        variance != null ? ` · απόκλιση ταμείου ${formatEUR(variance)}` : ""
+      }${tenders ? ` · ${tenders}` : ""}`,
+    );
+  }
+
   async function lookupGift() {
     setError(null);
     const res = await fetch(
@@ -606,7 +659,16 @@ export function PosClient({
         actions={
           <div className="flex flex-wrap gap-2">
             {sessionId ? (
-              <Badge tone="emerald">Βάρδια ανοιχτή</Badge>
+              <>
+                <Badge tone="emerald">Βάρδια ανοιχτή</Badge>
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  onClick={() => void closeSession()}
+                >
+                  Κλείσιμο / Z
+                </Button>
+              </>
             ) : (
               <Button size="sm" variant="secondary" onClick={() => void openSession()}>
                 Άνοιγμα βάρδιας

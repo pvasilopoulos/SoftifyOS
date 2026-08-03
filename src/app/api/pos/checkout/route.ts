@@ -400,7 +400,29 @@ export async function POST(request: Request) {
 
         let externalRef = t.externalRef || null;
         if ((pm.requiresExternalRef || kind === "CARD") && !externalRef) {
-          externalRef = `MOCK-${Date.now().toString(36).toUpperCase()}`;
+          const { resolveCardAdapter } = await import(
+            "@/modules/pos/card-provider"
+          );
+          const terminal = body.terminalId
+            ? await tx.posTerminal.findFirst({
+                where: {
+                  id: body.terminalId,
+                  tenantId: session.tenantId,
+                  isActive: true,
+                },
+              })
+            : null;
+          const adapter = resolveCardAdapter(terminal?.provider ?? "MOCK");
+          const auth = await adapter.authorize({
+            amount: t.amount,
+            terminalId: terminal?.id ?? "MOCK",
+            provider: terminal?.provider ?? "MOCK",
+            invoiceNumber: invoice.number,
+          });
+          if (!auth.ok) {
+            throw new Error(auth.error || "Απόρριψη κάρτας");
+          }
+          externalRef = auth.externalRef;
         }
 
         await tx.invoicePayment.create({
@@ -418,6 +440,36 @@ export async function POST(request: Request) {
             loyaltyAccountId,
           },
         });
+      }
+
+      // Fiscal MOCK receipt id on retail (Phase B shell)
+      try {
+        const { resolveFiscalAdapter } = await import(
+          "@/modules/pos/fiscal-adapter"
+        );
+        const fiscal = await resolveFiscalAdapter("MOCK").issueReceipt({
+          invoiceNumber: invoice.number,
+          total: totals.total,
+          vatAmount: totals.vatAmount,
+          lines: body.lines.map((l) => ({
+            description: l.description,
+            quantity: l.quantity,
+            lineTotal: roundMoney(l.quantity * l.unitPrice * (1 + l.vatRate / 100)),
+            vatRate: l.vatRate,
+          })),
+        });
+        if (fiscal.ok && fiscal.fiscalId) {
+          await tx.invoice.update({
+            where: { id: invoice.id },
+            data: {
+              notes: [invoice.notes, `ΦΗΜ:${fiscal.fiscalId}`]
+                .filter(Boolean)
+                .join(" · "),
+            },
+          });
+        }
+      } catch {
+        // fiscal optional
       }
 
       // Earn loyalty on sale total

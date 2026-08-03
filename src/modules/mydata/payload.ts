@@ -312,7 +312,7 @@ export async function buildPurchaseInvoiceInvoicesDocXml(
     legalEntityId: pi.legalEntityId,
   });
 
-  const invoiceType = input.invoiceType || "1.1";
+  const invoiceType = input.invoiceType || "14.1";
   const vatCategory = input.vatCategory || "1";
   const aaMatch = pi.number.match(/(\d+)\s*$/);
   const aa = aaMatch ? Number(aaMatch[1]) : 1;
