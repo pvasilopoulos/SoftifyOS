@@ -417,16 +417,21 @@ export function InvoiceDetailClient({
           title={invoice.number}
           description={`${invoice.customer.name}${invoice.branch ? ` · ${invoice.branch.name}` : ""}${invoice.space ? ` · ${invoice.space.name}` : ""}`}
           actions={
-            <div className="flex flex-wrap items-center justify-end gap-1.5">
+            <div
+              role="toolbar"
+              aria-label="Ενέργειες παραστατικού"
+              className="inline-flex max-w-full flex-wrap items-center gap-0.5 rounded-xl border border-slate-200/90 bg-white p-1 shadow-sm"
+            >
               <Button
                 size="icon"
-                variant="secondary"
+                variant="ghost"
                 type="button"
                 onClick={copyNumber}
                 title={copied ? "Αντιγράφηκε" : "Αντιγραφή αριθμού"}
                 aria-label={copied ? "Αντιγράφηκε" : "Αντιγραφή αριθμού"}
+                className="h-9 w-9 shrink-0 rounded-lg shadow-none"
               >
-                {copied ? <Check size={15} /> : <ClipboardCopy size={15} />}
+                {copied ? <Check size={16} /> : <ClipboardCopy size={16} />}
               </Button>
               <InvoiceActions
                 invoiceId={invoice.id}

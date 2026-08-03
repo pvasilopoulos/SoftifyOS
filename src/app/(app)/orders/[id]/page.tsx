@@ -180,11 +180,12 @@ export default async function OrderDetailPage({
   };
 
   const headerActions = (
-    <div className="flex flex-wrap items-center justify-end gap-2">
+    <div className="flex flex-wrap items-center justify-end gap-1.5">
       <TransformActionButton
         sourceKind={isQuote ? "SALES_QUOTE" : "SALES_ORDER"}
         sourceId={order.id}
         canWrite={session.role !== "VIEWER"}
+        iconOnly
       />
       {isQuote ? (
         <QuoteConvertOrder

@@ -18,6 +18,7 @@ import {
 } from "lucide-react";
 import { PageHeader } from "@/shared/ui/page-header";
 import { Badge } from "@/shared/ui/badge";
+import { Button } from "@/shared/ui/button";
 import {
   formatEUR,
   invoiceStatusLabel,
@@ -179,15 +180,22 @@ export function OrderDetailClient({
           title={order.number}
           description={desc}
           actions={
-            <div className="flex flex-col items-stretch gap-2 sm:items-end">
-              <button
+            <div
+              role="toolbar"
+              aria-label="Ενέργειες παραστατικού"
+              className="inline-flex max-w-full flex-wrap items-center gap-1.5"
+            >
+              <Button
+                size="icon"
+                variant="secondary"
                 type="button"
                 onClick={() => void copyNumber()}
-                className="inline-flex h-10 items-center justify-center gap-1.5 rounded-xl border border-slate-200 bg-white px-4 text-sm font-medium text-slate-700 hover:bg-slate-50"
+                title={copied ? "Αντιγράφηκε" : "Αντιγραφή αριθμού"}
+                aria-label={copied ? "Αντιγράφηκε" : "Αντιγραφή αριθμού"}
+                className="h-9 w-9 shrink-0"
               >
-                {copied ? <Check size={15} /> : <ClipboardCopy size={15} />}
-                {copied ? "Αντιγράφηκε" : "Αριθμός"}
-              </button>
+                {copied ? <Check size={16} /> : <ClipboardCopy size={16} />}
+              </Button>
               {headerActions}
             </div>
           }

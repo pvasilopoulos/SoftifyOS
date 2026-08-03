@@ -74,13 +74,18 @@ export function TransformActionButton({
     <>
       <Button
         size={iconOnly ? "icon" : "sm"}
-        variant="secondary"
+        variant={iconOnly ? "ghost" : "secondary"}
         type="button"
         onClick={() => setOpen(true)}
         title={label}
         aria-label={label}
+        className={
+          iconOnly
+            ? "h-9 w-9 shrink-0 rounded-lg shadow-none"
+            : undefined
+        }
       >
-        <ArrowRightLeft size={14} />
+        <ArrowRightLeft size={iconOnly ? 16 : 14} />
         {iconOnly ? null : label}
       </Button>
       {open ? (
