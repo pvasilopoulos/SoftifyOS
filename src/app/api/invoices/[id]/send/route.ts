@@ -45,8 +45,54 @@ export async function POST(
             status: "ISSUED",
             issuedAt: invoice.issuedAt ?? new Date(),
           },
+          include: {
+            series: {
+              select: {
+                myDataEnabled: true,
+                myDataInvoiceType: true,
+                myDataVatCategory: true,
+              },
+            },
+          },
         })
       : invoice;
+
+    let myDataId: string | null = null;
+    if (promote) {
+      const series =
+        "series" in updated && updated.series
+          ? updated.series
+          : await prisma.documentSeries.findFirst({
+              where: { id: invoice.seriesId ?? "", tenantId: session.tenantId },
+              select: {
+                myDataEnabled: true,
+                myDataInvoiceType: true,
+                myDataVatCategory: true,
+              },
+            });
+      if (series?.myDataEnabled) {
+        try {
+          const { enqueueMyDataSubmission } = await import(
+            "@/modules/mydata/service"
+          );
+          const sub = await enqueueMyDataSubmission(prisma, {
+            tenantId: session.tenantId,
+            entityType: "invoice",
+            entityId: invoice.id,
+            entityNumber: updated.number,
+            invoiceType: series.myDataInvoiceType,
+            vatCategory: series.myDataVatCategory,
+            payload: {
+              number: updated.number,
+              source: "invoice.send",
+            },
+          });
+          myDataId = sub.id;
+        } catch {
+          myDataId = null;
+        }
+      }
+    }
 
     await writeAuditEvent({
       tenantId: session.tenantId,
@@ -59,6 +105,7 @@ export async function POST(
         to: invoice.customer.email,
         promotedFromDraft: promote,
         status: updated.status,
+        myDataId,
       },
     });
 
@@ -71,6 +118,7 @@ export async function POST(
         total: toNumber(updated.total),
         customerEmail: invoice.customer.email,
         customerName: invoice.customer.name,
+        myDataId,
         message: invoice.customer.email
           ? `Καταχωρήθηκε αποστολή προς ${invoice.customer.email}`
           : `Καταχωρήθηκε αποστολή προς ${invoice.customer.name} (χωρίς email)`,

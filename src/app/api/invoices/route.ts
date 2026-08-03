@@ -661,6 +661,35 @@ export async function POST(request: Request) {
       }
     }
 
+    // myDATA queue on create-as-issued (same path as /issue)
+    let myDataId: string | null = null;
+    if (status === "ISSUED" && series?.myDataEnabled) {
+      try {
+        const { enqueueMyDataSubmission } = await import(
+          "@/modules/mydata/service"
+        );
+        const sub = await enqueueMyDataSubmission(prisma, {
+          tenantId: session.tenantId,
+          entityType: "invoice",
+          entityId: invoice.id,
+          entityNumber: invoice.number,
+          invoiceType: series.myDataInvoiceType,
+          vatCategory: series.myDataVatCategory,
+          payload: {
+            number: invoice.number,
+            kind: invoice.kind,
+            customerId: invoice.customerId,
+            total: toNumber(invoice.total),
+            vatAmount: toNumber(invoice.vatAmount),
+            source: "invoice.create",
+          },
+        });
+        myDataId = sub.id;
+      } catch {
+        myDataId = null;
+      }
+    }
+
     const after = await dispatchScriptEvent(prisma, {
       tenantId: session.tenantId,
       module: "INVOICES",
@@ -683,7 +712,7 @@ export async function POST(request: Request) {
 
     return NextResponse.json(
       {
-        item: { ...item, autoSettle: autoSettleMeta },
+        item: { ...item, autoSettle: autoSettleMeta, myDataId },
         ...(warnings.length ? { warning: warnings.join(" · ") } : {}),
         ...(after.failed ? { script: after.failed.scriptCode } : {}),
       },

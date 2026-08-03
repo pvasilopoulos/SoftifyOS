@@ -205,6 +205,30 @@ export async function POST(
       },
     });
 
+    if (status === "ISSUED" && series?.myDataEnabled) {
+      try {
+        const { enqueueMyDataSubmission } = await import(
+          "@/modules/mydata/service"
+        );
+        await enqueueMyDataSubmission(prisma, {
+          tenantId: session.tenantId,
+          entityType: "invoice",
+          entityId: credit.id,
+          entityNumber: credit.number,
+          invoiceType: series.myDataInvoiceType,
+          vatCategory: series.myDataVatCategory,
+          payload: {
+            number: credit.number,
+            kind: "SALES_CREDIT",
+            relatedInvoiceId: source.id,
+            source: "invoice.credit",
+          },
+        });
+      } catch {
+        // queue optional — credit still created
+      }
+    }
+
     return NextResponse.json(
       {
         item: {

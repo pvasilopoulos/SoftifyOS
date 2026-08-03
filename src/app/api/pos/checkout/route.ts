@@ -507,6 +507,33 @@ export async function POST(request: Request) {
       // Checkout succeeds even if GL posting fails
     }
 
+    // myDATA for retail receipts issued at POS
+    let myDataId: string | null = null;
+    if (series.myDataEnabled) {
+      try {
+        const { enqueueMyDataSubmission } = await import(
+          "@/modules/mydata/service"
+        );
+        const sub = await enqueueMyDataSubmission(prisma, {
+          tenantId: session.tenantId,
+          entityType: "invoice",
+          entityId: result.invoice.id,
+          entityNumber: result.invoice.number,
+          invoiceType: series.myDataInvoiceType,
+          vatCategory: series.myDataVatCategory,
+          payload: {
+            number: result.invoice.number,
+            kind: "RETAIL_RECEIPT",
+            source: "pos.checkout",
+            total: totals.total,
+          },
+        });
+        myDataId = sub.id;
+      } catch {
+        myDataId = null;
+      }
+    }
+
     await writeAuditEvent({
       tenantId: session.tenantId,
       userId: session.sub,
@@ -523,6 +550,7 @@ export async function POST(request: Request) {
         settlementId,
         issueJournalId,
         settlementJournalId,
+        myDataId,
       },
     });
 
@@ -538,6 +566,7 @@ export async function POST(request: Request) {
           settlementId,
           issueJournalId,
           settlementJournalId,
+          myDataId,
         },
       },
       { status: 201 },

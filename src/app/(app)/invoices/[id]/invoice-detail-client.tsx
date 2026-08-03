@@ -374,6 +374,28 @@ export function InvoiceDetailClient({
     });
   }
 
+  function enqueueMyData() {
+    startTransition(async () => {
+      setError(null);
+      setMessage(null);
+      const res = await fetch("/api/mydata/submissions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          entityType: "invoice",
+          entityId: invoice.id,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setError(data.error || "Αποτυχία εγγραφής στην ουρά myDATA");
+        return;
+      }
+      setMessage("Προστέθηκε στην ουρά myDATA Live");
+      router.refresh();
+    });
+  }
+
   const counts: Record<TabKey, number> = {
     lines: invoice.lines.length,
     payments: invoice.payments.length,
@@ -1090,10 +1112,35 @@ export function InvoiceDetailClient({
                   myDATA
                 </div>
                 {invoice.myData.length === 0 ? (
-                  <p className="px-4 py-6 text-sm text-slate-500">
-                    Δεν υπάρχει εγγραφή στην ουρά. Ενεργοποίησε myDATA στη σειρά
-                    και έκδωσε το παραστατικό.
-                  </p>
+                  <div className="space-y-3 px-4 py-6">
+                    <p className="text-sm text-slate-500">
+                      Δεν υπάρχει εγγραφή στην ουρά.
+                      {status === "DRAFT"
+                        ? " Η ουρά ανοίγει με την έκδοση (όχι στο πρόχειρο)."
+                        : invoice.series?.myDataEnabled
+                          ? " Μπορείς να την προσθέσεις τώρα."
+                          : " Ενεργοποίησε myDATA στη σειρά και έκδωσε το παραστατικό."}
+                    </p>
+                    {invoice.canWrite &&
+                    invoice.series?.myDataEnabled &&
+                    status !== "DRAFT" &&
+                    status !== "CANCELLED" ? (
+                      <button
+                        type="button"
+                        disabled={pending}
+                        onClick={() => enqueueMyData()}
+                        className="rounded-lg bg-teal-700 px-3 py-1.5 text-xs font-medium text-white disabled:opacity-50"
+                      >
+                        Εγγραφή στην ουρά myDATA
+                      </button>
+                    ) : null}
+                    <p className="text-xs text-slate-400">
+                      Διαχείριση ουράς:{" "}
+                      <Link href="/mydata" className="text-teal-700 hover:underline">
+                        myDATA Live
+                      </Link>
+                    </p>
+                  </div>
                 ) : (
                   <ul className="divide-y divide-slate-100">
                     {invoice.myData.map((m) => (

@@ -117,3 +117,100 @@ export async function GET(request: NextRequest) {
     );
   }
 }
+
+/** Enqueue (or return existing) myDATA row for an already-issued document. */
+export async function POST(request: Request) {
+  try {
+    const session = await getSession();
+    if (!session) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+    if (session.role === "VIEWER") {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
+    const body = (await request.json().catch(() => ({}))) as {
+      entityType?: string;
+      entityId?: string;
+    };
+    const entityType = body.entityType?.trim();
+    const entityId = body.entityId?.trim();
+    if (!entityType || !entityId) {
+      return NextResponse.json(
+        { error: "Απαιτούνται entityType και entityId" },
+        { status: 400 },
+      );
+    }
+
+    if (entityType === "invoice") {
+      const invoice = await prisma.invoice.findFirst({
+        where: { id: entityId, tenantId: session.tenantId },
+        include: {
+          series: {
+            select: {
+              myDataEnabled: true,
+              myDataInvoiceType: true,
+              myDataVatCategory: true,
+            },
+          },
+        },
+      });
+      if (!invoice) {
+        return NextResponse.json({ error: "Δεν βρέθηκε" }, { status: 404 });
+      }
+      if (invoice.status === "DRAFT" || invoice.status === "CANCELLED") {
+        return NextResponse.json(
+          {
+            error:
+              "Η ουρά myDATA ανοίγει μόνο για εκδομένα παραστατικά (όχι DRAFT/CANCELLED)",
+          },
+          { status: 400 },
+        );
+      }
+      if (!invoice.series?.myDataEnabled) {
+        return NextResponse.json(
+          { error: "Η σειρά δεν έχει ενεργό myDATA" },
+          { status: 400 },
+        );
+      }
+      const { enqueueMyDataSubmission } = await import(
+        "@/modules/mydata/service"
+      );
+      const { toNumber } = await import("@/modules/sales/invoice-utils");
+      const sub = await enqueueMyDataSubmission(prisma, {
+        tenantId: session.tenantId,
+        entityType: "invoice",
+        entityId: invoice.id,
+        entityNumber: invoice.number,
+        invoiceType: invoice.series.myDataInvoiceType,
+        vatCategory: invoice.series.myDataVatCategory,
+        payload: {
+          number: invoice.number,
+          kind: invoice.kind,
+          total: toNumber(invoice.total),
+          source: "mydata.enqueue",
+        },
+      });
+      return NextResponse.json(
+        {
+          item: {
+            ...sub,
+            lastAttemptAt: sub.lastAttemptAt?.toISOString() ?? null,
+            createdAt: sub.createdAt.toISOString(),
+            updatedAt: sub.updatedAt.toISOString(),
+          },
+        },
+        { status: 201 },
+      );
+    }
+
+    return NextResponse.json(
+      { error: `Μη υποστηριζόμενο entityType=${entityType}` },
+      { status: 400 },
+    );
+  } catch (error) {
+    return NextResponse.json(
+      { error: getErrorMessage(error, "Enqueue failed") },
+      { status: 500 },
+    );
+  }
+}
