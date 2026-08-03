@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { Ban, CheckCircle2, FileDown, Send, Wallet, X } from "lucide-react";
 import { Button } from "@/shared/ui/button";
+import { toast } from "@/shared/ui/toaster";
 import { formatEUR } from "@/modules/sales/invoice-utils";
 import {
   maybeAutoPrintAfterIssue,
@@ -19,6 +20,8 @@ type Props = {
   paidAmount: number;
   /** compact = preview panel sizes */
   size?: "sm" | "md";
+  /** Icon-only toolbar (detail header) */
+  iconsOnly?: boolean;
   showPdf?: boolean;
   showSend?: boolean;
   showCollect?: boolean;
@@ -33,6 +36,7 @@ export function InvoiceActions({
   total,
   paidAmount,
   size = "sm",
+  iconsOnly = false,
   showPdf = true,
   showSend = true,
   showCollect = true,
@@ -57,6 +61,15 @@ export function InvoiceActions({
   const canIssue = status === "DRAFT";
   const canCancel = status !== "CANCELLED" && status !== "PAID" && paidAmount <= 0;
 
+  function notifyOk(text: string) {
+    setMessage(text);
+    if (iconsOnly) toast.success(text);
+  }
+  function notifyErr(text: string) {
+    setError(text);
+    if (iconsOnly) toast.error(text);
+  }
+
   async function sendInvoice() {
     setBusy("send");
     setError(null);
@@ -70,14 +83,14 @@ export function InvoiceActions({
         error?: string;
       };
       if (!res.ok) {
-        setError(data.error || "Αποτυχία αποστολής");
+        notifyErr(data.error || "Αποτυχία αποστολής");
         return;
       }
-      setMessage(data.item?.message || "Η αποστολή καταχωρήθηκε");
+      notifyOk(data.item?.message || "Η αποστολή καταχωρήθηκε");
       router.refresh();
       onDone?.();
     } catch {
-      setError("Αποτυχία αποστολής");
+      notifyErr("Αποτυχία αποστολής");
     } finally {
       setBusy(null);
     }
@@ -113,20 +126,20 @@ export function InvoiceActions({
         error?: string;
       };
       if (!res.ok) {
-        setError(data.error || "Αποτυχία είσπραξης");
+        notifyErr(data.error || "Αποτυχία είσπραξης");
         return;
       }
       setCollectOpen(false);
       const settle = data.item?.settlementNumber
         ? ` · ${data.item.settlementNumber}`
         : "";
-      setMessage(
+      notifyOk(
         `Είσπραξη ${formatEUR(amount)}${settle} · υπόλοιπο ${formatEUR(data.item!.balance)}`,
       );
       router.refresh();
       onDone?.();
     } catch {
-      setError("Αποτυχία είσπραξης");
+      notifyErr("Αποτυχία είσπραξης");
     } finally {
       setBusy(null);
     }
@@ -155,7 +168,7 @@ export function InvoiceActions({
       };
       if (!res.ok) {
         printWin?.close();
-        setError(data.error || "Αποτυχία έκδοσης");
+        notifyErr(data.error || "Αποτυχία έκδοσης");
         return;
       }
       const settleMsg = data.item?.autoSettle?.settlementNumber
@@ -165,8 +178,8 @@ export function InvoiceActions({
               : ""
           }`
         : "";
-      setMessage(`Το τιμολόγιο εκδόθηκε${settleMsg}`);
-      if (data.warning) setError(data.warning);
+      notifyOk(`Το τιμολόγιο εκδόθηκε${settleMsg}`);
+      if (data.warning) notifyErr(data.warning);
       if (data.item?.print) {
         maybeAutoPrintAfterIssue(
           invoiceId,
@@ -183,7 +196,7 @@ export function InvoiceActions({
       onDone?.();
     } catch {
       printWin?.close();
-      setError("Αποτυχία έκδοσης");
+      notifyErr("Αποτυχία έκδοσης");
     } finally {
       setBusy(null);
     }
@@ -200,40 +213,55 @@ export function InvoiceActions({
       });
       const data = (await res.json()) as { error?: string };
       if (!res.ok) {
-        setError(data.error || "Αποτυχία ακύρωσης");
+        notifyErr(data.error || "Αποτυχία ακύρωσης");
         return;
       }
-      setMessage("Το τιμολόγιο ακυρώθηκε");
+      notifyOk("Το τιμολόγιο ακυρώθηκε");
       router.refresh();
       onDone?.();
     } catch {
-      setError("Αποτυχία ακύρωσης");
+      notifyErr("Αποτυχία ακύρωσης");
     } finally {
       setBusy(null);
     }
   }
 
+  const btnSize = iconsOnly ? "icon" : size;
+  const iconBtnClass = iconsOnly && size === "sm" ? "h-8 w-8" : undefined;
+
   return (
-    <div className="space-y-2">
-      <div className="flex flex-wrap gap-2">
+    <div className={iconsOnly ? undefined : "space-y-2"}>
+      <div className={iconsOnly ? "flex flex-wrap items-center gap-1.5" : "flex flex-wrap gap-2"}>
         {showIssue && canIssue ? (
           <Button
-            size={size}
+            size={btnSize}
             disabled={busy === "issue"}
             onClick={() => void issueInvoice()}
+            title="Έκδοση"
+            aria-label={busy === "issue" ? "Έκδοση…" : "Έκδοση"}
+            className={iconBtnClass}
           >
             <CheckCircle2 size={14} />
-            {busy === "issue" ? "..." : "Έκδοση"}
+            {iconsOnly ? null : busy === "issue" ? "..." : "Έκδοση"}
           </Button>
         ) : null}
         {showPdf ? (
           <Button
-            size={size}
-            variant={size === "sm" && !canIssue ? "primary" : "secondary"}
+            size={btnSize}
+            variant={
+              iconsOnly
+                ? "secondary"
+                : size === "sm" && !canIssue
+                  ? "primary"
+                  : "secondary"
+            }
             onClick={() => openInvoicePrint(invoiceId, { auto: true })}
+            title="PDF / Εκτύπωση"
+            aria-label="PDF / Εκτύπωση"
+            className={iconBtnClass}
           >
             <FileDown size={14} />
-            PDF
+            {iconsOnly ? null : "PDF"}
           </Button>
         ) : null}
         {showSend ? (
@@ -251,34 +279,48 @@ export function InvoiceActions({
         ) : null}
         {showCollect ? (
           <Button
-            size={size}
-            variant={size === "md" && !canIssue ? "primary" : "secondary"}
+            size={btnSize}
+            variant={
+              iconsOnly
+                ? canCollect
+                  ? "primary"
+                  : "secondary"
+                : size === "md" && !canIssue
+                  ? "primary"
+                  : "secondary"
+            }
             disabled={!canCollect || busy === "collect"}
             onClick={() => setCollectOpen(true)}
+            title="Είσπραξη"
+            aria-label="Είσπραξη"
+            className={iconBtnClass}
           >
             <Wallet size={14} />
-            Είσπραξη
+            {iconsOnly ? null : "Είσπραξη"}
           </Button>
         ) : null}
         {showCancel && canCancel ? (
           <Button
-            size={size}
-            variant="ghost"
+            size={btnSize}
+            variant={iconsOnly ? "secondary" : "ghost"}
             disabled={busy === "cancel"}
             onClick={() => void cancelInvoice()}
+            title="Ακύρωση"
+            aria-label={busy === "cancel" ? "Ακύρωση…" : "Ακύρωση"}
+            className={iconBtnClass}
           >
             <Ban size={14} />
-            Ακύρωση
+            {iconsOnly ? null : "Ακύρωση"}
           </Button>
         ) : null}
       </div>
 
-      {message ? (
+      {!iconsOnly && message ? (
         <p className="rounded-xl bg-emerald-50 px-3 py-2 text-xs text-emerald-800">
           {message}
         </p>
       ) : null}
-      {error ? (
+      {!iconsOnly && error ? (
         <p className="rounded-xl bg-rose-50 px-3 py-2 text-xs text-rose-700">
           {error}
         </p>

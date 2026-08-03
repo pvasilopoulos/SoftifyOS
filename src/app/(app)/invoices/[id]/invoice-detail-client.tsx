@@ -417,35 +417,34 @@ export function InvoiceDetailClient({
           title={invoice.number}
           description={`${invoice.customer.name}${invoice.branch ? ` · ${invoice.branch.name}` : ""}${invoice.space ? ` · ${invoice.space.name}` : ""}`}
           actions={
-            <div className="flex flex-col items-stretch gap-2 sm:items-end">
-              <div className="flex flex-wrap justify-end gap-2">
-                <Button
-                  size="md"
-                  variant="secondary"
-                  type="button"
-                  onClick={copyNumber}
-                >
-                  {copied ? <Check size={15} /> : <ClipboardCopy size={15} />}
-                  {copied ? "Αντιγράφηκε" : "Αριθμός"}
-                </Button>
-              </div>
+            <div className="flex flex-wrap items-center justify-end gap-1.5">
+              <Button
+                size="icon"
+                variant="secondary"
+                type="button"
+                onClick={copyNumber}
+                title={copied ? "Αντιγράφηκε" : "Αντιγραφή αριθμού"}
+                aria-label={copied ? "Αντιγράφηκε" : "Αντιγραφή αριθμού"}
+              >
+                {copied ? <Check size={15} /> : <ClipboardCopy size={15} />}
+              </Button>
               <InvoiceActions
                 invoiceId={invoice.id}
                 status={invoice.status}
                 total={invoice.total}
                 paidAmount={invoice.paidAmount}
                 size="md"
+                iconsOnly
                 showCollect={invoice.kind !== "SALES_CREDIT"}
               />
-              <div className="flex flex-wrap justify-end gap-2">
-                <TransformActionButton
-                  sourceKind={invoice.kind}
-                  sourceId={invoice.id}
-                  canWrite={
-                    invoice.canWrite && invoice.kind !== "SALES_CREDIT"
-                  }
-                />
-              </div>
+              <TransformActionButton
+                sourceKind={invoice.kind}
+                sourceId={invoice.id}
+                canWrite={
+                  invoice.canWrite && invoice.kind !== "SALES_CREDIT"
+                }
+                iconOnly
+              />
             </div>
           }
         />

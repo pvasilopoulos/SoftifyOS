@@ -60,24 +60,28 @@ export function TransformActionButton({
   sourceId,
   canWrite,
   label = "Μετασχηματισμός",
+  iconOnly = false,
 }: {
   sourceKind: string;
   sourceId: string;
   canWrite: boolean;
   label?: string;
+  iconOnly?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   if (!canWrite) return null;
   return (
     <>
       <Button
-        size="sm"
+        size={iconOnly ? "icon" : "sm"}
         variant="secondary"
         type="button"
         onClick={() => setOpen(true)}
+        title={label}
+        aria-label={label}
       >
         <ArrowRightLeft size={14} />
-        {label}
+        {iconOnly ? null : label}
       </Button>
       {open ? (
         <TransformDialog
