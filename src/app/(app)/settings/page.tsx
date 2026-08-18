@@ -6,11 +6,11 @@ export const metadata = { title: "Ρυθμίσεις" };
 
 const links = [
   {
-    href: "/settings/company",
-    title: "Εταιρεία",
+    href: "/settings/menu",
+    title: "Μενού πλοήγησης",
     description:
-      "Στοιχεία εταιρείας, ενεργός tenant, οργανωτική ταυτότητα και έλεγχος πρόσβασης ανά εταιρεία.",
-    badge: "Core",
+      "Δομή πλοήγησης, γρήγορες συντομεύσεις και οργάνωση βασικών λειτουργιών.",
+    badge: "Παραμετρικό",
   },
   {
     href: "/settings/users",
@@ -20,11 +20,48 @@ const links = [
     badge: "IAM",
   },
   {
+    href: "/settings/roles",
+    title: "Ρόλοι εφαρμογής",
+    description: "Κατηγορίες δικαιωμάτων και πρότυπα πρόσβασης ανά ρόλο.",
+    badge: "IAM",
+  },
+  {
+    href: "/settings/groups",
+    title: "Ομάδες χρηστών",
+    description: "Ομαδοποίηση μελών ανά τμήμα για πιο απλή διαχείριση πρόσβασης.",
+    badge: "IAM",
+  },
+  {
+    href: "/settings/permissions",
+    title: "Permissions",
+    description: "Κατάλογος ενεργειών που ελέγχονται από role-based πρόσβαση.",
+    badge: "IAM",
+  },
+  {
+    href: "/settings/payment-methods",
+    title: "Τρόποι πληρωμής",
+    description: "Κανόνες μεθόδων πληρωμής και συμπεριφορά στις εισπράξεις/POS.",
+    badge: "POS",
+  },
+  {
+    href: "/settings/units",
+    title: "Μονάδες μέτρησης",
+    description: "Βασικές μονάδες για προϊόντα, ποσότητες και παραγγελίες.",
+    badge: "Master Data",
+  },
+  {
     href: "/settings/series",
     title: "Σειρές & Τύποι",
     description:
       "Αρίθμηση παραστατικών, υποκατάστημα/ταμείο, κινήσεις πελάτη & αποθήκης, myDATA, λογιστικά άρθρα.",
     badge: "Κρίσιμο",
+  },
+  {
+    href: "/settings/company",
+    title: "Εταιρεία",
+    description:
+      "Στοιχεία εταιρείας, ενεργός tenant, οργανωτική ταυτότητα και έλεγχος πρόσβασης ανά εταιρεία.",
+    badge: "Core",
   },
   {
     href: "/settings/tax",
