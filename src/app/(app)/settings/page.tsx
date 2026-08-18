@@ -6,11 +6,53 @@ export const metadata = { title: "Ρυθμίσεις" };
 
 const links = [
   {
+    href: "/settings/company",
+    title: "Εταιρεία",
+    description:
+      "Στοιχεία εταιρείας, ενεργός tenant, οργανωτική ταυτότητα και έλεγχος πρόσβασης ανά εταιρεία.",
+    badge: "Core",
+  },
+  {
+    href: "/settings/users",
+    title: "Χρήστες & Ρόλοι",
+    description:
+      "Λίστα χρηστών, ρόλοι (SUPER_ADMIN/OWNER/ADMIN/MEMBER/VIEWER) και συμμετοχές σε εταιρείες.",
+    badge: "IAM",
+  },
+  {
     href: "/settings/series",
     title: "Σειρές & Τύποι",
     description:
       "Αρίθμηση παραστατικών, υποκατάστημα/ταμείο, κινήσεις πελάτη & αποθήκης, myDATA, λογιστικά άρθρα.",
     badge: "Κρίσιμο",
+  },
+  {
+    href: "/settings/tax",
+    title: "Φορολογία & myDATA",
+    description:
+      "Πολιτικές ΦΠΑ, κανόνες διασύνδεσης myDATA και παρακολούθηση readiness ανά τύπο παραστατικού.",
+    badge: "AADE",
+  },
+  {
+    href: "/settings/payments",
+    title: "Πληρωμές & Ταμείο",
+    description:
+      "Κανόνες εισπράξεων, σύνδεση με σειρές παραστατικών και πολιτικές μερικής εξόφλησης.",
+    badge: "POS",
+  },
+  {
+    href: "/settings/integrations",
+    title: "Integrations",
+    description:
+      "Κατάσταση εξωτερικών συνδέσεων (myDATA, ERP connectors, webhooks) και επιχειρησιακή ετοιμότητα.",
+    badge: "Ops",
+  },
+  {
+    href: "/settings/security",
+    title: "Ασφάλεια",
+    description:
+      "Session policy, audit παρακολούθηση, πρόσβαση από ρόλους και βασικά hardening checkpoints.",
+    badge: "Security",
   },
 ];
 
