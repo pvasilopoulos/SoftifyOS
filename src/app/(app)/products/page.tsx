@@ -24,9 +24,19 @@ async function loadProducts(tenantId: string) {
     id: p.id,
     sku: p.sku,
     name: p.name,
+    category: p.category,
+    brand: p.brand,
+    barcode: p.barcode,
     unit: p.unit,
     vatRate: toNumber(p.vatRate),
     price: toNumber(p.price),
+    cost: toNumber(p.cost),
+    stockOnHand: toNumber(p.stockOnHand),
+    minStock: toNumber(p.minStock),
+    reorderQty: toNumber(p.reorderQty),
+    location: p.location,
+    tags: p.tags,
+    isTracked: p.isTracked,
     status: p.status,
     createdAt: p.createdAt.toISOString(),
   }));
@@ -51,7 +61,7 @@ export default async function ProductsPage() {
     <div className="space-y-5">
       <PageHeader
         title="Προϊόντα"
-        description="Κατάλογος SKU · τιμή · μονάδα · ΦΠΑ"
+        description="Advanced κατάλογος SKU · εμπορικά · απόθεμα · περιθώριο"
         actions={
           <Link
             href="/products/new"

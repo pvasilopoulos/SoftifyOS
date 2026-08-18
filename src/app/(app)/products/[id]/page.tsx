@@ -62,13 +62,41 @@ export default async function ProductDetailPage({
 
       <div className="soft-panel grid gap-4 p-5 sm:grid-cols-2 lg:grid-cols-4">
         <Stat label="Τιμή" value={formatEUR(toNumber(product.price))} />
+        <Stat label="Κόστος" value={formatEUR(toNumber(product.cost))} />
+        <Stat
+          label="Περιθώριο"
+          value={`${marginPct(toNumber(product.price), toNumber(product.cost)).toFixed(1)}%`}
+        />
         <Stat label="ΦΠΑ" value={`${toNumber(product.vatRate)}%`} />
         <Stat label="Μονάδα" value={product.unit} />
+        <Stat label="Κατηγορία" value={product.category ?? "—"} />
+        <Stat label="Brand" value={product.brand ?? "—"} />
+        <Stat label="Barcode" value={product.barcode ?? "—"} />
+        <Stat
+          label="Stock διαθέσιμο"
+          value={product.isTracked ? toNumber(product.stockOnHand).toFixed(3) : "N/A"}
+        />
+        <Stat label="Ελάχιστο stock" value={toNumber(product.minStock).toFixed(3)} />
+        <Stat label="Αναπλήρωση" value={toNumber(product.reorderQty).toFixed(3)} />
+        <Stat label="Τοποθεσία" value={product.location ?? "—"} />
         <Stat
           label="Ενημέρωση"
           value={product.updatedAt.toLocaleDateString("el-GR")}
         />
       </div>
+
+      {product.tags.length ? (
+        <section className="soft-panel p-5">
+          <h2 className="mb-2 text-sm font-semibold text-ink-950">Tags</h2>
+          <div className="flex flex-wrap gap-1.5">
+            {product.tags.map((tag) => (
+              <Badge key={tag} tone="teal">
+                {tag}
+              </Badge>
+            ))}
+          </div>
+        </section>
+      ) : null}
 
       {product.notes ? (
         <section className="soft-panel p-5">
@@ -93,4 +121,9 @@ function Stat({ label, value }: { label: string; value: string }) {
       </p>
     </div>
   );
+}
+
+function marginPct(price: number, cost: number) {
+  if (price <= 0) return 0;
+  return ((price - cost) / price) * 100;
 }

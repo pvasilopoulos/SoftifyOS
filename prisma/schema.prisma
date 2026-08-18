@@ -188,9 +188,19 @@ model Product {
   tenantId  String
   sku       String
   name      String
+  category  String?
+  brand     String?
+  barcode   String?
   unit      String        @default("τεμ")
   vatRate   Decimal       @default(24) @db.Decimal(5, 2)
   price     Decimal       @db.Decimal(14, 2)
+  cost      Decimal       @default(0) @db.Decimal(14, 2)
+  stockOnHand Decimal     @default(0) @db.Decimal(14, 3)
+  minStock  Decimal       @default(0) @db.Decimal(14, 3)
+  reorderQty Decimal      @default(0) @db.Decimal(14, 3)
+  location  String?
+  tags      String[]      @default([])
+  isTracked Boolean       @default(true)
   status    ProductStatus @default(ACTIVE)
   notes     String?
   createdAt DateTime      @default(now())
@@ -201,7 +211,10 @@ model Product {
   invoiceLines InvoiceLine[]
 
   @@unique([tenantId, sku])
+  @@unique([tenantId, barcode])
   @@index([tenantId, name])
+  @@index([tenantId, category])
+  @@index([tenantId, brand])
   @@index([tenantId, createdAt(sort: Desc), id(sort: Desc)])
   @@index([tenantId, status, createdAt(sort: Desc)])
   @@map("products")
