@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { ArrowLeft, Plus, Ruler, Search, Trash2, X } from "lucide-react";
 import { PageHeader } from "@/shared/ui/page-header";
 import { Button } from "@/shared/ui/button";
+import { CatalogImportBar } from "../_components/catalog-import-bar";
 import { Badge } from "@/shared/ui/badge";
 import { cn } from "@/shared/lib/cn";
 import {
@@ -206,10 +207,13 @@ export function UnitsSettingsClient({
         title="Μονάδες μέτρησης"
         description="Παραμετρικός κατάλογος μονάδων για προϊόντα, παραγγελίες και αποθήκη."
         actions={
-          <Button size="sm" onClick={openCreate}>
-            <Plus size={15} />
-            Νέα μονάδα
-          </Button>
+          <div className="flex flex-col items-end gap-2">
+            <Button size="sm" onClick={openCreate}>
+              <Plus size={15} />
+              Νέα μονάδα
+            </Button>
+            <CatalogImportBar kind="units" onImported={refresh} />
+          </div>
         }
       />
 

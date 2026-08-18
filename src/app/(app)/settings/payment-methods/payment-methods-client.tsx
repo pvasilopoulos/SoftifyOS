@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { ArrowLeft, Pencil, Plus, X } from "lucide-react";
 import { PageHeader } from "@/shared/ui/page-header";
 import { Button } from "@/shared/ui/button";
+import { CatalogImportBar } from "../_components/catalog-import-bar";
 import { Badge } from "@/shared/ui/badge";
 import { cn } from "@/shared/lib/cn";
 import {
@@ -253,9 +254,20 @@ export function PaymentMethodsClient({
             description="Παραμετρικός κατάλογος για POS & εισπράξεις, με λογιστικούς λογαριασμούς."
           />
         </div>
-        <Button size="sm" onClick={openCreate}>
-          <Plus size={16} /> Νέος τρόπος
-        </Button>
+        <div className="flex flex-col items-end gap-2">
+          <Button size="sm" onClick={openCreate}>
+            <Plus size={16} /> Νέος τρόπος
+          </Button>
+          <CatalogImportBar
+            kind="payment-methods"
+            onImported={async () => {
+              const res = await fetch("/api/settings/payment-methods");
+              const data = await res.json();
+              if (res.ok) setItems(data.items ?? []);
+              router.refresh();
+            }}
+          />
+        </div>
       </div>
 
       {message ? (

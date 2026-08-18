@@ -3,6 +3,7 @@ import { PrismaClient, MembershipRole } from "../src/generated/prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { Pool } from "pg";
 import bcrypt from "bcryptjs";
+import { importBundledCatalogs } from "../src/modules/catalogs/import";
 
 type TenantSeed = {
   slug: string;
@@ -204,6 +205,14 @@ async function main() {
   createdCredentials.push(
     `${superAdminUser.email} / ${DEFAULT_PASSWORD} (all tenants, SUPER_ADMIN)`,
   );
+
+  console.log("Importing bundled catalogs (payments / units / roles)...");
+  for (const tenant of tenantRecords) {
+    const summary = await importBundledCatalogs(prisma, tenant.id);
+    console.log(
+      `  ${tenant.slug}: payments +${summary["payment-methods"].created}/${summary["payment-methods"].updated}, units +${summary.units.created}/${summary.units.updated}, roles +${summary.roles.created}/${summary.roles.updated}`,
+    );
+  }
 
   console.log("Seeded SoftifyOS multi-tenant settings data");
   console.log("Tenants:");

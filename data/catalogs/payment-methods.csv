@@ -1,0 +1,14 @@
+code,name,kind,description,glAccount,glContraAccount,glClearingAccount,costCenter,accountingCode,bankIban,bankName,myDataPaymentType,sortOrder,isActive,showInPos,showInCollect,requiresExternalRef,allowsChange,affectsCashDrawer
+CASH,Μετρητά,CASH,Μετρητά στο ταμείο,38.00.00,30.00.00,,,CASH,,,,10,true,true,true,false,true,true
+CARD_VIVA,Κάρτα Viva,CARD,POS Viva Wallet,33.90.00,30.00.00,33.90.01,,CARD_VIVA,,,3,20,true,true,true,true,false,false
+CARD_WORLDLINE,Κάρτα Worldline,CARD,POS Worldline,33.90.00,30.00.00,33.90.02,,CARD_WL,,,3,21,true,true,true,true,false,false
+IRIS,IRIS / DIAS,TRANSFER,Άμεση πληρωμή IRIS,38.03.10,30.00.00,,,IRIS,,,6,25,true,true,true,true,false,false
+TRANSFER_NBG,Μεταφορά ΕΤΕ,TRANSFER,Τραπεζική κατάθεση Εθνική,38.03.01,30.00.00,,,NBG,GR1601101250000000012300695,Εθνική Τράπεζα,6,30,true,false,true,true,false,false
+TRANSFER_EUROBANK,Μεταφορά Eurobank,TRANSFER,Τραπεζική κατάθεση Eurobank,38.03.02,30.00.00,,,EUROBANK,GR1602603040000660201225086,Eurobank,6,31,true,false,true,true,false,false
+COD,Αντικαταβολή,CASH,Είσπραξη με courier,38.00.10,30.00.00,,,COD,,,,40,true,false,true,true,false,false
+CREDIT_30,Πίστωση 30ημ,OTHER,Ανοιχτό υπόλοιπο πελάτη 30 ημέρες,30.00.00,70.00.00,,,CR30,,,,50,true,false,true,false,false,false
+CREDIT_60,Πίστωση 60ημ,OTHER,Ανοιχτό υπόλοιπο πελάτη 60 ημέρες,30.00.00,70.00.00,,,CR60,,,,51,true,false,true,false,false,false
+CHECK,Επιταγή,OTHER,Επιταγή πελάτη,33.03.00,30.00.00,,,CHECK,,,,60,true,false,true,true,false,false
+GIFT_CARD,Δωροκάρτα,GIFT_CARD,Εξαργύρωση δωροκάρτας,56.00.00,30.00.00,,,GIFT,,,,70,true,true,false,false,false,false
+LOYALTY,Πόντοι loyalty,LOYALTY,Εξαργύρωση πόντων,64.90.00,30.00.00,,,LOY,,,,80,true,true,false,false,false,false
+OTHER,Άλλο,OTHER,Λοιποί τρόποι είσπραξης,38.99.00,30.00.00,,,OTHER,,,,90,true,true,true,false,false,false

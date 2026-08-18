@@ -1,0 +1,7 @@
+code,name,description,permissions
+sales,Πωλήσεις,"Προσφορές, παραγγελίες, τιμολόγια και πελάτες","dashboard.view|customers.read|customers.write|quotes.read|quotes.write|orders.read|orders.write|invoices.read|invoices.write|pos.use|products.read|reports.read"
+cashier,Ταμίας / POS,Λιανική πώληση και εισπράξεις,"dashboard.view|customers.read|invoices.read|invoices.write|pos.use|gift_cards.read|gift_cards.write|loyalty.read|loyalty.write|products.read"
+warehouse,Αποθήκη,Αποθέματα και παραλαβές,"dashboard.view|products.read|products.write|inventory.read|inventory.write|orders.read|purchasing.read"
+purchasing,Αγορές,Προμηθευτές και παραγγελίες αγοράς,"dashboard.view|purchasing.read|purchasing.write|products.read|inventory.read|reports.read"
+accountant,Λογιστήριο,Οικονομικά παραστατικά και αναφορές,"dashboard.view|invoices.read|finance.read|reports.read|audit.read|customers.read|orders.read"
+ops_manager,Υπεύθυνος λειτουργιών,Εποπτεία πωλήσεων και αποθήκης χωρίς IAM,"dashboard.view|customers.read|quotes.read|orders.read|invoices.read|products.read|inventory.read|purchasing.read|finance.read|reports.read|pos.use"

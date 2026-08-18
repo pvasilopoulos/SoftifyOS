@@ -13,6 +13,7 @@
     "db:migrate": "prisma migrate dev",
     "db:push": "prisma db push",
     "db:seed": "tsx prisma/seed.ts",
+    "db:import:catalogs": "tsx scripts/import-catalogs.ts",
     "db:seed:scale": "tsx scripts/seed-scale.ts",
     "db:seed:customers": "tsx scripts/seed-customers.ts",
     "db:seed:invoices": "tsx scripts/seed-invoices.ts",
@@ -49,6 +50,7 @@
     "react": "19.2.4",
     "react-dom": "19.2.4",
     "tailwind-merge": "^3.6.0",
+    "xlsx": "^0.18.5",
     "zod": "^4.4.3"
   },
   "devDependencies": {

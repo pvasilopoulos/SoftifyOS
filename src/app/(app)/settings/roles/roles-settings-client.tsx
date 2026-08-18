@@ -15,6 +15,7 @@ import {
 } from "lucide-react";
 import { PageHeader } from "@/shared/ui/page-header";
 import { Button } from "@/shared/ui/button";
+import { CatalogImportBar } from "../_components/catalog-import-bar";
 import { Badge } from "@/shared/ui/badge";
 import { cn } from "@/shared/lib/cn";
 import {
@@ -261,10 +262,13 @@ export function RolesSettingsClient({ initialRoles }: { initialRoles: Role[] }) 
         title="Ρόλοι"
         description="Ορίστε δικαιώματα ανά ρόλο — system και custom — για κάθε λειτουργία του ERP."
         actions={
-          <Button size="sm" onClick={() => setCreating(true)}>
-            <Plus size={15} />
-            Νέος ρόλος
-          </Button>
+          <div className="flex flex-col items-end gap-2">
+            <Button size="sm" onClick={() => setCreating(true)}>
+              <Plus size={15} />
+              Νέος ρόλος
+            </Button>
+            <CatalogImportBar kind="roles" onImported={refresh} />
+          </div>
         }
       />
 

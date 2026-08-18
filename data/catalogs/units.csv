@@ -1,0 +1,20 @@
+code,name,symbol,kind,decimals,description,sortOrder,isActive,isDefault
+PCS,Τεμάχια,τεμ,COUNT,0,Βασική μονάδα τεμαχίων,10,true,true
+PAIR,Ζεύγος,ζεύγ,COUNT,0,Ζευγάρια (υποδήματα/γάντια),15,true,false
+SET,Σετ,σετ,COUNT,0,Ομαδοποιημένα τεμάχια,16,true,false
+DOZ,Δωδεκάδα,δωδ,COUNT,0,12 τεμάχια,18,true,false
+BOX,Κουτί,κουτί,COUNT,0,Κιβώτιο λιανικής,20,true,false
+PKG,Συσκευασία,συσκ,COUNT,0,Συσκευασία χονδρικής,30,true,false
+PAL,Παλέτα,παλ,COUNT,0,Παλέτα μεταφοράς,40,true,false
+ROLL,Ρολό,ρολό,COUNT,0,Υλικά σε ρολό,45,true,false
+KG,Χιλιόγραμμα,kg,WEIGHT,3,Βάρος πώλησης,50,true,false
+G,Γραμμάρια,g,WEIGHT,0,Μικρό βάρος,60,true,false
+TON,Τόνος,t,WEIGHT,3,Χύδην φορτία,65,true,false
+LT,Λίτρα,lt,VOLUME,3,Υγρά,70,true,false
+ML,Χιλιοστόλιτρα,ml,VOLUME,0,Μικρός όγκος,80,true,false
+M3,Κυβικά μέτρα,m³,VOLUME,3,Όγκος αποθήκης,85,true,false
+M,Μέτρα,m,LENGTH,2,Μήκος,90,true,false
+CM,Εκατοστά,cm,LENGTH,0,Μικρό μήκος,100,true,false
+M2,Τετραγωνικά μέτρα,m²,AREA,2,Εμβαδόν,110,true,false
+HR,Ώρες,ώρα,TIME,2,Υπηρεσίες χρόνου,120,true,false
+DAY,Ημέρες,ημ,TIME,0,Ημερήσια χρέωση,130,true,false
