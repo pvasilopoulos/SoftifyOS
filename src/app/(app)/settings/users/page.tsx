@@ -1,68 +1,59 @@
 import { redirect } from "next/navigation";
-import { ShieldCheck, Users } from "lucide-react";
 import { getSession } from "@/platform/auth/session";
+import { ensureSystemRoles } from "@/platform/auth/ensure-system-roles";
 import { prisma } from "@/server/db";
-import { PageHeader } from "@/shared/ui/page-header";
-import { Badge } from "@/shared/ui/badge";
+import { UsersSettingsClient } from "./users-settings-client";
 
-export const metadata = { title: "Ρυθμίσεις · Χρήστες & Ρόλοι" };
+export const metadata = { title: "Χρήστες" };
 export const dynamic = "force-dynamic";
-
-const roleTone: Record<string, "teal" | "emerald" | "amber" | "rose" | "slate"> = {
-  SUPER_ADMIN: "rose",
-  OWNER: "teal",
-  ADMIN: "emerald",
-  MEMBER: "amber",
-  VIEWER: "slate",
-};
 
 export default async function UsersSettingsPage() {
   const session = await getSession();
   if (!session) redirect("/login");
+  if (
+    session.role !== "SUPER_ADMIN" &&
+    session.role !== "OWNER" &&
+    session.role !== "ADMIN"
+  ) {
+    redirect("/settings");
+  }
+  await ensureSystemRoles(session.tenantId);
 
-  const memberships = await prisma.membership.findMany({
-    where: { tenantId: session.tenantId },
-    include: {
-      user: { select: { id: true, name: true, email: true } },
-    },
-    orderBy: [{ role: "asc" }, { createdAt: "asc" }],
-  });
+  const [users, roles] = await Promise.all([
+    prisma.membership.findMany({
+      where: { tenantId: session.tenantId },
+      include: {
+        user: { select: { id: true, email: true, name: true, createdAt: true } },
+        appRole: { select: { id: true, code: true, name: true } },
+        groups: {
+          include: { group: { select: { id: true, code: true, name: true } } },
+        },
+      },
+      orderBy: { createdAt: "asc" },
+    }),
+    prisma.appRole.findMany({
+      where: { tenantId: session.tenantId },
+      orderBy: [{ isSystem: "desc" }, { name: "asc" }],
+      select: { id: true, code: true, name: true },
+    }),
+  ]);
 
   return (
-    <div className="space-y-5">
-      <PageHeader
-        title="Χρήστες & Ρόλοι"
-        description="Δικαιώματα πρόσβασης ανά χρήστη στην τρέχουσα εταιρεία"
-      />
-
-      <div className="flex flex-wrap items-center gap-2 text-sm text-slate-600">
-        <span className="inline-flex items-center gap-1">
-          <Users size={14} /> {memberships.length} ενεργές συμμετοχές
-        </span>
-        <span className="inline-flex items-center gap-1">
-          <ShieldCheck size={14} /> Ρόλος session:{" "}
-          <Badge tone={roleTone[session.role] ?? "slate"}>{session.role}</Badge>
-        </span>
-      </div>
-
-      <section className="soft-panel overflow-hidden">
-        <div className="grid grid-cols-[1.2fr_1fr_0.7fr] border-b border-slate-100 px-4 py-2 text-xs font-medium uppercase tracking-wide text-slate-400">
-          <span>Χρήστης</span>
-          <span>Email</span>
-          <span>Ρόλος</span>
-        </div>
-        <ul className="divide-y divide-slate-100">
-          {memberships.map((m) => (
-            <li key={m.id} className="grid grid-cols-[1.2fr_1fr_0.7fr] items-center gap-2 px-4 py-3 text-sm">
-              <span className="font-medium text-ink-950">{m.user.name}</span>
-              <span className="text-slate-600">{m.user.email}</span>
-              <span>
-                <Badge tone={roleTone[m.role] ?? "slate"}>{m.role}</Badge>
-              </span>
-            </li>
-          ))}
-        </ul>
-      </section>
-    </div>
+    <UsersSettingsClient
+      initialUsers={users.map((m) => ({
+        membershipId: m.id,
+        role: m.role,
+        appRoleId: m.appRoleId,
+        appRole: m.appRole,
+        user: {
+          ...m.user,
+          createdAt: m.user.createdAt.toISOString(),
+        },
+        groups: m.groups.map((g) => g.group),
+      }))}
+      initialRoles={roles}
+      currentUserId={session.sub}
+      currentRole={session.role}
+    />
   );
 }

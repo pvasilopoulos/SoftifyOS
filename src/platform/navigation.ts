@@ -12,14 +12,81 @@ import {
   ScrollText,
   Tags,
   ClipboardList,
+  Store,
+  Shield,
+  FolderTree,
+  Gift,
+  Star,
+  MoreHorizontal,
   type LucideIcon,
 } from "lucide-react";
 
+export type NavIconName =
+  | "LayoutDashboard"
+  | "Users"
+  | "FileText"
+  | "ShoppingCart"
+  | "ClipboardList"
+  | "Store"
+  | "Gift"
+  | "Star"
+  | "Tags"
+  | "Package"
+  | "Truck"
+  | "Wallet"
+  | "UserRound"
+  | "BarChart3"
+  | "ScrollText"
+  | "Settings"
+  | "Shield"
+  | "FolderTree";
+
+export const navIconMap: Record<NavIconName, LucideIcon> = {
+  LayoutDashboard,
+  Users,
+  FileText,
+  ShoppingCart,
+  ClipboardList,
+  Store,
+  Gift,
+  Star,
+  Tags,
+  Package,
+  Truck,
+  Wallet,
+  UserRound,
+  BarChart3,
+  ScrollText,
+  Settings,
+  Shield,
+  FolderTree,
+};
+
+/** Serializable menu node (stored in DB / edited in settings) */
+export type MenuNodeConfig = {
+  id: string;
+  /** folder | link */
+  type: "folder" | "link";
+  label: string;
+  href?: string;
+  icon?: NavIconName;
+  visible?: boolean;
+  /** Nested children for folders */
+  children?: MenuNodeConfig[];
+  /** Roles that can see this node; empty/undefined = all */
+  roles?: Array<"SUPER_ADMIN" | "OWNER" | "ADMIN" | "MEMBER" | "VIEWER">;
+  mobileTab?: boolean;
+  /** Order among mobile footer tabs (0-based). Lower first. */
+  mobileOrder?: number;
+};
+
 export type NavItem = {
+  id: string;
   href: string;
   label: string;
   icon: LucideIcon;
   mobileTab?: boolean;
+  mobileOrder?: number;
 };
 
 export type NavGroup = {
@@ -28,75 +95,254 @@ export type NavGroup = {
   items: NavItem[];
 };
 
-export const navGroups: NavGroup[] = [
+/** Default SoftifyOS menu — source of truth when tenant has no overrides */
+export const defaultMenuTree: MenuNodeConfig[] = [
   {
     id: "main",
+    type: "folder",
     label: "Κύρια",
-    items: [
+    icon: "LayoutDashboard",
+    children: [
       {
-        href: "/",
+        id: "dashboard",
+        type: "link",
         label: "Πίνακας ελέγχου",
-        icon: LayoutDashboard,
+        href: "/",
+        icon: "LayoutDashboard",
         mobileTab: true,
+        mobileOrder: 0,
       },
     ],
   },
   {
     id: "sales",
+    type: "folder",
     label: "Πωλήσεις",
-    items: [
+    icon: "ShoppingCart",
+    children: [
       {
-        href: "/customers",
+        id: "customers",
+        type: "link",
         label: "Πελάτες",
-        icon: Users,
+        href: "/customers",
+        icon: "Users",
         mobileTab: true,
+        mobileOrder: 1,
       },
       {
-        href: "/invoices",
-        label: "Τιμολόγια",
-        icon: FileText,
+        id: "quotes",
+        type: "link",
+        label: "Προσφορές",
+        href: "/quotes",
+        icon: "ClipboardList",
       },
-      { href: "/orders", label: "Παραγγελίες", icon: ShoppingCart },
-      { href: "/quotes", label: "Προσφορές", icon: ClipboardList },
+      {
+        id: "orders",
+        type: "link",
+        label: "Παραγγελίες",
+        href: "/orders",
+        icon: "ShoppingCart",
+      },
+      {
+        id: "invoices",
+        type: "link",
+        label: "Τιμολόγια",
+        href: "/invoices",
+        icon: "FileText",
+      },
+      {
+        id: "pos",
+        type: "link",
+        label: "POS Λιανική",
+        href: "/pos",
+        icon: "Store",
+      },
+      {
+        id: "gift-cards",
+        type: "link",
+        label: "Δωροκάρτες",
+        href: "/gift-cards",
+        icon: "Gift",
+      },
+      {
+        id: "loyalty",
+        type: "link",
+        label: "Loyalty",
+        href: "/loyalty",
+        icon: "Star",
+      },
     ],
   },
   {
     id: "ops",
+    type: "folder",
     label: "Λειτουργίες",
-    items: [
+    icon: "Package",
+    children: [
       {
-        href: "/products",
+        id: "products",
+        type: "link",
         label: "Προϊόντα",
-        icon: Tags,
+        href: "/products",
+        icon: "Tags",
       },
       {
-        href: "/inventory",
+        id: "inventory",
+        type: "link",
         label: "Αποθήκη",
-        icon: Package,
+        href: "/inventory",
+        icon: "Package",
         mobileTab: true,
+        mobileOrder: 2,
       },
-      { href: "/purchasing", label: "Αγορές", icon: Truck },
+      {
+        id: "purchasing",
+        type: "link",
+        label: "Αγορές",
+        href: "/purchasing",
+        icon: "Truck",
+      },
     ],
   },
   {
-    id: "finance",
+    id: "org",
+    type: "folder",
     label: "Οργάνωση",
-    items: [
-      { href: "/finance", label: "Οικονομικά", icon: Wallet },
-      { href: "/hr", label: "HR", icon: UserRound },
-      { href: "/reports", label: "Αναφορές", icon: BarChart3 },
-      { href: "/audit", label: "Audit log", icon: ScrollText },
-      { href: "/settings", label: "Ρυθμίσεις", icon: Settings },
+    icon: "Settings",
+    children: [
+      {
+        id: "finance",
+        type: "link",
+        label: "Οικονομικά",
+        href: "/finance",
+        icon: "Wallet",
+      },
+      {
+        id: "hr",
+        type: "link",
+        label: "HR",
+        href: "/hr",
+        icon: "UserRound",
+      },
+      {
+        id: "reports",
+        type: "link",
+        label: "Αναφορές",
+        href: "/reports",
+        icon: "BarChart3",
+      },
+      {
+        id: "audit",
+        type: "link",
+        label: "Audit log",
+        href: "/audit",
+        icon: "ScrollText",
+        roles: ["OWNER", "ADMIN"],
+      },
+      {
+        id: "settings",
+        type: "link",
+        label: "Ρυθμίσεις",
+        href: "/settings",
+        icon: "Settings",
+        roles: ["OWNER", "ADMIN"],
+      },
     ],
   },
 ];
 
+export function resolveIcon(name?: NavIconName): LucideIcon {
+  if (!name) return FolderTree;
+  return navIconMap[name] ?? FolderTree;
+}
+
+function roleAllowed(
+  node: MenuNodeConfig,
+  role: string | undefined,
+): boolean {
+  if (!node.roles || node.roles.length === 0) return true;
+  if (!role) return true;
+  return node.roles.includes(role as MenuNodeConfig["roles"] extends
+    | Array<infer R>
+    | undefined
+    ? R
+    : never);
+}
+
+/** Flatten configurable tree → sidebar groups (folders → groups, nested folders recurse) */
+export function menuTreeToNavGroups(
+  tree: MenuNodeConfig[],
+  role?: string,
+): NavGroup[] {
+  const groups: NavGroup[] = [];
+
+  function walk(nodes: MenuNodeConfig[]) {
+    for (const node of nodes) {
+      if (node.visible === false) continue;
+      if (!roleAllowed(node, role)) continue;
+
+      if (node.type === "folder") {
+        const items: NavItem[] = [];
+        const nested: MenuNodeConfig[] = [];
+        for (const child of node.children ?? []) {
+          if (child.visible === false) continue;
+          if (!roleAllowed(child, role)) continue;
+          if (child.type === "folder") {
+            nested.push(child);
+            continue;
+          }
+          if (child.type !== "link" || !child.href) continue;
+          items.push({
+            id: child.id,
+            href: child.href,
+            label: child.label,
+            icon: resolveIcon(child.icon),
+            mobileTab: child.mobileTab,
+            mobileOrder: child.mobileOrder,
+          });
+        }
+        if (items.length > 0) {
+          groups.push({ id: node.id, label: node.label, items });
+        }
+        if (nested.length > 0) walk(nested);
+      } else if (node.type === "link" && node.href) {
+        groups.push({
+          id: node.id,
+          label: node.label,
+          items: [
+            {
+              id: node.id,
+              href: node.href,
+              label: node.label,
+              icon: resolveIcon(node.icon),
+              mobileTab: node.mobileTab,
+              mobileOrder: node.mobileOrder,
+            },
+          ],
+        });
+      }
+    }
+  }
+
+  walk(tree);
+  return groups;
+}
+
+/** @deprecated use menuTreeToNavGroups(defaultMenuTree) — kept for gradual migration */
+export const navGroups: NavGroup[] = menuTreeToNavGroups(defaultMenuTree);
+
+/** @deprecated use resolveMobileTabsFromGroups — kept for gradual migration */
 export const mobileTabs: NavItem[] = [
-  ...navGroups.flatMap((g) => g.items).filter((i) => i.mobileTab),
+  ...navGroups
+    .flatMap((g) => g.items)
+    .filter((i) => i.mobileTab)
+    .sort((a, b) => (a.mobileOrder ?? 999) - (b.mobileOrder ?? 999))
+    .slice(0, 3),
   {
+    id: "more",
     href: "/more",
     label: "Περισσότερα",
-    icon: Settings,
+    icon: MoreHorizontal,
     mobileTab: true,
   },
 ];
@@ -105,7 +351,7 @@ export const quickActions = [
   {
     id: "new-invoice",
     label: "Νέο τιμολόγιο",
-    href: "/invoices?new=1",
+    href: "/invoices/new",
     shortcut: "N I",
   },
   {
@@ -119,6 +365,12 @@ export const quickActions = [
     label: "Νέα προσφορά",
     href: "/quotes/new",
     shortcut: "N Q",
+  },
+  {
+    id: "pos",
+    label: "Άνοιγμα POS",
+    href: "/pos",
+    shortcut: "G R",
   },
   {
     id: "open-customer",

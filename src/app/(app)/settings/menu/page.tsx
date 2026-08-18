@@ -1,17 +1,22 @@
-import { SettingsPlaceholder } from "../_components/settings-placeholder";
+import { redirect } from "next/navigation";
+import { getSession } from "@/platform/auth/session";
+import { getTenantMenuTree } from "@/platform/navigation/resolve-menu";
+import { MenuSettingsClient } from "./menu-settings-client";
 
-export const metadata = { title: "Ρυθμίσεις · Μενού πλοήγησης" };
+export const metadata = { title: "Μενού πλοήγησης" };
+export const dynamic = "force-dynamic";
 
-export default function MenuSettingsPage() {
-  return (
-    <SettingsPlaceholder
-      title="Μενού πλοήγησης"
-      description="Οργάνωση κύριου και mobile μενού εφαρμογής"
-      bullets={[
-        "Αποκαταστάθηκε η ενότητα από το παλαιότερο GitHub settings structure.",
-        "Μπορείς να ορίσεις ποια modules εμφανίζονται σε desktop και mobile.",
-        "Υποστηρίζεται επέκταση για drag & drop ταξινόμηση στο επόμενο βήμα.",
-      ]}
-    />
-  );
+export default async function MenuSettingsPage() {
+  const session = await getSession();
+  if (!session) redirect("/login");
+  if (
+    session.role !== "SUPER_ADMIN" &&
+    session.role !== "OWNER" &&
+    session.role !== "ADMIN"
+  ) {
+    redirect("/settings");
+  }
+
+  const menu = await getTenantMenuTree(session.tenantId);
+  return <MenuSettingsClient initialMenu={menu} />;
 }

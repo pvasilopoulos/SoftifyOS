@@ -47,6 +47,18 @@ model Tenant {
   sites            Site[]
   documentSeries   DocumentSeries[]
   invoicePayments  InvoicePayment[]
+  posSessions      PosSession[]
+  posTerminals     PosTerminal[]
+  giftCards        GiftCard[]
+  giftCardLedgers  GiftCardLedger[]
+  loyaltyAccounts  LoyaltyAccount[]
+  loyaltyLedgers   LoyaltyLedger[]
+  loyaltyProgram   LoyaltyProgram?
+  paymentMethods   PaymentMethod[]
+  unitsOfMeasure   UnitOfMeasure[]
+  tenantSettings   TenantSettings?
+  appRoles         AppRole[]
+  userGroups       UserGroup[]
 
   @@map("tenants")
 }
@@ -70,15 +82,19 @@ model Membership {
   tenantId  String
   userId    String
   role      MembershipRole @default(MEMBER)
+  appRoleId String?
   createdAt DateTime       @default(now())
   updatedAt DateTime       @updatedAt
 
-  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tenant  Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  user    User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  appRole AppRole? @relation(fields: [appRoleId], references: [id], onDelete: SetNull)
+  groups  UserGroupMember[]
 
   @@unique([tenantId, userId])
   @@index([userId])
   @@index([tenantId, role])
+  @@index([tenantId, appRoleId])
   @@map("memberships")
 }
 
@@ -118,6 +134,8 @@ model Customer {
   branches Branch[]
   invoices Invoice[]
   orders   Order[]
+  giftCards GiftCard[]
+  loyaltyAccounts LoyaltyAccount[]
 
   @@unique([tenantId, code])
   @@index([tenantId, name])
@@ -188,11 +206,14 @@ model Product {
   id        String        @id @default(cuid())
   tenantId  String
   sku       String
-  name      String
   category  String?
   brand     String?
+  /// Barcode / EAN / QR payload for POS scan (optional)
   barcode   String?
+  name      String
+  /// Denormalized display symbol (from UnitOfMeasure.symbol)
   unit      String        @default("τεμ")
+  unitId    String?
   vatRate   Decimal       @default(24) @db.Decimal(5, 2)
   price     Decimal       @db.Decimal(14, 2)
   cost      Decimal       @default(0) @db.Decimal(14, 2)
@@ -207,18 +228,60 @@ model Product {
   createdAt DateTime      @default(now())
   updatedAt DateTime      @updatedAt
 
-  tenant Tenant      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  lines  OrderLine[]
-  invoiceLines InvoiceLine[]
+  tenant        Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  unitOfMeasure UnitOfMeasure? @relation(fields: [unitId], references: [id], onDelete: SetNull)
+  lines         OrderLine[]
+  invoiceLines  InvoiceLine[]
 
   @@unique([tenantId, sku])
   @@unique([tenantId, barcode])
   @@index([tenantId, name])
   @@index([tenantId, category])
   @@index([tenantId, brand])
+  @@index([tenantId, unitId])
   @@index([tenantId, createdAt(sort: Desc), id(sort: Desc)])
   @@index([tenantId, status, createdAt(sort: Desc)])
   @@map("products")
+}
+
+enum UnitOfMeasureKind {
+  COUNT
+  WEIGHT
+  VOLUME
+  LENGTH
+  AREA
+  TIME
+  OTHER
+}
+
+/// Παραμετρικές μονάδες μέτρησης ανά tenant
+model UnitOfMeasure {
+  id          String            @id @default(cuid())
+  tenantId    String
+  /// Stable code e.g. PCS, KG, LT
+  code        String
+  name        String
+  /// Short symbol shown on products / docs e.g. τεμ, kg
+  symbol      String
+  kind        UnitOfMeasureKind @default(COUNT)
+  /// Decimal places allowed for quantities
+  decimals    Int               @default(0)
+  description String?
+  sortOrder   Int               @default(100)
+  isActive    Boolean           @default(true)
+  isDefault   Boolean           @default(false)
+  isSystem    Boolean           @default(false)
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+
+  tenant   Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  products Product[]
+
+  @@unique([tenantId, code])
+  @@unique([tenantId, symbol])
+  @@index([tenantId, isActive, sortOrder])
+  @@index([tenantId, kind, sortOrder])
+  @@map("units_of_measure")
 }
 
 enum InvoiceStatus {
@@ -310,19 +373,32 @@ model InvoiceLine {
 }
 
 model InvoicePayment {
-  id        String   @id @default(cuid())
-  tenantId  String
-  invoiceId String
-  amount    Decimal  @db.Decimal(14, 2)
-  method    String   @default("OTHER")
-  note      String?
-  paidAt    DateTime @default(now())
-  createdAt DateTime @default(now())
+  id               String   @id @default(cuid())
+  tenantId         String
+  invoiceId        String
+  amount           Decimal  @db.Decimal(14, 2)
+  /// Stable code from PaymentMethod catalog (e.g. CASH, CARD_VIVA)
+  method           String   @default("OTHER")
+  paymentMethodId  String?
+  note             String?
+  changeAmount     Decimal  @default(0) @db.Decimal(14, 2)
+  externalRef      String?
+  posSessionId     String?
+  giftCardId       String?
+  loyaltyAccountId String?
+  paidAt           DateTime @default(now())
+  createdAt        DateTime @default(now())
 
-  tenant  Tenant  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  invoice Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  tenant         Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  invoice        Invoice         @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  paymentMethod  PaymentMethod?  @relation(fields: [paymentMethodId], references: [id], onDelete: SetNull)
+  posSession     PosSession?     @relation(fields: [posSessionId], references: [id], onDelete: SetNull)
+  giftCard       GiftCard?       @relation(fields: [giftCardId], references: [id], onDelete: SetNull)
+  loyaltyAccount LoyaltyAccount? @relation(fields: [loyaltyAccountId], references: [id], onDelete: SetNull)
 
   @@index([tenantId, invoiceId, paidAt(sort: Desc)])
+  @@index([tenantId, posSessionId])
+  @@index([tenantId, paymentMethodId])
   @@map("invoice_payments")
 }
 
@@ -427,6 +503,8 @@ model Site {
   series   DocumentSeries[]
   invoices Invoice[]
   orders   Order[]
+  posSessions PosSession[]
+  posTerminals PosTerminal[]
 
   @@unique([tenantId, code])
   @@index([tenantId, kind, isActive])
@@ -506,4 +584,328 @@ model DocumentSeries {
   @@index([tenantId, kind, isActive])
   @@index([tenantId, siteId, kind])
   @@map("document_series")
+}
+
+enum PosSessionStatus {
+  OPEN
+  CLOSED
+}
+
+enum PosTerminalProvider {
+  MOCK
+  VIVA
+  WORLDLINE
+  OTHER
+}
+
+enum GiftCardStatus {
+  ACTIVE
+  DEPLETED
+  VOID
+  EXPIRED
+}
+
+enum GiftCardLedgerKind {
+  ISSUE
+  REDEEM
+  ADJUST
+  VOID
+  EXPIRE
+}
+
+enum LoyaltyLedgerKind {
+  EARN
+  REDEEM
+  ADJUST
+  VOID
+}
+
+/// Behavior contract for POS / collect — tenants add custom codes with a kind
+enum PaymentMethodKind {
+  CASH
+  CARD
+  TRANSFER
+  GIFT_CARD
+  LOYALTY
+  OTHER
+}
+
+/// Tenant catalog of payment / tender methods (POS + εισπράξεις)
+model PaymentMethod {
+  id                  String            @id @default(cuid())
+  tenantId            String
+  code                String
+  name                String
+  kind                PaymentMethodKind
+  description         String?
+  /// Κύριος λογ. λογαριασμός (ταμείο / τράπεζα / κάρτες)
+  glAccount           String?
+  /// Αντίστοιχος λογαριασμός (π.χ. πελάτες / εκκρεμείς)
+  glContraAccount     String?
+  /// Εκκαθάριση (κάρτες / ενδιάμεσος)
+  glClearingAccount   String?
+  costCenter          String?
+  accountingCode      String?
+  bankIban            String?
+  bankName            String?
+  /// Κωδικός τύπου πληρωμής myDATA (εφόσον ισχύει)
+  myDataPaymentType   String?
+  sortOrder           Int               @default(0)
+  isActive            Boolean           @default(true)
+  showInPos           Boolean           @default(true)
+  showInCollect       Boolean           @default(true)
+  requiresExternalRef Boolean           @default(false)
+  allowsChange        Boolean           @default(false)
+  affectsCashDrawer   Boolean           @default(false)
+  isSystem            Boolean           @default(false)
+  createdAt           DateTime          @default(now())
+  updatedAt           DateTime          @updatedAt
+
+  tenant   Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  payments InvoicePayment[]
+
+  @@unique([tenantId, code])
+  @@index([tenantId, isActive, sortOrder])
+  @@index([tenantId, showInPos, sortOrder])
+  @@map("payment_methods")
+}
+
+/// Ανοιχτή βάρδια ταμείου POS
+model PosSession {
+  id             String           @id @default(cuid())
+  tenantId       String
+  siteId         String
+  openedByUserId String
+  status         PosSessionStatus @default(OPEN)
+  openingFloat   Decimal          @default(0) @db.Decimal(14, 2)
+  closingCash    Decimal?         @db.Decimal(14, 2)
+  openedAt       DateTime         @default(now())
+  closedAt       DateTime?
+  notes          String?
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+
+  tenant   Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  site     Site             @relation(fields: [siteId], references: [id], onDelete: Restrict)
+  payments InvoicePayment[]
+
+  @@index([tenantId, status, openedAt(sort: Desc)])
+  @@index([tenantId, siteId, status])
+  @@map("pos_sessions")
+}
+
+/// Σύνδεση τερματικού κάρτας (config · live provider αργότερα)
+model PosTerminal {
+  id        String              @id @default(cuid())
+  tenantId  String
+  siteId    String
+  code      String
+  name      String
+  provider  PosTerminalProvider @default(MOCK)
+  isActive  Boolean             @default(true)
+  configJson String?
+  createdAt DateTime            @default(now())
+  updatedAt DateTime            @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  site   Site   @relation(fields: [siteId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, code])
+  @@index([tenantId, siteId, isActive])
+  @@map("pos_terminals")
+}
+
+model GiftCard {
+  id             String         @id @default(cuid())
+  tenantId       String
+  code           String
+  initialBalance Decimal        @db.Decimal(14, 2)
+  balance        Decimal        @db.Decimal(14, 2)
+  currency       String         @default("EUR")
+  status         GiftCardStatus @default(ACTIVE)
+  customerId     String?
+  expiresAt      DateTime?
+  notes          String?
+  /// Παθητικό / υπόλοιπο δωροκαρτών (π.χ. 56.00.00)
+  glLiabilityAccount String?
+  /// Είσπραξη έκδοσης — ταμείο / τράπεζα (π.χ. 38.00.00)
+  glCashAccount      String?
+  /// Αντίστοιχος εξαργύρωσης — έσοδα / εκκαθάριση (π.χ. 70.00.00)
+  glRedeemContraAccount String?
+  costCenter     String?
+  accountingCode String?
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+
+  tenant   Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  customer Customer?        @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  payments InvoicePayment[]
+  ledger   GiftCardLedger[]
+
+  @@unique([tenantId, code])
+  @@index([tenantId, status])
+  @@index([tenantId, createdAt(sort: Desc)])
+  @@map("gift_cards")
+}
+
+model GiftCardLedger {
+  id              String             @id @default(cuid())
+  tenantId        String
+  giftCardId      String
+  kind            GiftCardLedgerKind
+  /// Signed amount in EUR (+ issue/credit, − redeem/void)
+  amount          Decimal            @db.Decimal(14, 2)
+  balanceAfter    Decimal            @db.Decimal(14, 2)
+  invoiceId       String?
+  note            String?
+  /// Snapshot λογιστικής κίνησης
+  glDebitAccount  String?
+  glCreditAccount String?
+  createdByUserId String?
+  createdAt       DateTime           @default(now())
+
+  tenant   Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  giftCard GiftCard @relation(fields: [giftCardId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, giftCardId, createdAt(sort: Desc)])
+  @@map("gift_card_ledgers")
+}
+
+/// Tenant loyalty earn/redeem policy
+model LoyaltyProgram {
+  id                  String   @id @default(cuid())
+  tenantId            String   @unique
+  name                String   @default("Standard")
+  /// Points earned per 1 € sale
+  earnPointsPerEur    Int      @default(1)
+  /// Points required to redeem 1 €
+  redeemPointsPerEur  Int      @default(100)
+  isActive            Boolean  @default(true)
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@map("loyalty_programs")
+}
+
+model LoyaltyAccount {
+  id            String   @id @default(cuid())
+  tenantId      String
+  customerId    String
+  pointsBalance Int      @default(0)
+  tier          String   @default("STANDARD")
+  isActive      Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  tenant   Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  customer Customer         @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  ledger   LoyaltyLedger[]
+  payments InvoicePayment[]
+
+  @@unique([tenantId, customerId])
+  @@index([tenantId, isActive])
+  @@map("loyalty_accounts")
+}
+
+model LoyaltyLedger {
+  id        String            @id @default(cuid())
+  tenantId  String
+  accountId String
+  kind      LoyaltyLedgerKind
+  points    Int
+  invoiceId String?
+  note      String?
+  createdAt DateTime          @default(now())
+
+  tenant  Tenant         @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  account LoyaltyAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, accountId, createdAt(sort: Desc)])
+  @@map("loyalty_ledgers")
+}
+
+/// Tenant-level UI / menu preferences
+model TenantSettings {
+  id        String   @id @default(cuid())
+  tenantId  String   @unique
+  /// JSON MenuNodeConfig[]
+  menuJson  Json?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@map("tenant_settings")
+}
+
+/// Custom role with permission codes (plus MembershipRole for backward compat)
+model AppRole {
+  id          String   @id @default(cuid())
+  tenantId    String
+  code        String
+  name        String
+  description String?
+  /// Permission codes e.g. ["invoices.write","pos.use","users.manage"]
+  permissions String[]
+  isSystem    Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  tenant      Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  memberships Membership[]
+  groups      UserGroupRole[]
+
+  @@unique([tenantId, code])
+  @@index([tenantId, isSystem])
+  @@map("app_roles")
+}
+
+model UserGroup {
+  id          String   @id @default(cuid())
+  tenantId    String
+  code        String
+  name        String
+  description String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  tenant  Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  members UserGroupMember[]
+  roles   UserGroupRole[]
+
+  @@unique([tenantId, code])
+  @@index([tenantId])
+  @@map("user_groups")
+}
+
+model UserGroupMember {
+  id           String   @id @default(cuid())
+  tenantId     String
+  groupId      String
+  membershipId String
+  createdAt    DateTime @default(now())
+
+  group      UserGroup  @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  membership Membership @relation(fields: [membershipId], references: [id], onDelete: Cascade)
+
+  @@unique([groupId, membershipId])
+  @@index([tenantId, groupId])
+  @@map("user_group_members")
+}
+
+model UserGroupRole {
+  id        String   @id @default(cuid())
+  tenantId  String
+  groupId   String
+  appRoleId String
+  createdAt DateTime @default(now())
+
+  group   UserGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  appRole AppRole   @relation(fields: [appRoleId], references: [id], onDelete: Cascade)
+
+  @@unique([groupId, appRoleId])
+  @@index([tenantId, groupId])
+  @@map("user_group_roles")
 }

@@ -1,17 +1,44 @@
-import { SettingsPlaceholder } from "../_components/settings-placeholder";
+import { redirect } from "next/navigation";
+import { getSession } from "@/platform/auth/session";
+import { ensureSystemRoles } from "@/platform/auth/ensure-system-roles";
+import { prisma } from "@/server/db";
+import { RolesSettingsClient } from "./roles-settings-client";
 
-export const metadata = { title: "Ρυθμίσεις · Ρόλοι εφαρμογής" };
+export const metadata = { title: "Ρόλοι" };
+export const dynamic = "force-dynamic";
 
-export default function RolesSettingsPage() {
+export default async function RolesSettingsPage() {
+  const session = await getSession();
+  if (!session) redirect("/login");
+  if (
+    session.role !== "SUPER_ADMIN" &&
+    session.role !== "OWNER" &&
+    session.role !== "ADMIN"
+  ) {
+    redirect("/settings");
+  }
+  await ensureSystemRoles(session.tenantId);
+
+  const roles = await prisma.appRole.findMany({
+    where: { tenantId: session.tenantId },
+    orderBy: [{ isSystem: "desc" }, { name: "asc" }],
+    include: {
+      _count: { select: { memberships: true, groups: true } },
+    },
+  });
+
   return (
-    <SettingsPlaceholder
-      title="Ρόλοι εφαρμογής"
-      description="Διαχείριση δικαιωμάτων ανά επιχειρησιακό ρόλο"
-      bullets={[
-        "Επαναφέρθηκε η σελίδα ρόλων που έλειπε από τη νεότερη έκδοση.",
-        "Η ιεραρχία συστήματος (SUPER_ADMIN, OWNER, ADMIN, MEMBER, VIEWER) παραμένει ενεργή.",
-        "Το module είναι έτοιμο για granular permission matrix ανά feature.",
-      ]}
+    <RolesSettingsClient
+      initialRoles={roles.map((r) => ({
+        id: r.id,
+        code: r.code,
+        name: r.name,
+        description: r.description,
+        permissions: r.permissions,
+        isSystem: r.isSystem,
+        membershipCount: r._count.memberships,
+        groupCount: r._count.groups,
+      }))}
     />
   );
 }

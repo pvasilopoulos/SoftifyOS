@@ -9,87 +9,53 @@ const links = [
     href: "/settings/menu",
     title: "Μενού πλοήγησης",
     description:
-      "Δομή πλοήγησης, γρήγορες συντομεύσεις και οργάνωση βασικών λειτουργιών.",
+      "Drag & drop δομή, διαθέσιμες επιλογές και footer μενού για mobile.",
     badge: "Παραμετρικό",
   },
   {
     href: "/settings/users",
-    title: "Χρήστες & Ρόλοι",
-    description:
-      "Λίστα χρηστών, ρόλοι (SUPER_ADMIN/OWNER/ADMIN/MEMBER/VIEWER) και συμμετοχές σε εταιρείες.",
+    title: "Χρήστες",
+    description: "Δημιουργία, επεξεργασία και αφαίρεση μελών · ρόλοι και App Role.",
     badge: "IAM",
   },
   {
     href: "/settings/roles",
-    title: "Ρόλοι εφαρμογής",
-    description: "Κατηγορίες δικαιωμάτων και πρότυπα πρόσβασης ανά ρόλο.",
+    title: "Ρόλοι",
+    description: "App roles με granular permissions για λειτουργίες του ERP.",
     badge: "IAM",
   },
   {
     href: "/settings/groups",
     title: "Ομάδες χρηστών",
-    description: "Ομαδοποίηση μελών ανά τμήμα για πιο απλή διαχείριση πρόσβασης.",
+    description: "Ομαδοποίηση μελών και ανάθεση ρόλων σε ομάδες.",
     badge: "IAM",
   },
   {
     href: "/settings/permissions",
     title: "Permissions",
-    description: "Κατάλογος ενεργειών που ελέγχονται από role-based πρόσβαση.",
+    description: "Κατάλογος δικαιωμάτων που μπορούν να ανατεθούν σε ρόλους.",
     badge: "IAM",
   },
   {
     href: "/settings/payment-methods",
     title: "Τρόποι πληρωμής",
-    description: "Κανόνες μεθόδων πληρωμής και συμπεριφορά στις εισπράξεις/POS.",
-    badge: "POS",
+    description:
+      "Παραμετρικοί τρόποι για POS & εισπράξεις, με λογιστικούς λογαριασμούς και IBAN.",
+    badge: "Παραμετρικό",
   },
   {
     href: "/settings/units",
     title: "Μονάδες μέτρησης",
-    description: "Βασικές μονάδες για προϊόντα, ποσότητες και παραγγελίες.",
-    badge: "Master Data",
+    description:
+      "Κατάλογος μονάδων (τεμ, kg, lt…) για προϊόντα — σύμβολο, δεκαδικά, προεπιλογή.",
+    badge: "Παραμετρικό",
   },
   {
     href: "/settings/series",
     title: "Σειρές & Τύποι",
     description:
-      "Αρίθμηση παραστατικών, υποκατάστημα/ταμείο, κινήσεις πελάτη & αποθήκης, myDATA, λογιστικά άρθρα.",
+      "Αρίθμηση παραστατικών, υποκατάστημα/ταμείο, κινήσεις πελάτη & αποθήκης, myDATA.",
     badge: "Κρίσιμο",
-  },
-  {
-    href: "/settings/company",
-    title: "Εταιρεία",
-    description:
-      "Στοιχεία εταιρείας, ενεργός tenant, οργανωτική ταυτότητα και έλεγχος πρόσβασης ανά εταιρεία.",
-    badge: "Core",
-  },
-  {
-    href: "/settings/tax",
-    title: "Φορολογία & myDATA",
-    description:
-      "Πολιτικές ΦΠΑ, κανόνες διασύνδεσης myDATA και παρακολούθηση readiness ανά τύπο παραστατικού.",
-    badge: "AADE",
-  },
-  {
-    href: "/settings/payments",
-    title: "Πληρωμές & Ταμείο",
-    description:
-      "Κανόνες εισπράξεων, σύνδεση με σειρές παραστατικών και πολιτικές μερικής εξόφλησης.",
-    badge: "POS",
-  },
-  {
-    href: "/settings/integrations",
-    title: "Integrations",
-    description:
-      "Κατάσταση εξωτερικών συνδέσεων (myDATA, ERP connectors, webhooks) και επιχειρησιακή ετοιμότητα.",
-    badge: "Ops",
-  },
-  {
-    href: "/settings/security",
-    title: "Ασφάλεια",
-    description:
-      "Session policy, audit παρακολούθηση, πρόσβαση από ρόλους και βασικά hardening checkpoints.",
-    badge: "Security",
   },
 ];
 
@@ -98,7 +64,7 @@ export default function SettingsPage() {
     <div className="space-y-5">
       <PageHeader
         title="Ρυθμίσεις"
-        description="Παραμετροποίηση tenant και παραστατικών"
+        description="Παραμετροποίηση tenant, μενού και δικαιωμάτων"
       />
       <div className="grid gap-3 sm:grid-cols-2">
         {links.map((link) => (
