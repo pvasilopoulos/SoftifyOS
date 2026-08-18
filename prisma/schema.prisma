@@ -8,6 +8,7 @@ datasource db {
 }
 
 enum MembershipRole {
+  SUPER_ADMIN
   OWNER
   ADMIN
   MEMBER

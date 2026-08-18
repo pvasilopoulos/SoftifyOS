@@ -52,11 +52,18 @@ const tenantSeeds: TenantSeed[] = [
   },
 ];
 
+const superAdminUser = {
+  email: "superadmin@softifyos.gr",
+  name: "SoftifyOS Super Admin",
+  role: "SUPER_ADMIN" as MembershipRole,
+};
+
 async function main() {
   const pool = new Pool({ connectionString: process.env.DATABASE_URL });
   const prisma = new PrismaClient({ adapter: new PrismaPg(pool) });
   const passwordHash = await bcrypt.hash(DEFAULT_PASSWORD, 12);
   const createdCredentials: string[] = [];
+  const tenantIds: Array<{ id: string; slug: string }> = [];
 
   for (const tenantSeed of tenantSeeds) {
     const tenant = await prisma.tenant.upsert({
@@ -101,9 +108,13 @@ async function main() {
         `${userSeed.email} / ${DEFAULT_PASSWORD} (${tenantSeed.slug}, ${userSeed.role})`,
       );
     }
+    tenantIds.push({ id: tenant.id, slug: tenant.slug });
 
     const owner = tenantSeed.users.find((x) => x.role === "OWNER") ?? tenantSeed.users[0];
-    const ownerUser = await prisma.user.findUnique({ where: { email: owner.email } });
+    const ownerEmail = owner?.email;
+    const ownerUser = ownerEmail
+      ? await prisma.user.findUnique({ where: { email: ownerEmail } })
+      : null;
     if (ownerUser) {
       await prisma.auditEvent.create({
         data: {
@@ -117,6 +128,39 @@ async function main() {
       });
     }
   }
+
+  const superAdmin = await prisma.user.upsert({
+    where: { email: superAdminUser.email },
+    update: {
+      name: superAdminUser.name,
+      passwordHash,
+    },
+    create: {
+      email: superAdminUser.email,
+      name: superAdminUser.name,
+      passwordHash,
+    },
+  });
+
+  for (const tenant of tenantIds) {
+    await prisma.membership.upsert({
+      where: {
+        tenantId_userId: {
+          tenantId: tenant.id,
+          userId: superAdmin.id,
+        },
+      },
+      update: { role: superAdminUser.role },
+      create: {
+        tenantId: tenant.id,
+        userId: superAdmin.id,
+        role: superAdminUser.role,
+      },
+    });
+  }
+  createdCredentials.push(
+    `${superAdminUser.email} / ${DEFAULT_PASSWORD} (all tenants, SUPER_ADMIN)`,
+  );
 
   console.log("Seeded SoftifyOS multi-tenant access");
   console.log("Tenants:");
