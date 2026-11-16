@@ -4,11 +4,14 @@ import clsx from 'clsx';
 import { useInfiniteQuery } from '@tanstack/react-query';
 import { useWindowVirtualizer } from '@tanstack/react-virtual';
 import { useLocale, useTranslations } from 'next-intl';
-import { Archive, ArrowDownAZ, Clock, Euro, Loader2, MapPin, Plus, Search, UserRound, X } from 'lucide-react';
+import { Archive, ArrowDownAZ, Clock, Euro, ListTree, Loader2, MapPin, Plus, Search, Store, UserRound, Users, X } from 'lucide-react';
 import { api, type Customer, type Page } from '@/lib/api';
 import { money } from '@/lib/format';
 import { Link } from '@/i18n/navigation';
 import { EntityTile, PageHeader, Segmented, Skeleton, StatusBadge } from '@/components/ui';
+import { CustomerTreeView, StoresView } from '@/components/customer-views';
+
+type View = 'list' | 'tree' | 'stores';
 
 type Status = 'all' | 'active' | 'prospect' | 'negotiation' | 'inactive';
 type Sort = 'name' | 'recent' | 'value';
@@ -34,10 +37,12 @@ export default function CustomersPage() {
   const [sort, setSort] = usePersisted<Sort>('cust.sort', 'name');
   const [mine, setMine] = usePersisted('cust.mine', false);
   const [archived, setArchived] = usePersisted('cust.archived', false);
+  const [view, setView] = usePersisted<View>('cust.view', 'list');
   const [q, setQ] = useState('');
   const dq = useDebounced(q.trim());
 
   const query = useInfiniteQuery({
+    enabled: view === 'list',
     queryKey: ['customers', status, sort, mine, archived, dq],
     initialPageParam: null as string | null,
     queryFn: ({ pageParam, signal }) => {
@@ -73,30 +78,50 @@ export default function CustomersPage() {
         </Link>
       } />
 
+      {/* View switcher */}
+      <div className="mb-3 grid grid-cols-3 gap-1 rounded-2xl bg-surface-2 p-1">
+        {([
+          { value: 'list', icon: Users, label: t('viewList') },
+          { value: 'tree', icon: ListTree, label: t('viewTree') },
+          { value: 'stores', icon: Store, label: t('viewStores') },
+        ] as const).map(({ value, icon: Icon, label }) => (
+          <button key={value} onClick={() => setView(value)} aria-pressed={view === value}
+            className={clsx('flex min-w-0 items-center justify-center gap-1.5 rounded-xl px-2 py-2 text-sm font-medium transition',
+              view === value ? 'bg-surface text-primary shadow-sm' : 'text-muted hover:text-text')}>
+            <Icon size={16} className="shrink-0" /> <span className="truncate">{label}</span>
+          </button>
+        ))}
+      </div>
+
       <div className="mb-3 flex items-center gap-2 rounded-xl border border-border bg-surface px-3.5">
         <Search size={18} className="text-muted" />
-        <input value={q} onChange={(e) => setQ(e.target.value)} placeholder={t('search')} className="w-full bg-transparent py-3 outline-none" />
+        <input value={q} onChange={(e) => setQ(e.target.value)} placeholder={view === 'stores' ? t('searchStores') : t('search')} className="w-full bg-transparent py-3 outline-none" />
         {q && <button onClick={() => setQ('')} aria-label="clear"><X size={18} className="text-muted" /></button>}
         {query.isFetching && !query.isFetchingNextPage && <Loader2 size={16} className="animate-spin text-muted" />}
       </div>
 
-      <div className="mb-3">
-        <Segmented value={status} onChange={setStatus} options={[
-          { value: 'all', label: t('all') }, { value: 'active', label: t('active') }, { value: 'prospect', label: t('prospects') },
-          { value: 'negotiation', label: t('negotiation') }, { value: 'inactive', label: t('inactive') },
-        ]} />
-      </div>
+      {view !== 'stores' && (
+        <>
+          <div className="mb-3">
+            <Segmented value={status} onChange={setStatus} options={[
+              { value: 'all', label: t('all') }, { value: 'active', label: t('active') }, { value: 'prospect', label: t('prospects') },
+              { value: 'negotiation', label: t('negotiation') }, { value: 'inactive', label: t('inactive') },
+            ]} />
+          </div>
+          <div className="no-scrollbar mb-4 flex gap-2 overflow-x-auto">
+            <button onClick={() => setSort('name')} className={chip(sort === 'name')}><ArrowDownAZ size={15} /> {t('sortName')}</button>
+            <button onClick={() => setSort('recent')} className={chip(sort === 'recent')}><Clock size={15} /> {t('sortRecent')}</button>
+            <button onClick={() => setSort('value')} className={chip(sort === 'value')}><Euro size={15} /> {t('sortValue')}</button>
+            <span className="mx-1 w-px shrink-0 bg-border" />
+            <button onClick={() => setMine(!mine)} className={chip(mine)}><UserRound size={15} /> {t('mine')}</button>
+            <button onClick={() => setArchived(!archived)} className={chip(archived)}><Archive size={15} /> {t('archivedList')}</button>
+          </div>
+        </>
+      )}
 
-      <div className="no-scrollbar mb-4 flex gap-2 overflow-x-auto">
-        <button onClick={() => setSort('name')} className={chip(sort === 'name')}><ArrowDownAZ size={15} /> {t('sortName')}</button>
-        <button onClick={() => setSort('recent')} className={chip(sort === 'recent')}><Clock size={15} /> {t('sortRecent')}</button>
-        <button onClick={() => setSort('value')} className={chip(sort === 'value')}><Euro size={15} /> {t('sortValue')}</button>
-        <span className="mx-1 w-px shrink-0 bg-border" />
-        <button onClick={() => setMine(!mine)} className={chip(mine)}><UserRound size={15} /> {t('mine')}</button>
-        <button onClick={() => setArchived(!archived)} className={chip(archived)}><Archive size={15} /> {t('archivedList')}</button>
-      </div>
-
-      {query.isLoading ? (
+      {view === 'tree' ? <CustomerTreeView filters={{ status, sort, mine, archived, q: dq }} />
+      : view === 'stores' ? <StoresView q={dq} mine={mine} />
+      : query.isLoading ? (
         <div className="space-y-3">{Array.from({ length: 6 }).map((_, i) => <Skeleton key={i} className="h-[84px]" />)}</div>
       ) : rows.length === 0 ? (
         <p className="py-16 text-center text-muted">{t('empty')}</p>

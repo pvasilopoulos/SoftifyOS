@@ -1,5 +1,6 @@
 'use client';
-import { use, useState, type ReactNode } from 'react';
+import { use, useCallback, useState, type ReactNode } from 'react';
+import { useSearchParams } from 'next/navigation';
 import clsx from 'clsx';
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useLocale, useTranslations } from 'next-intl';
@@ -35,7 +36,9 @@ export default function CustomerPage({ params }: { params: Promise<{ id: string 
   const locale = useLocale();
   const router = useRouter();
   const qc = useQueryClient();
-  const [tab, setTab] = useState<Tab>('overview');
+  const sp = useSearchParams();
+  const focusBranch = sp.get('branch');
+  const [tab, setTab] = useState<Tab>(() => (['overview','subsidiaries','branches','contacts','offers','activity'].includes(sp.get('tab') ?? '') ? sp.get('tab') as Tab : 'overview'));
   const [dialog, setDialog] = useState<DialogState>(null);
   const { data, isLoading } = useQuery({ queryKey: ['customer', id], queryFn: () => api<CustomerDetail>(`/customers/${id}`) });
   const archive = useMutation({
@@ -196,7 +199,7 @@ export default function CustomerPage({ params }: { params: Promise<{ id: string 
           )}
           {data.branches.length === 0 && <p className="py-8 text-center text-muted">{t('noBranches')}</p>}
           {data.branches.map((b) => (
-            <BranchCard key={b.id} branch={b} canEdit={data.can.edit}
+            <BranchCard key={b.id} branch={b} canEdit={data.can.edit} focus={b.id === focusBranch}
               onEdit={() => setDialog({ kind: 'branch', branch: b })}
               onAddSpace={() => setDialog({ kind: 'space', branchId: b.id })}
               onEditSpace={(sp) => setDialog({ kind: 'space', branchId: b.id, space: sp })} />
@@ -283,13 +286,15 @@ function Row({ k, v, icon: Icon }: { k: string; v: ReactNode; icon?: typeof Mail
 }
 
 /** Store card: tap to expand its spaces (add / edit inline). */
-function BranchCard({ branch: b, canEdit, onEdit, onAddSpace, onEditSpace }: {
-  branch: Branch; canEdit: boolean; onEdit: () => void; onAddSpace: () => void; onEditSpace: (s: Space) => void;
+function BranchCard({ branch: b, canEdit, onEdit, onAddSpace, onEditSpace, focus }: {
+  branch: Branch; canEdit: boolean; onEdit: () => void; onAddSpace: () => void; onEditSpace: (s: Space) => void; focus?: boolean;
 }) {
   const t = useTranslations('customer');
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(!!focus);
+  // Deep link from the "Stores" view: open this store and bring it into view
+  const ref = useCallback((el: HTMLDivElement | null) => { if (el && focus) el.scrollIntoView({ block: 'center', behavior: 'smooth' }); }, [focus]);
   return (
-    <div className={clsx('card overflow-hidden transition', open && 'border-primary/40')}>
+    <div ref={ref} className={clsx('card overflow-hidden transition', open && 'border-primary/40', focus && 'ring-2 ring-primary/40')}>
       <button onClick={() => setOpen(!open)} aria-expanded={open} className="flex w-full items-center gap-3 p-3.5 text-left">
         <EntityTile name={b.name} size={52} />
         <div className="min-w-0 flex-1">

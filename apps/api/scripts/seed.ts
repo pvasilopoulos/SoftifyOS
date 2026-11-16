@@ -5,6 +5,7 @@
 // Bulk rows are generated inside PostgreSQL with generate_series (fast, no network round trips).
 import postgres from 'postgres';
 import { hash } from '@node-rs/argon2';
+import { seedDemoBranches } from './demo-branches.js';
 
 const url = process.env.DATABASE_URL;
 if (!url) throw new Error('DATABASE_URL is not set');
@@ -210,6 +211,7 @@ for (let i = 1; i <= extraTenants; i++) {
   await seedTenant(`tenant-${i}`, `Tenant ${i}`, 20_000 * scale, false);
 }
 await sql`SET session_replication_role = origin`.catch(() => {});
+await seedDemoBranches(sql, (await sql<{ id: string }[]>`SELECT id FROM tenants WHERE slug = ANY(${slugs})`).map((t) => t.id), log);
 log('ANALYZE ...');
 await sql`ANALYZE`;
 log(`Done. Login: ${DEMO_EMAIL} (password from SEED_PASSWORD or the default in scripts/seed.ts)`);

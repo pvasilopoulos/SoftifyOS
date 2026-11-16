@@ -121,6 +121,8 @@ export default async function customerRoutes(app: FastifyInstance) {
       tag: z.string().trim().max(40).optional(),
       archived: z.enum(['0', '1']).default('0'),
       sort: z.enum(['name', 'recent', 'value']).default('name'),
+      // "Customers & stores" view: embed each customer's stores (+ spaces) and let the search match stores too
+      include: z.enum(['branches']).optional(),
       cursor: z.string().optional(),
       limit: z.coerce.number().int().min(1).max(100).default(30),
     }).parse(req.query);
@@ -129,6 +131,7 @@ export default async function customerRoutes(app: FastifyInstance) {
     const cur = decodeCursor<[string, string]>(q.cursor);
     const key = q.q && q.q.length >= 2 ? `%${searchKey(q.q)}%` : null;
     const manager = q.manager === 'me' ? s.userId : q.manager;
+    const withBranches = q.include === 'branches';
 
     return withTenant(T, async (tx) => {
       const order = q.sort === 'recent' ? tx`created_at DESC, id DESC`
@@ -140,6 +143,16 @@ export default async function customerRoutes(app: FastifyInstance) {
       const rows = await tx`
         SELECT id, code, kind, name, trade_name, status, category, tags, image_url, annual_value, address_city,
                companies_count, branches_count, spaces_count, created_at, archived_at
+               ${withBranches ? tx`, (
+                 SELECT coalesce(json_agg(x ORDER BY x.name), '[]') FROM (
+                   SELECT b.id, b.name, b.city, b.address, b.status, b.spaces_count,
+                          (SELECT count(*) FROM offers o WHERE o.branch_id = b.id
+                            AND o.status IN ('draft','in_progress','pending_approval','approved','sent'))::int AS open_offers,
+                          (SELECT coalesce(json_agg(json_build_object('id', sp.id, 'name', sp.name, 'kind', sp.kind, 'area_sqm', sp.area_sqm)
+                                  ORDER BY sp.name), '[]') FROM spaces sp WHERE sp.branch_id = b.id) AS spaces
+                   FROM branches b WHERE b.customer_id = customers.id ORDER BY b.name LIMIT 50) x
+               ) AS branches` : tx``}
+               ${withBranches && key ? tx`, ARRAY(SELECT b.id FROM branches b WHERE b.customer_id = customers.id AND b.search LIKE ${key}) AS matched_branches` : tx``}
         FROM customers
         WHERE tenant_id = ${T}
           ${q.archived === '1' ? tx`AND archived_at IS NOT NULL` : tx`AND archived_at IS NULL`}
@@ -147,7 +160,8 @@ export default async function customerRoutes(app: FastifyInstance) {
           ${q.kind ? tx`AND kind = ${q.kind}` : tx``}
           ${manager ? tx`AND account_manager_id = ${manager}` : tx``}
           ${q.tag ? tx`AND tags @> ARRAY[${q.tag}]::text[]` : tx``}
-          ${key ? tx`AND search LIKE ${key}` : tx``}
+          ${key && withBranches ? tx`AND (search LIKE ${key} OR id IN (SELECT customer_id FROM branches WHERE tenant_id = ${T} AND search LIKE ${key}))`
+            : key ? tx`AND search LIKE ${key}` : tx``}
           ${after}
         ORDER BY ${order}
         LIMIT ${q.limit + 1}`;
@@ -157,6 +171,60 @@ export default async function customerRoutes(app: FastifyInstance) {
       const cursorOf = (r: typeof last) => q.sort === 'recent' ? [r!.created_at, r!.id] : q.sort === 'value' ? [r!.annual_value, r!.id] : [r!.name, r!.id];
       return { items, nextCursor: more && last ? encodeCursor(cursorOf(last)) : null };
     });
+  });
+
+  // ---- Flat store list ("Stores" view) ----
+  app.get('/branches', async (req) => {
+    const q = z.object({
+      q: z.string().trim().max(100).optional(),
+      city: z.string().trim().max(100).optional(),
+      status: z.enum(['active', 'inactive']).optional(),
+      manager: z.literal('me').optional(),
+      sort: z.enum(['name', 'city', 'spaces']).default('name'),
+      cursor: z.string().optional(),
+      limit: z.coerce.number().int().min(1).max(100).default(40),
+    }).parse(req.query);
+    const s = req.session;
+    const T = s.tenantId;
+    const cur = decodeCursor<string[]>(q.cursor);
+    const key = q.q && q.q.length >= 2 ? `%${searchKey(q.q)}%` : null;
+
+    return withTenant(T, async (tx) => {
+      const order = q.sort === 'city' ? tx`coalesce(b.city, ''), b.name, b.id`
+        : q.sort === 'spaces' ? tx`b.spaces_count DESC, b.id DESC` : tx`b.name, b.id`;
+      const after = !cur ? tx``
+        : q.sort === 'city' ? tx`AND (coalesce(b.city, ''), b.name, b.id) > (${cur[0]}, ${cur[1]}, ${cur[2]}::uuid)`
+        : q.sort === 'spaces' ? tx`AND (b.spaces_count, b.id) < (${Number(cur[0])}, ${cur[1]}::uuid)`
+        : tx`AND (b.name, b.id) > (${cur[0]}, ${cur[1]}::uuid)`;
+      const rows = await tx`
+        SELECT b.id, b.name, b.city, b.address, b.postal_code, b.phone, b.status, b.spaces_count,
+               b.customer_id, c.name AS customer_name, c.status AS customer_status,
+               (SELECT count(*) FROM offers o WHERE o.branch_id = b.id
+                 AND o.status IN ('draft','in_progress','pending_approval','approved','sent'))::int AS open_offers
+        FROM branches b JOIN customers c ON c.id = b.customer_id
+        WHERE b.tenant_id = ${T} AND c.archived_at IS NULL
+          ${q.status ? tx`AND b.status = ${q.status}` : tx``}
+          ${q.city ? tx`AND b.city_key = ${searchKey(q.city)}` : tx``}
+          ${q.manager ? tx`AND c.account_manager_id = ${s.userId}` : tx``}
+          ${key ? tx`AND (b.search LIKE ${key} OR b.customer_id IN (SELECT id FROM customers WHERE tenant_id = ${T} AND search LIKE ${key}))` : tx``}
+          ${after}
+        ORDER BY ${order}
+        LIMIT ${q.limit + 1}`;
+      const more = rows.length > q.limit;
+      const items = more ? rows.slice(0, q.limit) : rows;
+      const l = items.at(-1);
+      const next = !more || !l ? null
+        : q.sort === 'city' ? [l.city ?? '', l.name, l.id] : q.sort === 'spaces' ? [String(l.spaces_count), l.id] : [l.name, l.id];
+      return { items, nextCursor: next ? encodeCursor(next) : null };
+    });
+  });
+
+  // Cities that have stores (city filter), most stores first
+  app.get('/branches/cities', async (req) => {
+    const T = req.session.tenantId;
+    return withTenant(T, (tx) => tx`
+      SELECT city, count(*)::int AS stores FROM branches
+      WHERE tenant_id = ${T} AND city IS NOT NULL GROUP BY city ORDER BY stores DESC, city LIMIT 100`);
   });
 
   // Groups for the "parent group" picker

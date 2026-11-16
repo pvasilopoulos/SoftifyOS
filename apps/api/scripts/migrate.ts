@@ -11,6 +11,7 @@ const dir = resolve(import.meta.dirname, '../db/migrations');
 await sql`CREATE TABLE IF NOT EXISTS schema_migrations (name text PRIMARY KEY, applied_at timestamptz NOT NULL DEFAULT now())`;
 const done = new Set((await sql<{ name: string }[]>`SELECT name FROM schema_migrations`).map((r) => r.name));
 
+let applied = 0;
 for (const file of readdirSync(dir).filter((f) => f.endsWith('.sql')).sort()) {
   if (done.has(file)) continue;
   process.stdout.write(`Applying ${file} ... `);
@@ -19,6 +20,9 @@ for (const file of readdirSync(dir).filter((f) => f.endsWith('.sql')).sort()) {
     await tx`INSERT INTO schema_migrations (name) VALUES (${file})`;
   });
   console.log('ok');
+  applied++;
 }
+// Migrations can rewrite tables: refresh planner statistics so queries keep using the right indexes
+if (applied) { process.stdout.write('ANALYZE ... '); await sql`ANALYZE`; console.log('ok'); }
 console.log('Migrations up to date.');
 await sql.end();
