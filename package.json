@@ -1,0 +1,26 @@
+{
+  "name": "softifyos",
+  "private": true,
+  "version": "0.1.0",
+  "workspaces": [
+    "apps/*"
+  ],
+  "scripts": {
+    "dev:db": "npm run db:dev -w @softify/api",
+    "dev:api": "npm run dev -w @softify/api",
+    "dev:worker": "npm run dev:worker -w @softify/api",
+    "dev:web": "npm run dev -w @softify/web",
+    "db:migrate": "npm run db:migrate -w @softify/api",
+    "db:seed": "npm run db:seed -w @softify/api",
+    "vapid": "npm run vapid -w @softify/api",
+    "build": "npm run build -w @softify/api && npm run build -w @softify/web",
+    "typecheck": "npm run typecheck --workspaces"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "allowScripts": {
+    "esbuild@0.28.2": true,
+    "@embedded-postgres/windows-x64@17.5.0-beta.15": true
+  }
+}

@@ -1,0 +1,105 @@
+// Background worker: processes the Postgres job queue (push notifications, reminders, maintenance).
+// Run one or more instances; FOR UPDATE SKIP LOCKED guarantees each job is taken by exactly one worker.
+// Connects as the table owner (no RLS) because it works across tenants.
+import webpush from 'web-push';
+import { env } from './env.js';
+import { sql } from './db.js';
+import { publish } from './realtime.js';
+import type { JobMap, NotifyJob } from './jobs.js';
+
+const BATCH = 50;
+const MAX_ATTEMPTS = 8;
+const pushEnabled = Boolean(env.vapidPublic && env.vapidPrivate);
+if (pushEnabled) webpush.setVapidDetails(env.vapidSubject, env.vapidPublic, env.vapidPrivate);
+else console.warn('VAPID keys missing: web push disabled (in-app live notifications still work). Run: npm run vapid');
+
+type Job = { id: string; kind: keyof JobMap; payload: unknown; attempts: number };
+
+async function handleNotify(p: NotifyJob) {
+  // 1) Persist in-app notifications
+  const rows = await sql<{ id: string; user_id: string }[]>`
+    INSERT INTO notifications (tenant_id, user_id, title, body, url)
+    SELECT ${p.tenantId}, u, ${p.title}, ${p.body ?? null}, ${p.url ?? null} FROM unnest(${p.userIds}::uuid[]) u
+    RETURNING id, user_id`;
+  // 2) Live update to open browsers (SSE)
+  await publish({ tenantId: p.tenantId, userIds: p.userIds, type: 'notification', data: { title: p.title, body: p.body, url: p.url } });
+  // 3) Web Push to every registered device of these users
+  if (!pushEnabled) return;
+  const subs = await sql<{ id: string; endpoint: string; p256dh: string; auth: string }[]>`
+    SELECT id, endpoint, p256dh, auth FROM push_subscriptions
+    WHERE tenant_id = ${p.tenantId} AND user_id = ANY(${p.userIds}::uuid[])`;
+  const payload = JSON.stringify({ title: p.title, body: p.body, url: p.url, tag: rows[0]?.id });
+  await Promise.all(subs.map(async (s) => {
+    try {
+      await webpush.sendNotification({ endpoint: s.endpoint, keys: { p256dh: s.p256dh, auth: s.auth } }, payload, { TTL: 3600, urgency: 'high' });
+    } catch (e) {
+      const status = (e as { statusCode?: number }).statusCode;
+      if (status === 404 || status === 410) await sql`DELETE FROM push_subscriptions WHERE id = ${s.id}`; // expired device
+      else console.error('push failed', status, (e as Error).message);
+    }
+  }));
+}
+
+async function processBatch(): Promise<number> {
+  const jobs = await sql<Job[]>`
+    UPDATE jobs SET locked_at = now(), attempts = attempts + 1
+    WHERE id IN (
+      SELECT id FROM jobs WHERE locked_at IS NULL AND run_at <= now()
+      ORDER BY run_at LIMIT ${BATCH} FOR UPDATE SKIP LOCKED)
+    RETURNING id, kind, payload, attempts`;
+  await Promise.all(jobs.map(async (j) => {
+    try {
+      if (j.kind === 'notify') await handleNotify(j.payload as NotifyJob);
+      await sql`DELETE FROM jobs WHERE id = ${j.id}`;
+    } catch (e) {
+      const msg = (e as Error).message;
+      if (j.attempts >= MAX_ATTEMPTS) {
+        console.error(`job ${j.id} dropped after ${j.attempts} attempts: ${msg}`);
+        await sql`DELETE FROM jobs WHERE id = ${j.id}`;
+      } else {
+        await sql`UPDATE jobs SET locked_at = NULL, last_error = ${msg},
+                  run_at = now() + (${2 ** j.attempts} * interval '1 second') WHERE id = ${j.id}`;
+      }
+    }
+  }));
+  return jobs.length;
+}
+
+// Calendar reminders -> notify jobs
+async function scheduleReminders() {
+  await sql`
+    WITH due AS (
+      UPDATE events SET reminded = true
+      WHERE id IN (SELECT id FROM events WHERE reminded = false AND remind_at <= now() AND owner_id IS NOT NULL LIMIT 500 FOR UPDATE SKIP LOCKED)
+      RETURNING tenant_id, owner_id, title, starts_at)
+    INSERT INTO jobs (kind, payload)
+    SELECT 'notify', jsonb_build_object(
+      'tenantId', tenant_id, 'userIds', jsonb_build_array(owner_id),
+      'title', title, 'body', 'Ξεκινά στις ' || to_char(starts_at AT TIME ZONE 'Europe/Athens', 'HH24:MI'), 'url', '/calendar')
+    FROM due`;
+}
+
+async function maintenance() {
+  await sql`UPDATE jobs SET locked_at = NULL WHERE locked_at < now() - interval '5 minutes'`; // crashed workers
+  await sql`SELECT ensure_activity_partitions(1, 3)`;
+}
+
+let running = true;
+let lastReminder = 0, lastMaintenance = 0;
+console.log(`SoftifyOS worker started (push ${pushEnabled ? 'on' : 'off'})`);
+while (running) {
+  try {
+    const now = Date.now();
+    if (now - lastReminder > 15_000) { await scheduleReminders(); lastReminder = now; }
+    if (now - lastMaintenance > 3_600_000) { await maintenance(); lastMaintenance = now; }
+    const n = await processBatch();
+    if (n < BATCH) await new Promise((r) => setTimeout(r, 500));
+  } catch (e) {
+    console.error('worker loop error', e);
+    await new Promise((r) => setTimeout(r, 2000));
+  }
+}
+
+const stop = async () => { running = false; await sql.end({ timeout: 5 }); process.exit(0); };
+process.on('SIGINT', stop);
+process.on('SIGTERM', stop);

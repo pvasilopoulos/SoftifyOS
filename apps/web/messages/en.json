@@ -1,0 +1,56 @@
+{
+  "app": { "name": "SoftifyOS", "tagline": "Enterprise Business OS" },
+  "nav": {
+    "home": "Home", "customers": "Customers", "offers": "Offers", "calendar": "Calendar", "more": "More",
+    "crm": "CRM activities", "tasks": "Tasks", "documents": "Documents", "reports": "Reports",
+    "groups": "Group & Companies", "branches": "Branches & Spaces", "products": "Products & Services", "admin": "Administration"
+  },
+  "login": {
+    "title": "Sign in", "subtitle": "Welcome to SoftifyOS", "email": "Email", "password": "Password",
+    "submit": "Sign in", "invalid": "Wrong email or password", "tooMany": "Too many attempts. Try again in a few minutes."
+  },
+  "home": {
+    "greeting": "Good morning, {name}", "greetingAfternoon": "Good afternoon, {name}", "subtitle": "Today's commercial overview",
+    "allCompanies": "Group (All companies)", "commercialValue": "Commercial value", "openOffers": "Open offers",
+    "pending": "Pending approval", "closed": "Closed", "offersCount": "{count, plural, one {# offer} other {# offers}}",
+    "pipeline": "Offer pipeline", "upcoming": "Upcoming meetings", "all": "All", "recent": "Recent activity",
+    "noEvents": "No upcoming meetings", "customers": "Customers"
+  },
+  "status": {
+    "active": "Active", "prospect": "Prospect", "negotiation": "Negotiating", "inactive": "Inactive",
+    "draft": "Draft", "in_progress": "In progress", "pending_approval": "Pending approval", "approved": "Approved",
+    "sent": "Sent", "accepted": "Accepted", "rejected": "Rejected", "pending": "Pending"
+  },
+  "pipeline": { "initial": "Initial contact", "negotiation": "Negotiating", "approval": "Pending approval", "closed": "Closed" },
+  "customers": {
+    "title": "Customers", "all": "All", "active": "Active", "prospects": "Prospects", "search": "Search customer, VAT, code…",
+    "annualValue": "Annual value", "companies": "{count, plural, one {# company} other {# companies}}",
+    "branches": "{count, plural, one {# store} other {# stores}}", "empty": "No customers found",
+    "new": "New customer", "name": "Name", "vat": "VAT no.", "create": "Create", "cancel": "Cancel", "group": "Group of companies", "company": "Company"
+  },
+  "customer": {
+    "back": "Customer", "call": "Call", "email": "Email", "meeting": "Meeting", "task": "Task",
+    "overview": "Overview", "companies": "Companies", "branches": "Branches", "activity": "Activity", "contacts": "Contacts",
+    "basics": "Details", "group": "Group", "vat": "VAT no.", "category": "Category", "manager": "Account Manager",
+    "commercial": "Commercial overview", "totalValue": "Total value", "openOffers": "Open offers", "wonOffers": "Won offers",
+    "pendingAmount": "Pending approval", "spaces": "{count, plural, one {# space} other {# spaces}}", "history": "Activity history", "noBranches": "No branches"
+  },
+  "offers": {
+    "title": "Offers", "all": "All", "inProgress": "In progress", "approved": "Approved", "new": "New offer",
+    "validUntil": "Valid until", "summary": "Summary", "items": "Items", "versions": "Versions", "approvals": "Approvals",
+    "net": "Net amount", "vat": "VAT (24%)", "total": "Total", "approve": "Approve step", "pdf": "View PDF",
+    "steps": { "created": "Created", "approval": "Approval", "sent": "Sent", "accepted": "Accepted" },
+    "owner": "Owner", "company": "Issuing company", "empty": "No offers"
+  },
+  "calendar": { "title": "Calendar", "day": "Day", "week": "Week", "month": "Month", "empty": "No events", "events": "{count, plural, one {# event} other {# events}}" },
+  "more": {
+    "title": "More", "language": "Language", "theme": "Appearance", "light": "Light", "dark": "Dark", "system": "System",
+    "notifications": "Notifications", "enablePush": "Enable push notifications", "pushEnabled": "Notifications are enabled on this device",
+    "pushDenied": "Notifications are blocked by the browser. Enable them in its settings.",
+    "pushUnsupported": "This browser does not support push.", "iosHint": "On iPhone: tap Share → “Add to Home Screen”, then open SoftifyOS from there.",
+    "testPush": "Send a test notification", "testSent": "Sent!", "disablePush": "Disable on this device",
+    "install": "Install as app", "logout": "Sign out", "tenant": "Organisation", "inbox": "Notification inbox", "markRead": "Mark all as read", "noNotifications": "No notifications"
+  },
+  "activity": { "today": "Today", "yesterday": "Yesterday" },
+  "common": { "loading": "Loading…", "error": "Something went wrong", "retry": "Retry", "loadMore": "Load more", "live": "Live" }
+}

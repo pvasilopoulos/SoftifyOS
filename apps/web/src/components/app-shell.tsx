@@ -1,0 +1,119 @@
+'use client';
+import clsx from 'clsx';
+import { useQuery } from '@tanstack/react-query';
+import { useTranslations } from 'next-intl';
+import {
+  Bell, Building2, CalendarDays, ChartNoAxesColumn, FileText, Home, LayoutGrid, ListChecks,
+  MapPin, MoreHorizontal, Package, Settings, Sparkles, Users, FolderOpen,
+} from 'lucide-react';
+import type { ReactNode } from 'react';
+import { Link, usePathname } from '@/i18n/navigation';
+import { api, type Me } from '@/lib/api';
+import { Avatar } from './ui';
+import { useLive } from './providers';
+
+export function Logo({ dark = false }: { dark?: boolean }) {
+  return (
+    <div className="flex items-center gap-2.5">
+      <span className="grid h-9 w-9 place-items-center rounded-xl bg-gradient-to-br from-[#7c63ff] to-[#4a2ee0] text-lg font-black text-white shadow-md">S</span>
+      <div className="leading-tight">
+        <div className={clsx('text-lg font-extrabold tracking-tight', dark ? 'text-white' : 'text-text')}>SoftifyOS</div>
+        <div className={clsx('text-[11px]', dark ? 'text-white/60' : 'text-muted')}>Enterprise Business OS</div>
+      </div>
+    </div>
+  );
+}
+
+const primary = [
+  { href: '/', key: 'home', icon: Home },
+  { href: '/customers', key: 'customers', icon: Users },
+  { href: '/offers', key: 'offers', icon: FileText },
+  { href: '/calendar', key: 'calendar', icon: CalendarDays },
+] as const;
+
+const secondary = [
+  { href: '/more', key: 'crm', icon: Sparkles },
+  { href: '/more', key: 'tasks', icon: ListChecks },
+  { href: '/more', key: 'documents', icon: FolderOpen },
+  { href: '/more', key: 'reports', icon: ChartNoAxesColumn },
+  { href: '/more', key: 'groups', icon: Building2 },
+  { href: '/more', key: 'branches', icon: MapPin },
+  { href: '/more', key: 'products', icon: Package },
+  { href: '/more', key: 'admin', icon: Settings },
+] as const;
+
+function isActive(pathname: string, href: string) {
+  return href === '/' ? pathname === '/' : pathname.startsWith(href);
+}
+
+export function useMe() {
+  return useQuery({ queryKey: ['me'], queryFn: () => api<Me>('/me'), staleTime: 5 * 60_000 });
+}
+
+export function AppShell({ children }: { children: ReactNode }) {
+  const t = useTranslations('nav');
+  const pathname = usePathname();
+  const { data: me } = useMe();
+  const live = useLive();
+  const { data: notif } = useQuery({ queryKey: ['notifications'], queryFn: () => api<{ unread: number }>('/notifications'), refetchInterval: 120_000 });
+
+  return (
+    <div className="min-h-dvh lg:flex">
+      {/* Desktop sidebar */}
+      <aside className="sticky top-0 hidden h-dvh w-72 shrink-0 flex-col bg-sidebar p-5 text-white lg:flex">
+        <Logo dark />
+        <nav className="mt-8 flex flex-col gap-1">
+          {primary.map(({ href, key, icon: Icon }) => (
+            <Link key={key} href={href} className={clsx('flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition',
+              isActive(pathname, href) ? 'bg-primary text-white shadow-lg shadow-primary/30' : 'text-white/75 hover:bg-white/5 hover:text-white')}>
+              <Icon size={19} /> {t(key)}
+            </Link>
+          ))}
+          <div className="my-3 h-px bg-white/10" />
+          {secondary.map(({ href, key, icon: Icon }) => (
+            <Link key={key} href={href} className="flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm text-white/65 transition hover:bg-white/5 hover:text-white">
+              <Icon size={19} /> {t(key)}
+            </Link>
+          ))}
+        </nav>
+        <Link href="/more" className="mt-auto flex items-center gap-3 rounded-xl bg-white/5 p-3">
+          <Avatar name={me?.user.full_name} size={38} />
+          <div className="min-w-0 flex-1">
+            <div className="truncate text-sm font-semibold">{me?.user.full_name ?? '…'}</div>
+            <div className="truncate text-xs text-white/60">{me?.tenant?.title ?? me?.tenant?.name}</div>
+          </div>
+          <span title="Live" className={clsx('h-2 w-2 rounded-full', live ? 'bg-emerald-400' : 'bg-white/30')} />
+        </Link>
+      </aside>
+
+      <div className="min-w-0 flex-1">
+        {/* Mobile top bar */}
+        <div className="flex items-center justify-between px-4 pt-3 safe-top lg:hidden">
+          <Logo />
+          <Link href="/more" aria-label="Notifications" className="relative grid h-10 w-10 place-items-center rounded-full">
+            <Bell size={22} />
+            {!!notif?.unread && <span className="absolute right-2 top-2 h-2.5 w-2.5 rounded-full bg-danger ring-2 ring-bg" />}
+          </Link>
+        </div>
+        <main className="mx-auto w-full max-w-6xl px-4 pb-28 pt-2 lg:px-8 lg:pb-10 lg:pt-8">{children}</main>
+      </div>
+
+      {/* Mobile bottom navigation */}
+      <nav className="fixed inset-x-0 bottom-0 z-40 border-t border-border bg-surface/95 backdrop-blur-md safe-bottom lg:hidden">
+        <div className="mx-auto grid max-w-lg grid-cols-5">
+          {[...primary, { href: '/more', key: 'more', icon: MoreHorizontal } as const].map(({ href, key, icon: Icon }) => {
+            const active = isActive(pathname, href);
+            return (
+              <Link key={key} href={href} className={clsx('flex flex-col items-center gap-1 py-2.5 text-[11px] font-medium', active ? 'text-primary' : 'text-muted')}>
+                <Icon size={22} strokeWidth={active ? 2.4 : 1.8} />
+                {t(key)}
+              </Link>
+            );
+          })}
+        </div>
+      </nav>
+    </div>
+  );
+}
+
+export { LayoutGrid };
