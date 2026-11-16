@@ -1,0 +1,186 @@
+'use client';
+import { useState, type ReactNode } from 'react';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { useTranslations } from 'next-intl';
+import { Loader2, Mail, NotebookPen, Phone, Users, X } from 'lucide-react';
+import clsx from 'clsx';
+import { api, ApiError } from '@/lib/api';
+import type { Branch, Contact, Space } from '@/lib/customers';
+import { IconButton } from './ui';
+
+const input = 'w-full min-w-0 rounded-xl border border-border bg-surface-2 px-3 py-2.5 outline-none focus:border-primary';
+
+export function Dialog({ title, onClose, children }: { title: string; onClose: () => void; children: ReactNode }) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 sm:items-center" onClick={onClose}>
+      <div onClick={(e) => e.stopPropagation()} role="dialog" aria-label={title}
+        className="max-h-[90dvh] w-full max-w-lg overflow-auto rounded-t-3xl bg-surface p-5 safe-bottom sm:rounded-3xl sm:p-6">
+        <div className="mb-4 flex items-center justify-between">
+          <h2 className="text-lg font-bold">{title}</h2>
+          <IconButton label="close" onClick={onClose}><X size={20} /></IconButton>
+        </div>
+        {children}
+      </div>
+    </div>
+  );
+}
+
+function F({ label, children, wide }: { label: string; children: ReactNode; wide?: boolean }) {
+  return (
+    <label className={clsx('block min-w-0', wide && 'sm:col-span-2')}>
+      <span className="mb-1 block text-xs font-medium text-muted">{label}</span>
+      {children}
+    </label>
+  );
+}
+
+function Actions({ busy, error, onCancel, onDelete }: { busy: boolean; error?: string | null; onCancel: () => void; onDelete?: () => void }) {
+  const t = useTranslations('customer');
+  return (
+    <div className="mt-5 flex items-center gap-2 sm:col-span-2">
+      {onDelete && <button type="button" onClick={onDelete} className="rounded-xl px-3 py-2.5 text-sm font-semibold text-danger hover:bg-danger-soft">{t('delete')}</button>}
+      {error && <span className="text-sm text-danger">{error}</span>}
+      <span className="flex-1" />
+      <button type="button" onClick={onCancel} className="rounded-xl border border-border px-4 py-2.5 font-medium">{t('cancel')}</button>
+      <button disabled={busy} className="flex items-center gap-2 rounded-xl bg-primary px-5 py-2.5 font-semibold text-white disabled:opacity-60">
+        {busy && <Loader2 size={16} className="animate-spin" />} {t('save')}
+      </button>
+    </div>
+  );
+}
+
+/** Shared mutation helper: runs the request, refreshes the customer, closes the dialog. */
+function useSave(customerId: string, onDone: () => void) {
+  const qc = useQueryClient();
+  const [error, setError] = useState<string | null>(null);
+  const m = useMutation({
+    mutationFn: (fn: () => Promise<unknown>) => fn(),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['customer', customerId] });
+      qc.invalidateQueries({ queryKey: ['activities', customerId] });
+      qc.invalidateQueries({ queryKey: ['customers'] });
+      onDone();
+    },
+    onError: (e) => setError(e instanceof ApiError ? (e.status === 403 ? '403' : e.code) : 'error'),
+  });
+  return { run: m.mutate, busy: m.isPending, error };
+}
+
+export function BranchDialog({ customerId, branch, onClose }: { customerId: string; branch?: Branch; onClose: () => void }) {
+  const t = useTranslations('customer');
+  const [v, setV] = useState({
+    name: branch?.name ?? '', city: branch?.city ?? '', address: branch?.address ?? '', postal_code: branch?.postal_code ?? '',
+    phone: branch?.phone ?? '', manager_name: branch?.manager_name ?? '', status: (branch?.status ?? 'active') as 'active' | 'inactive',
+  });
+  const { run, busy, error } = useSave(customerId, onClose);
+  const set = (k: keyof typeof v) => (e: React.ChangeEvent<HTMLInputElement>) => setV((x) => ({ ...x, [k]: e.target.value }));
+  return (
+    <Dialog title={branch ? t('editBranch') : t('addBranch')} onClose={onClose}>
+      <form className="grid grid-cols-1 gap-3 sm:grid-cols-2" onSubmit={(e) => {
+        e.preventDefault();
+        run(() => branch ? api(`/branches/${branch.id}`, { method: 'PUT', json: v }) : api(`/customers/${customerId}/branches`, { method: 'POST', json: v }));
+      }}>
+        <F label={`${t('branchName')} *`} wide><input required autoFocus className={input} value={v.name} onChange={set('name')} /></F>
+        <F label={t('street')} wide><input className={input} value={v.address} onChange={set('address')} /></F>
+        <F label={t('city')}><input className={input} value={v.city} onChange={set('city')} /></F>
+        <F label={t('postal')}><input className={input} value={v.postal_code} onChange={set('postal_code')} /></F>
+        <F label={t('phone')}><input type="tel" className={input} value={v.phone} onChange={set('phone')} /></F>
+        <F label={t('branchManager')}><input className={input} value={v.manager_name} onChange={set('manager_name')} /></F>
+        <Actions busy={busy} error={error} onCancel={onClose}
+          onDelete={branch ? () => { if (confirm(t('confirmDelete'))) run(() => api(`/branches/${branch.id}`, { method: 'DELETE' })); } : undefined} />
+      </form>
+    </Dialog>
+  );
+}
+
+const SPACE_KINDS = ['retail', 'warehouse', 'office', 'department'] as const;
+
+export function SpaceDialog({ customerId, branchId, space, onClose }: { customerId: string; branchId: string; space?: Space; onClose: () => void }) {
+  const t = useTranslations('customer');
+  const [v, setV] = useState({ name: space?.name ?? '', kind: (space?.kind ?? 'retail') as (typeof SPACE_KINDS)[number], area_sqm: space?.area_sqm ?? '', notes: space?.notes ?? '' });
+  const { run, busy, error } = useSave(customerId, onClose);
+  return (
+    <Dialog title={space ? t('editSpace') : t('addSpace')} onClose={onClose}>
+      <form className="grid grid-cols-1 gap-3 sm:grid-cols-2" onSubmit={(e) => {
+        e.preventDefault();
+        const body = { ...v, area_sqm: v.area_sqm === '' ? null : Number(v.area_sqm) };
+        run(() => space ? api(`/spaces/${space.id}`, { method: 'PUT', json: body }) : api(`/branches/${branchId}/spaces`, { method: 'POST', json: body }));
+      }}>
+        <F label={`${t('spaceName')} *`} wide><input required autoFocus className={input} value={v.name} onChange={(e) => setV({ ...v, name: e.target.value })} /></F>
+        <F label={t('spaceKind')}>
+          <select className={input} value={v.kind} onChange={(e) => setV({ ...v, kind: e.target.value as typeof v.kind })}>
+            {SPACE_KINDS.map((k) => <option key={k} value={k}>{t(`spaceKinds.${k}`)}</option>)}
+          </select>
+        </F>
+        <F label={t('area')}><input type="number" min={0} step="0.5" className={input} value={v.area_sqm} onChange={(e) => setV({ ...v, area_sqm: e.target.value })} /></F>
+        <F label={t('notes')} wide><input className={input} value={v.notes} onChange={(e) => setV({ ...v, notes: e.target.value })} /></F>
+        <Actions busy={busy} error={error} onCancel={onClose}
+          onDelete={space ? () => { if (confirm(t('confirmDelete'))) run(() => api(`/spaces/${space.id}`, { method: 'DELETE' })); } : undefined} />
+      </form>
+    </Dialog>
+  );
+}
+
+export function ContactDialog({ customerId, contact, onClose }: { customerId: string; contact?: Contact; onClose: () => void }) {
+  const t = useTranslations('customer');
+  const [v, setV] = useState({
+    full_name: contact?.full_name ?? '', role_title: contact?.role_title ?? '', email: contact?.email ?? '', phone: contact?.phone ?? '',
+    mobile: contact?.mobile ?? '', is_primary: contact?.is_primary ?? false, notes: contact?.notes ?? '',
+  });
+  const { run, busy, error } = useSave(customerId, onClose);
+  const set = (k: keyof typeof v) => (e: React.ChangeEvent<HTMLInputElement>) => setV((x) => ({ ...x, [k]: e.target.value }));
+  return (
+    <Dialog title={contact ? t('editContact') : t('addContact')} onClose={onClose}>
+      <form className="grid grid-cols-1 gap-3 sm:grid-cols-2" onSubmit={(e) => {
+        e.preventDefault();
+        run(() => contact ? api(`/contacts/${contact.id}`, { method: 'PUT', json: v }) : api(`/customers/${customerId}/contacts`, { method: 'POST', json: v }));
+      }}>
+        <F label={`${t('fullName')} *`}><input required minLength={2} autoFocus className={input} value={v.full_name} onChange={set('full_name')} /></F>
+        <F label={t('roleTitle')}><input className={input} value={v.role_title} onChange={set('role_title')} /></F>
+        <F label={t('email')} wide><input type="email" className={input} value={v.email} onChange={set('email')} /></F>
+        <F label={t('phone')}><input type="tel" className={input} value={v.phone} onChange={set('phone')} /></F>
+        <F label={t('mobile')}><input type="tel" className={input} value={v.mobile} onChange={set('mobile')} /></F>
+        <F label={t('notes')} wide><input className={input} value={v.notes} onChange={set('notes')} /></F>
+        <label className="flex items-center gap-2 text-sm sm:col-span-2">
+          <input type="checkbox" className="h-4 w-4 accent-[var(--primary)]" checked={v.is_primary} onChange={(e) => setV({ ...v, is_primary: e.target.checked })} />
+          {t('primary')}
+        </label>
+        <Actions busy={busy} error={error} onCancel={onClose}
+          onDelete={contact ? () => { if (confirm(t('confirmDelete'))) run(() => api(`/contacts/${contact.id}`, { method: 'DELETE' })); } : undefined} />
+      </form>
+    </Dialog>
+  );
+}
+
+const KINDS = [
+  { value: 'call', icon: Phone, key: 'kindCall' },
+  { value: 'email_sent', icon: Mail, key: 'kindEmail' },
+  { value: 'meeting_done', icon: Users, key: 'kindMeeting' },
+  { value: 'note', icon: NotebookPen, key: 'kindNote' },
+] as const;
+
+export function ActivityDialog({ customerId, initialKind = 'call', onClose }: { customerId: string; initialKind?: (typeof KINDS)[number]['value']; onClose: () => void }) {
+  const t = useTranslations('customer');
+  const [kind, setKind] = useState<(typeof KINDS)[number]['value']>(initialKind);
+  const defaultTitle = (k: string) => t(KINDS.find((x) => x.value === k)!.key);
+  const [title, setTitle] = useState(defaultTitle(initialKind));
+  const [body, setBody] = useState('');
+  const { run, busy, error } = useSave(customerId, onClose);
+  return (
+    <Dialog title={t('logActivity')} onClose={onClose}>
+      <form className="grid grid-cols-1 gap-3" onSubmit={(e) => { e.preventDefault(); run(() => api(`/customers/${customerId}/activities`, { method: 'POST', json: { kind, title, body } })); }}>
+        <div className="grid grid-cols-4 gap-2">
+          {KINDS.map(({ value, icon: Icon, key }) => (
+            <button key={value} type="button" onClick={() => { if (title === defaultTitle(kind)) setTitle(t(key)); setKind(value); }}
+              className={clsx('flex flex-col items-center gap-1 rounded-xl border py-2.5 text-xs font-medium', kind === value ? 'border-primary bg-primary-soft text-primary' : 'border-border')}>
+              <Icon size={18} /> {t(key)}
+            </button>
+          ))}
+        </div>
+        <F label={t('activityTitle')}><input required className={input} value={title} onChange={(e) => setTitle(e.target.value)} /></F>
+        <F label={t('activityBody')}><textarea rows={4} autoFocus className={input} value={body} onChange={(e) => setBody(e.target.value)} /></F>
+        <Actions busy={busy} error={error} onCancel={onClose} />
+      </form>
+    </Dialog>
+  );
+}

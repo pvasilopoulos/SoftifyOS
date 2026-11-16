@@ -1,15 +1,18 @@
 'use client';
 import { useEffect, useRef, useState } from 'react';
-import { useInfiniteQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import clsx from 'clsx';
+import { useInfiniteQuery } from '@tanstack/react-query';
 import { useWindowVirtualizer } from '@tanstack/react-virtual';
 import { useLocale, useTranslations } from 'next-intl';
-import { Loader2, Plus, Search, X } from 'lucide-react';
+import { Archive, ArrowDownAZ, Clock, Euro, Loader2, MapPin, Plus, Search, UserRound, X } from 'lucide-react';
 import { api, type Customer, type Page } from '@/lib/api';
 import { money } from '@/lib/format';
 import { Link } from '@/i18n/navigation';
 import { EntityTile, PageHeader, Segmented, Skeleton, StatusBadge } from '@/components/ui';
 
-type Filter = 'all' | 'active' | 'prospect';
+type Status = 'all' | 'active' | 'prospect' | 'negotiation' | 'inactive';
+type Sort = 'name' | 'recent' | 'value';
+type Row = Customer & { trade_name: string | null; tags: string[]; address_city: string | null; archived_at: string | null };
 
 function useDebounced<T>(v: T, ms = 250) {
   const [d, setD] = useState(v);
@@ -17,43 +20,57 @@ function useDebounced<T>(v: T, ms = 250) {
   return d;
 }
 
+// Filters survive navigation (back from a customer card keeps your view)
+function usePersisted<T>(key: string, initial: T): [T, (v: T) => void] {
+  const [v, setV] = useState<T>(initial);
+  useEffect(() => { try { const s = sessionStorage.getItem(key); if (s) setV(JSON.parse(s)); } catch {} }, [key]);
+  return [v, (x: T) => { setV(x); try { sessionStorage.setItem(key, JSON.stringify(x)); } catch {} }];
+}
+
 export default function CustomersPage() {
   const t = useTranslations('customers');
   const locale = useLocale();
-  const [filter, setFilter] = useState<Filter>('all');
+  const [status, setStatus] = usePersisted<Status>('cust.status', 'all');
+  const [sort, setSort] = usePersisted<Sort>('cust.sort', 'name');
+  const [mine, setMine] = usePersisted('cust.mine', false);
+  const [archived, setArchived] = usePersisted('cust.archived', false);
   const [q, setQ] = useState('');
-  const [creating, setCreating] = useState(false);
   const dq = useDebounced(q.trim());
 
   const query = useInfiniteQuery({
-    queryKey: ['customers', filter, dq],
+    queryKey: ['customers', status, sort, mine, archived, dq],
     initialPageParam: null as string | null,
     queryFn: ({ pageParam, signal }) => {
-      const p = new URLSearchParams({ limit: '40' });
-      if (filter !== 'all') p.set('status', filter);
+      const p = new URLSearchParams({ limit: '40', sort });
+      if (status !== 'all') p.set('status', status);
+      if (mine) p.set('manager', 'me');
+      if (archived) p.set('archived', '1');
       if (dq.length >= 2) p.set('q', dq);
       if (pageParam) p.set('cursor', pageParam);
-      return api<Page<Customer>>(`/customers?${p}`, { signal });
+      return api<Page<Row>>(`/customers?${p}`, { signal });
     },
     getNextPageParam: (last) => last.nextCursor,
   });
   const rows = query.data?.pages.flatMap((p) => p.items) ?? [];
 
-  // Window virtualisation: only visible rows are in the DOM, so 100k+ loaded rows still scroll smoothly
+  // Window virtualisation: only visible rows are in the DOM, so huge lists stay smooth
   const listRef = useRef<HTMLDivElement>(null);
-  const v = useWindowVirtualizer({ count: rows.length, estimateSize: () => 92, overscan: 8, scrollMargin: listRef.current?.offsetTop ?? 0 });
+  const v = useWindowVirtualizer({ count: rows.length, estimateSize: () => 96, overscan: 8, scrollMargin: listRef.current?.offsetTop ?? 0 });
   const items = v.getVirtualItems();
   const lastIndex = items.at(-1)?.index ?? 0;
   useEffect(() => {
     if (lastIndex >= rows.length - 10 && query.hasNextPage && !query.isFetchingNextPage) query.fetchNextPage();
   }, [lastIndex, rows.length, query]);
 
+  const chip = (active: boolean) => clsx('flex shrink-0 items-center gap-1.5 rounded-full border px-3 py-1.5 text-sm font-medium transition',
+    active ? 'border-primary bg-primary-soft text-primary' : 'border-border bg-surface text-muted');
+
   return (
     <div>
       <PageHeader title={t('title')} actions={
-        <button onClick={() => setCreating(true)} className="hidden items-center gap-1.5 rounded-full bg-primary px-4 py-2 text-sm font-semibold text-white lg:flex">
+        <Link href="/customers/new" className="hidden items-center gap-1.5 rounded-full bg-primary px-4 py-2 text-sm font-semibold text-white lg:flex">
           <Plus size={18} /> {t('new')}
-        </button>
+        </Link>
       } />
 
       <div className="mb-3 flex items-center gap-2 rounded-xl border border-border bg-surface px-3.5">
@@ -63,14 +80,24 @@ export default function CustomersPage() {
         {query.isFetching && !query.isFetchingNextPage && <Loader2 size={16} className="animate-spin text-muted" />}
       </div>
 
-      <div className="mb-4">
-        <Segmented value={filter} onChange={setFilter} options={[
+      <div className="mb-3">
+        <Segmented value={status} onChange={setStatus} options={[
           { value: 'all', label: t('all') }, { value: 'active', label: t('active') }, { value: 'prospect', label: t('prospects') },
+          { value: 'negotiation', label: t('negotiation') }, { value: 'inactive', label: t('inactive') },
         ]} />
       </div>
 
+      <div className="no-scrollbar mb-4 flex gap-2 overflow-x-auto">
+        <button onClick={() => setSort('name')} className={chip(sort === 'name')}><ArrowDownAZ size={15} /> {t('sortName')}</button>
+        <button onClick={() => setSort('recent')} className={chip(sort === 'recent')}><Clock size={15} /> {t('sortRecent')}</button>
+        <button onClick={() => setSort('value')} className={chip(sort === 'value')}><Euro size={15} /> {t('sortValue')}</button>
+        <span className="mx-1 w-px shrink-0 bg-border" />
+        <button onClick={() => setMine(!mine)} className={chip(mine)}><UserRound size={15} /> {t('mine')}</button>
+        <button onClick={() => setArchived(!archived)} className={chip(archived)}><Archive size={15} /> {t('archivedList')}</button>
+      </div>
+
       {query.isLoading ? (
-        <div className="space-y-3">{Array.from({ length: 6 }).map((_, i) => <Skeleton key={i} className="h-[80px]" />)}</div>
+        <div className="space-y-3">{Array.from({ length: 6 }).map((_, i) => <Skeleton key={i} className="h-[84px]" />)}</div>
       ) : rows.length === 0 ? (
         <p className="py-16 text-center text-muted">{t('empty')}</p>
       ) : (
@@ -79,14 +106,18 @@ export default function CustomersPage() {
             const c = rows[it.index];
             return (
               <div key={c.id} style={{ position: 'absolute', top: 0, left: 0, right: 0, transform: `translateY(${it.start - v.options.scrollMargin}px)` }} className="pb-3">
-                <Link href={`/customers/${c.id}`} className="card flex items-center gap-3.5 p-3.5 transition hover:border-primary/40">
+                <Link href={`/customers/${c.id}`} className={clsx('card flex items-center gap-3.5 p-3.5 transition hover:border-primary/40', c.archived_at && 'opacity-60')}>
                   <EntityTile name={c.name} />
                   <div className="min-w-0 flex-1">
                     <div className="truncate font-semibold">{c.name}</div>
-                    <div className="truncate text-sm text-muted">
-                      {c.kind === 'group' ? `${t('group')} · ${t('companies', { count: c.companies_count })}` : c.code}
+                    <div className="flex min-w-0 items-center gap-1 truncate text-sm text-muted">
+                      {c.kind === 'group' ? `${t('group')} · ${t('companies', { count: c.companies_count })}` : (c.trade_name || c.code)}
+                      {c.address_city && <><span>·</span><MapPin size={13} className="shrink-0" />{c.address_city}</>}
                     </div>
-                    <div className="mt-1"><StatusBadge status={c.status} /></div>
+                    <div className="mt-1 flex min-w-0 gap-1.5 overflow-hidden">
+                      <StatusBadge status={c.status} />
+                      {c.tags?.slice(0, 2).map((tag) => <span key={tag} className="truncate rounded-full bg-primary-soft px-2 py-0.5 text-xs text-primary">#{tag}</span>)}
+                    </div>
                   </div>
                   <div className="hidden text-right sm:block">
                     <div className="text-xs text-muted">{t('annualValue')}</div>
@@ -100,40 +131,10 @@ export default function CustomersPage() {
       )}
       {query.isFetchingNextPage && <div className="flex justify-center py-4"><Loader2 className="animate-spin text-muted" /></div>}
 
-      <button onClick={() => setCreating(true)} aria-label={t('new')}
+      <Link href="/customers/new" aria-label={t('new')}
         className="fixed bottom-24 right-5 z-30 grid h-14 w-14 place-items-center rounded-full bg-primary text-white shadow-xl shadow-primary/40 lg:hidden">
         <Plus size={26} />
-      </button>
-      {creating && <NewCustomer onClose={() => setCreating(false)} />}
-    </div>
-  );
-}
-
-function NewCustomer({ onClose }: { onClose: () => void }) {
-  const t = useTranslations('customers');
-  const qc = useQueryClient();
-  const [name, setName] = useState('');
-  const [vat, setVat] = useState('');
-  const [kind, setKind] = useState<'company' | 'group'>('company');
-  const m = useMutation({
-    mutationFn: () => api('/customers', { method: 'POST', json: { name, vat: vat || undefined, kind } }),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['customers'] }); onClose(); },
-  });
-  return (
-    <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 sm:items-center" onClick={onClose}>
-      <form onClick={(e) => e.stopPropagation()} onSubmit={(e) => { e.preventDefault(); m.mutate(); }}
-        className="w-full max-w-md rounded-t-3xl bg-surface p-6 safe-bottom sm:rounded-3xl">
-        <h2 className="mb-4 text-lg font-bold">{t('new')}</h2>
-        <Segmented value={kind} onChange={setKind} options={[{ value: 'company', label: t('company') }, { value: 'group', label: t('group') }]} />
-        <input autoFocus required minLength={2} placeholder={t('name')} value={name} onChange={(e) => setName(e.target.value)}
-          className="mt-4 w-full rounded-xl border border-border bg-surface-2 px-3.5 py-3 outline-none focus:border-primary" />
-        <input placeholder={t('vat')} value={vat} onChange={(e) => setVat(e.target.value)}
-          className="mt-3 w-full rounded-xl border border-border bg-surface-2 px-3.5 py-3 outline-none focus:border-primary" />
-        <div className="mt-5 flex gap-2">
-          <button type="button" onClick={onClose} className="flex-1 rounded-xl border border-border py-3 font-medium">{t('cancel')}</button>
-          <button disabled={m.isPending} className="flex-1 rounded-xl bg-primary py-3 font-semibold text-white disabled:opacity-60">{t('create')}</button>
-        </div>
-      </form>
+      </Link>
     </div>
   );
 }

@@ -1,25 +1,26 @@
 'use client';
-import { use, useState } from 'react';
-import { useInfiniteQuery, useQuery } from '@tanstack/react-query';
+import { use, useState, type ReactNode } from 'react';
+import clsx from 'clsx';
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useLocale, useTranslations } from 'next-intl';
 import {
-  ArrowLeft, CalendarDays, CheckCircle2, ChevronRight, FileText, Mail, MapPin, MoreHorizontal, Phone, PencilLine, Star, StickyNote,
+  Archive, ArchiveRestore, ArrowLeft, CalendarDays, CheckCircle2, ChevronDown, ChevronRight, FileText, Globe, Mail,
+  MapPin, NotebookPen, Pencil, Phone, Plus, Smartphone, Star, StickyNote, Store, Users,
 } from 'lucide-react';
-import { api, type Activity, type Page } from '@/lib/api';
-import { money, relative } from '@/lib/format';
+import { api, type Activity, type Offer, type Page } from '@/lib/api';
+import { date, money, relative } from '@/lib/format';
+import type { Branch, Contact, CustomerDetail, Space } from '@/lib/customers';
 import { Link, useRouter } from '@/i18n/navigation';
 import { Avatar, EntityTile, IconButton, Skeleton, StatusBadge, Tabs } from '@/components/ui';
+import { ActivityDialog, BranchDialog, ContactDialog, SpaceDialog } from '@/components/customer-dialogs';
 
-type Detail = {
-  customer: {
-    id: string; name: string; code: string; kind: string; status: string; vat: string | null; category: string | null;
-    parent_name: string | null; account_manager_name: string | null; annual_value: string; spaces_count: number;
-  };
-  branches: { id: string; name: string; city: string | null; status: string; spaces_count: number }[];
-  stats: { open_offers: number; won_offers: number; pending_amount: string };
-  activities: Activity[];
-  contacts: { id: string; full_name: string; email: string | null; phone: string | null; role_title: string | null }[];
-};
+type Tab = 'overview' | 'subsidiaries' | 'branches' | 'contacts' | 'offers' | 'activity';
+type DialogState =
+  | { kind: 'branch'; branch?: Branch }
+  | { kind: 'space'; branchId: string; space?: Space }
+  | { kind: 'contact'; contact?: Contact }
+  | { kind: 'activity'; initial?: 'call' | 'email_sent' | 'meeting_done' | 'note' }
+  | null;
 
 const activityIcon: Record<string, typeof FileText> = {
   offer_updated: FileText, meeting_done: CalendarDays, email_sent: Mail, approval: CheckCircle2, call: Phone, note: StickyNote,
@@ -29,128 +30,339 @@ export default function CustomerPage({ params }: { params: Promise<{ id: string 
   const { id } = use(params);
   const t = useTranslations('customer');
   const tc = useTranslations('customers');
+  const tf = useTranslations('cform');
+  const ta = useTranslations('activity');
   const locale = useLocale();
   const router = useRouter();
-  const [tab, setTab] = useState<'overview' | 'branches' | 'activity' | 'contacts'>('overview');
-  const { data, isLoading } = useQuery({ queryKey: ['customer', id], queryFn: () => api<Detail>(`/customers/${id}`) });
-  const c = data?.customer;
+  const qc = useQueryClient();
+  const [tab, setTab] = useState<Tab>('overview');
+  const [dialog, setDialog] = useState<DialogState>(null);
+  const { data, isLoading } = useQuery({ queryKey: ['customer', id], queryFn: () => api<CustomerDetail>(`/customers/${id}`) });
+  const archive = useMutation({
+    mutationFn: (archived: boolean) => api(`/customers/${id}/archive`, { method: 'POST', json: { archived } }),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['customer', id] }); qc.invalidateQueries({ queryKey: ['customers'] }); },
+  });
+
+  if (isLoading || !data) {
+    return <div className="space-y-4"><Skeleton className="h-10 w-40" /><Skeleton className="h-32" /><Skeleton className="h-20" /><Skeleton className="h-64" /></div>;
+  }
+  const c = data.customer;
+  const s = data.stats;
+  const primary = data.contacts.find((x) => x.is_primary) ?? data.contacts[0];
+  const phone = c.phone || c.mobile || primary?.phone || primary?.mobile;
+  const email = c.email || primary?.email;
+  const rel = (d: string) => relative(d, locale, { today: ta('today'), yesterday: ta('yesterday') });
+  const termsLabel = (x: string | null) => (x ? (tf.has(`terms.${x}`) ? tf(`terms.${x}` as never) : x) : null);
+  const sourceLabel = (x: string | null) => (x ? (tf.has(`sources.${x}`) ? tf(`sources.${x}` as never) : x) : null);
+
+  const tabs: { value: Tab; label: string }[] = [
+    { value: 'overview', label: t('overview') },
+    ...(c.kind === 'group' ? [{ value: 'subsidiaries' as const, label: `${t('subsidiaries')} (${data.subsidiaries.length})` }] : []),
+    { value: 'branches', label: `${t('branches')} (${data.branches.length})` },
+    { value: 'contacts', label: `${t('contacts')} (${data.contacts.length})` },
+    { value: 'offers', label: t('offers') },
+    { value: 'activity', label: t('activity') },
+  ];
 
   return (
     <div className="space-y-4">
       <header className="flex items-center gap-1">
-        <IconButton label="back" onClick={() => router.back()}><ArrowLeft size={22} /></IconButton>
+        <IconButton label="back" onClick={() => router.push('/customers')}><ArrowLeft size={22} /></IconButton>
         <span className="flex-1 text-lg font-semibold">{t('back')}</span>
-        <IconButton label="favourite"><Star size={20} /></IconButton>
-        <IconButton label="more"><MoreHorizontal size={20} /></IconButton>
+        {data.can.archive && (
+          <IconButton label={c.archived_at ? t('restore') : t('archive')}
+            onClick={() => { if (c.archived_at || confirm(t('confirmArchive'))) archive.mutate(!c.archived_at); }}>
+            {c.archived_at ? <ArchiveRestore size={20} /> : <Archive size={20} />}
+          </IconButton>
+        )}
+        {data.can.edit && (
+          <Link href={`/customers/${id}/edit`} className="flex items-center gap-1.5 rounded-full bg-primary-soft px-4 py-2 text-sm font-semibold text-primary">
+            <Pencil size={16} /> {t('edit')}
+          </Link>
+        )}
       </header>
 
-      <section className="card flex items-center gap-4 p-4">
-        {c ? <EntityTile name={c.name} size={72} /> : <Skeleton className="h-[72px] w-[72px]" />}
+      {c.archived_at && (
+        <div className="flex items-center gap-2 rounded-2xl bg-warning-soft px-4 py-3 text-sm text-warning">
+          <Archive size={16} /> {t('archived')} · {date(c.archived_at, locale)}
+        </div>
+      )}
+
+      {/* Identity */}
+      <section className="card flex items-start gap-4 p-4 sm:p-5">
+        <EntityTile name={c.name} size={72} />
         <div className="min-w-0 flex-1">
-          {c ? <>
-            <h1 className="truncate text-xl font-bold">{c.name}</h1>
-            <div className="text-sm text-muted">{c.kind === 'group' ? tc('group') : tc('company')}</div>
-            <div className="mt-1.5 flex flex-wrap items-center gap-2">
-              <StatusBadge status={c.status} />
-              <span className="text-sm text-muted">{c.code}</span>
-            </div>
-          </> : <Skeleton className="h-14 w-48" />}
+          <h1 className="text-xl font-bold leading-tight sm:text-2xl">{c.name}</h1>
+          <div className="mt-0.5 text-sm text-muted">
+            {c.trade_name && <span className="font-medium text-text">{c.trade_name} · </span>}
+            {c.kind === 'group' ? tc('group') : tc('company')}
+            {c.parent_id && <> · <Link href={`/customers/${c.parent_id}`} className="text-primary hover:underline">{c.parent_name}</Link></>}
+          </div>
+          <div className="mt-2 flex flex-wrap items-center gap-1.5">
+            <StatusBadge status={c.status} />
+            <span className="rounded-full bg-surface-2 px-2.5 py-0.5 text-xs text-muted">{c.code}</span>
+            {c.category && <span className="rounded-full bg-warning-soft px-2.5 py-0.5 text-xs font-medium text-warning">{c.category}</span>}
+            {c.tags.map((tag) => <span key={tag} className="rounded-full bg-primary-soft px-2.5 py-0.5 text-xs font-medium text-primary">#{tag}</span>)}
+          </div>
         </div>
       </section>
 
+      {/* Quick actions */}
       <div className="grid grid-cols-4 gap-2">
-        {[{ icon: Phone, l: t('call') }, { icon: Mail, l: t('email') }, { icon: CalendarDays, l: t('meeting') }, { icon: CheckCircle2, l: t('task') }].map(({ icon: Icon, l }) => (
-          <button key={l} className="card flex flex-col items-center gap-1.5 py-3 text-xs font-medium">
-            <Icon size={20} className="text-primary" /> {l}
-          </button>
-        ))}
+        <QuickAction icon={Phone} label={t('call')} href={phone ? `tel:${phone.replace(/\s/g, '')}` : undefined} onClick={() => setDialog({ kind: 'activity', initial: 'call' })} />
+        <QuickAction icon={Mail} label={t('email')} href={email ? `mailto:${email}` : undefined} onClick={() => setDialog({ kind: 'activity', initial: 'email_sent' })} />
+        <QuickAction icon={CalendarDays} label={t('meeting')} onClick={() => setDialog({ kind: 'activity', initial: 'meeting_done' })} />
+        <QuickAction icon={NotebookPen} label={t('kindNote')} onClick={() => setDialog({ kind: 'activity', initial: 'note' })} />
       </div>
 
-      {c && (
-        <Link href={`/offers/new?customer=${c.id}&name=${encodeURIComponent(c.name)}`}
-          className="flex items-center justify-center gap-2 rounded-2xl bg-primary py-3 font-semibold text-white shadow-lg shadow-primary/25">
-          <FileText size={18} /> {tc('newOffer')}
-        </Link>
-      )}
+      <Link href={`/offers/new?customer=${c.id}&name=${encodeURIComponent(c.name)}`}
+        className="flex items-center justify-center gap-2 rounded-2xl bg-primary py-3 font-semibold text-white shadow-lg shadow-primary/25">
+        <FileText size={18} /> {tc('newOffer')}
+      </Link>
 
-      <Tabs value={tab} onChange={setTab} options={[
-        { value: 'overview', label: t('overview') }, { value: 'branches', label: t('branches') },
-        { value: 'activity', label: t('activity') }, { value: 'contacts', label: t('contacts') },
-      ]} />
+      {/* KPIs */}
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+        <Kpi label={t('annualValue')} value={money(c.annual_value, locale, 0)} />
+        <Kpi label={t('openAmount')} value={money(s.open_amount, locale, 0)} sub={t('offersCount', { count: s.open_offers })} />
+        <Kpi label={t('wonAmount')} value={money(s.won_amount, locale, 0)} sub={t('offersCount', { count: s.won_offers })} tone="text-success" />
+        <Kpi label={t('winRate')} value={s.win_rate === null ? '—' : `${s.win_rate}%`}
+          sub={s.last_activity_at ? `${t('lastActivity')}: ${rel(s.last_activity_at)}` : undefined} />
+      </div>
 
-      {isLoading || !data ? <Skeleton className="h-48" /> : tab === 'overview' ? (
-        <div className="grid gap-4 lg:grid-cols-2">
-          <section className="card p-4">
-            <div className="mb-2 flex items-center justify-between">
-              <h2 className="font-semibold">{t('basics')}</h2>
-              <PencilLine size={18} className="text-primary" />
-            </div>
-            <dl className="divide-y divide-border text-sm">
-              {[
-                [t('group'), data.customer.parent_name ?? data.customer.name],
-                [t('vat'), data.customer.vat ?? '—'],
-                [t('category'), data.customer.category ? <span className="rounded-md bg-warning-soft px-2 py-0.5 text-warning">{data.customer.category}</span> : '—'],
-                [t('manager'), data.customer.account_manager_name ? <span className="flex items-center gap-2"><Avatar name={data.customer.account_manager_name} size={22} />{data.customer.account_manager_name}</span> : '—'],
-              ].map(([k, v], i) => (
-                <div key={i} className="flex items-center justify-between py-2.5"><dt className="text-muted">{k}</dt><dd className="font-medium">{v}</dd></div>
-              ))}
-            </dl>
-          </section>
-          <section className="card p-4">
-            <h2 className="mb-2 font-semibold">{t('commercial')}</h2>
-            <div className="tabular text-3xl font-bold">{money(data.customer.annual_value, locale, 0)}</div>
-            <div className="text-sm text-muted">{t('totalValue')}</div>
-            <div className="mt-4 grid grid-cols-3 gap-2">
-              <Stat value={String(data.stats.open_offers)} label={t('openOffers')} />
-              <Stat value={String(data.stats.won_offers)} label={t('wonOffers')} />
-              <Stat value={money(data.stats.pending_amount, locale, 0)} label={t('pendingAmount')} />
-            </div>
-          </section>
+      <Tabs value={tab} onChange={setTab} options={tabs} />
+
+      {tab === 'overview' && (
+        <div className="grid gap-4 lg:grid-cols-2 [&>*]:min-w-0">
+          <InfoCard title={t('basics')}>
+            <Row k={t('vat')} v={c.vat} />
+            <Row k={t('taxOffice')} v={c.tax_office} />
+            <Row k={t('gemi')} v={c.gemi} />
+            <Row k={t('activityField')} v={c.activity} />
+            <Row k={t('manager')} v={c.account_manager_name && <span className="flex items-center gap-2"><Avatar name={c.account_manager_name} size={22} />{c.account_manager_name}</span>} />
+            <Row k={t('source')} v={sourceLabel(c.source)} />
+          </InfoCard>
+          <InfoCard title={t('contactInfo')}>
+            <Row k={t('email')} v={c.email && <a href={`mailto:${c.email}`} className="text-primary hover:underline">{c.email}</a>} icon={Mail} />
+            <Row k={t('phone')} v={c.phone && <a href={`tel:${c.phone}`} className="text-primary">{c.phone}</a>} icon={Phone} />
+            <Row k={t('mobile')} v={c.mobile && <a href={`tel:${c.mobile}`} className="text-primary">{c.mobile}</a>} icon={Smartphone} />
+            <Row k="Web" v={c.website && <a href={c.website.startsWith('http') ? c.website : `https://${c.website}`} target="_blank" rel="noopener" className="text-primary hover:underline">{c.website}</a>} icon={Globe} />
+            {primary && <Row k={t('primary')} v={`${primary.full_name}${primary.role_title ? ` · ${primary.role_title}` : ''}`} icon={Star} />}
+          </InfoCard>
+          <InfoCard title={t('address')}>
+            <p className="text-sm leading-relaxed">
+              {[c.address_street, [c.address_postal, c.address_city].filter(Boolean).join(' '), c.address_region, c.address_country].filter(Boolean).join(', ') || '—'}
+            </p>
+            <div className="mt-3 text-xs font-medium text-muted">{t('billing')}</div>
+            <p className="text-sm">{c.billing_address
+              ? [c.billing_address.street, [c.billing_address.postal, c.billing_address.city].filter(Boolean).join(' ')].filter(Boolean).join(', ')
+              : t('sameAsAddress')}</p>
+          </InfoCard>
+          <InfoCard title={t('terms')}>
+            <Row k={t('paymentTerms')} v={termsLabel(c.payment_terms)} />
+            <Row k={t('creditLimit')} v={c.credit_limit ? money(c.credit_limit, locale, 0) : null} />
+            <Row k={t('discount')} v={Number(c.discount) ? `${Number(c.discount)}%` : null} />
+          </InfoCard>
+          {c.notes && <InfoCard title={t('notes')} wide><p className="whitespace-pre-line text-sm">{c.notes}</p></InfoCard>}
         </div>
-      ) : tab === 'branches' ? (
-        data.branches.length ? (
-          <ul className="space-y-3">
-            {data.branches.map((b) => (
-              <li key={b.id} className="card flex items-center gap-3 p-3.5">
-                <EntityTile name={b.name} size={52} />
-                <div className="min-w-0 flex-1">
-                  <div className="truncate font-semibold">{b.name}</div>
-                  {b.city && <div className="flex items-center gap-1 text-sm text-muted"><MapPin size={14} />{b.city}</div>}
-                  <div className="mt-1 flex gap-2"><span className="rounded-full bg-surface-2 px-2.5 py-0.5 text-xs">{t('spaces', { count: b.spaces_count })}</span><StatusBadge status={b.status} /></div>
-                </div>
-                <ChevronRight size={18} className="text-muted" />
-              </li>
-            ))}
-          </ul>
-        ) : <p className="py-10 text-center text-muted">{t('noBranches')}</p>
-      ) : tab === 'activity' ? (
-        <ActivityTimeline customerId={id} />
-      ) : (
-        <ul className="card divide-y divide-border">
-          {data.contacts.map((p) => (
-            <li key={p.id} className="flex items-center gap-3 p-3.5">
-              <Avatar name={p.full_name} size={38} />
-              <div className="min-w-0 flex-1">
-                <div className="font-semibold">{p.full_name}</div>
-                <div className="truncate text-sm text-muted">{[p.role_title, p.email].filter(Boolean).join(' · ')}</div>
-              </div>
-              {p.phone && <a href={`tel:${p.phone}`} className="text-primary"><Phone size={18} /></a>}
-            </li>
-          ))}
-        </ul>
       )}
-      <div className="h-2" />
-      <Link href="/customers" className="sr-only">back</Link>
+
+      {tab === 'subsidiaries' && (
+        <div className="space-y-2">
+          {data.can.edit && (
+            <Link href={`/customers/new?parent=${c.id}&parentName=${encodeURIComponent(c.name)}`} className="flex items-center justify-center gap-2 rounded-2xl border-2 border-dashed border-border py-3 text-sm font-semibold text-primary">
+              <Plus size={18} /> {t('addSubsidiary')}
+            </Link>
+          )}
+          {data.subsidiaries.length === 0 ? <p className="py-8 text-center text-muted">{t('noSubsidiaries')}</p> : data.subsidiaries.map((x) => (
+            <Link key={x.id} href={`/customers/${x.id}`} className="card flex items-center gap-3 p-3.5 hover:border-primary/40">
+              <EntityTile name={x.name} size={44} />
+              <div className="min-w-0 flex-1">
+                <div className="truncate font-semibold">{x.name}</div>
+                <div className="text-xs text-muted">{x.code} · {t('branchesCount', { count: x.branches_count })}</div>
+              </div>
+              <StatusBadge status={x.status} />
+              <ChevronRight size={18} className="text-muted" />
+            </Link>
+          ))}
+        </div>
+      )}
+
+      {tab === 'branches' && (
+        <div className="space-y-3">
+          {data.can.edit && (
+            <button onClick={() => setDialog({ kind: 'branch' })} className="flex w-full items-center justify-center gap-2 rounded-2xl border-2 border-dashed border-border py-3 text-sm font-semibold text-primary">
+              <Plus size={18} /> {t('addBranch')}
+            </button>
+          )}
+          {data.branches.length === 0 && <p className="py-8 text-center text-muted">{t('noBranches')}</p>}
+          {data.branches.map((b) => (
+            <BranchCard key={b.id} branch={b} canEdit={data.can.edit}
+              onEdit={() => setDialog({ kind: 'branch', branch: b })}
+              onAddSpace={() => setDialog({ kind: 'space', branchId: b.id })}
+              onEditSpace={(sp) => setDialog({ kind: 'space', branchId: b.id, space: sp })} />
+          ))}
+        </div>
+      )}
+
+      {tab === 'contacts' && (
+        <div className="space-y-2">
+          {data.can.edit && (
+            <button onClick={() => setDialog({ kind: 'contact' })} className="flex w-full items-center justify-center gap-2 rounded-2xl border-2 border-dashed border-border py-3 text-sm font-semibold text-primary">
+              <Plus size={18} /> {t('addContact')}
+            </button>
+          )}
+          {data.contacts.length === 0 ? <p className="py-8 text-center text-muted">{t('noContacts')}</p> : data.contacts.map((p) => (
+            <div key={p.id} className="card flex items-center gap-3 p-3.5">
+              <Avatar name={p.full_name} size={42} />
+              <button onClick={() => data.can.edit && setDialog({ kind: 'contact', contact: p })} className="min-w-0 flex-1 text-left">
+                <div className="flex items-center gap-1.5 font-semibold">{p.full_name}{p.is_primary && <Star size={14} className="fill-warning text-warning" />}</div>
+                <div className="truncate text-sm text-muted">{[p.role_title, p.email].filter(Boolean).join(' · ')}</div>
+              </button>
+              {p.email && <a href={`mailto:${p.email}`} aria-label="email" className="grid h-9 w-9 place-items-center rounded-full bg-primary-soft text-primary"><Mail size={16} /></a>}
+              {(p.mobile || p.phone) && <a href={`tel:${(p.mobile || p.phone)!.replace(/\s/g, '')}`} aria-label="call" className="grid h-9 w-9 place-items-center rounded-full bg-success-soft text-success"><Phone size={16} /></a>}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {tab === 'offers' && <CustomerOffers customerId={id} />}
+
+      {tab === 'activity' && (
+        <div className="space-y-3">
+          {data.can.edit && (
+            <button onClick={() => setDialog({ kind: 'activity', initial: 'note' })} className="flex w-full items-center justify-center gap-2 rounded-2xl bg-primary-soft py-3 text-sm font-semibold text-primary">
+              <Plus size={18} /> {t('logActivity')}
+            </button>
+          )}
+          <ActivityTimeline customerId={id} />
+        </div>
+      )}
+
+      {dialog?.kind === 'branch' && <BranchDialog customerId={id} branch={dialog.branch} onClose={() => setDialog(null)} />}
+      {dialog?.kind === 'space' && <SpaceDialog customerId={id} branchId={dialog.branchId} space={dialog.space} onClose={() => setDialog(null)} />}
+      {dialog?.kind === 'contact' && <ContactDialog customerId={id} contact={dialog.contact} onClose={() => setDialog(null)} />}
+      {dialog?.kind === 'activity' && <ActivityDialog customerId={id} initialKind={dialog.initial} onClose={() => setDialog(null)} />}
     </div>
   );
 }
 
-function Stat({ value, label }: { value: string; label: string }) {
+function QuickAction({ icon: Icon, label, href, onClick }: { icon: typeof Phone; label: string; href?: string; onClick: () => void }) {
+  const cls = 'card flex flex-col items-center gap-1.5 py-3 text-xs font-medium transition hover:border-primary/40';
+  // With a phone/email: open the dialer/mail app AND offer to log it; otherwise just log the activity
+  return href
+    ? <a href={href} onClick={() => setTimeout(onClick, 400)} className={cls}><Icon size={20} className="text-primary" /> {label}</a>
+    : <button onClick={onClick} className={cls}><Icon size={20} className="text-primary" /> {label}</button>;
+}
+
+function Kpi({ label, value, sub, tone }: { label: string; value: string; sub?: string; tone?: string }) {
   return (
-    <div className="rounded-xl bg-surface-2 p-3">
-      <div className="tabular truncate text-lg font-bold">{value}</div>
-      <div className="text-xs text-muted">{label}</div>
+    <div className="card min-w-0 p-4">
+      <div className="truncate text-xs text-muted">{label}</div>
+      <div className={clsx('tabular mt-1 truncate text-xl font-bold', tone)}>{value}</div>
+      {sub && <div className="mt-0.5 truncate text-xs text-muted">{sub}</div>}
     </div>
+  );
+}
+
+function InfoCard({ title, children, wide }: { title: string; children: ReactNode; wide?: boolean }) {
+  return (
+    <section className={clsx('card p-4', wide && 'lg:col-span-2')}>
+      <h2 className="mb-2 font-semibold">{title}</h2>
+      <dl className="divide-y divide-border">{children}</dl>
+    </section>
+  );
+}
+
+function Row({ k, v, icon: Icon }: { k: string; v: ReactNode; icon?: typeof Mail }) {
+  return (
+    <div className="flex items-center justify-between gap-4 py-2.5 text-sm">
+      <dt className="flex shrink-0 items-center gap-1.5 text-muted">{Icon && <Icon size={14} />}{k}</dt>
+      <dd className="min-w-0 truncate text-right font-medium">{v || <span className="text-muted">—</span>}</dd>
+    </div>
+  );
+}
+
+/** Store card: tap to expand its spaces (add / edit inline). */
+function BranchCard({ branch: b, canEdit, onEdit, onAddSpace, onEditSpace }: {
+  branch: Branch; canEdit: boolean; onEdit: () => void; onAddSpace: () => void; onEditSpace: (s: Space) => void;
+}) {
+  const t = useTranslations('customer');
+  const [open, setOpen] = useState(false);
+  return (
+    <div className={clsx('card overflow-hidden transition', open && 'border-primary/40')}>
+      <button onClick={() => setOpen(!open)} aria-expanded={open} className="flex w-full items-center gap-3 p-3.5 text-left">
+        <EntityTile name={b.name} size={52} />
+        <div className="min-w-0 flex-1">
+          <div className="truncate font-semibold">{b.name}</div>
+          {(b.city || b.address) && <div className="flex items-center gap-1 truncate text-sm text-muted"><MapPin size={14} className="shrink-0" />{[b.address, b.city].filter(Boolean).join(', ')}</div>}
+          <div className="mt-1 flex gap-2">
+            <span className="rounded-full bg-surface-2 px-2.5 py-0.5 text-xs">{t('spaces', { count: b.spaces.length })}</span>
+            <StatusBadge status={b.status} />
+          </div>
+        </div>
+        <ChevronDown size={20} className={clsx('shrink-0 text-muted transition-transform', open && 'rotate-180 text-primary')} />
+      </button>
+      {open && (
+        <div className="border-t border-border bg-surface-2/50 px-3.5 pb-3.5 pt-3">
+          {(b.phone || b.manager_name || b.postal_code) && (
+            <div className="mb-3 flex flex-wrap gap-x-4 gap-y-1 text-sm text-muted">
+              {b.manager_name && <span className="flex items-center gap-1"><Users size={14} />{b.manager_name}</span>}
+              {b.phone && <a href={`tel:${b.phone}`} className="flex items-center gap-1 text-primary"><Phone size={14} />{b.phone}</a>}
+              {b.postal_code && <span>{t('postal')} {b.postal_code}</span>}
+            </div>
+          )}
+          {b.spaces.length === 0 ? <p className="py-2 text-sm text-muted">{t('noSpaces')}</p> : (
+            <ul className="divide-y divide-border rounded-xl border border-border bg-surface">
+              {b.spaces.map((sp) => (
+                <li key={sp.id}>
+                  <button onClick={() => canEdit && onEditSpace(sp)} className="flex w-full items-center gap-3 px-3 py-2.5 text-left hover:bg-surface-2">
+                    <span className="grid h-9 w-9 place-items-center rounded-lg bg-primary-soft text-primary"><Store size={16} /></span>
+                    <div className="min-w-0 flex-1">
+                      <div className="truncate text-sm font-medium">{sp.name}</div>
+                      <div className="text-xs text-muted">{t(`spaceKinds.${sp.kind}` as never)}{sp.area_sqm && ` · ${Number(sp.area_sqm)} m²`}</div>
+                    </div>
+                    {canEdit && <Pencil size={14} className="text-muted" />}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+          {canEdit && (
+            <div className="mt-3 flex gap-2">
+              <button onClick={onAddSpace} className="flex flex-1 items-center justify-center gap-1.5 rounded-xl bg-primary-soft py-2.5 text-sm font-semibold text-primary"><Plus size={16} /> {t('addSpace')}</button>
+              <button onClick={onEdit} className="flex items-center gap-1.5 rounded-xl border border-border bg-surface px-4 py-2.5 text-sm font-medium"><Pencil size={15} /> {t('edit')}</button>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function CustomerOffers({ customerId }: { customerId: string }) {
+  const t = useTranslations('customer');
+  const locale = useLocale();
+  const { data, isLoading } = useQuery({ queryKey: ['offers', 'customer', customerId], queryFn: () => api<Page<Offer>>(`/offers?customer=${customerId}&limit=50`) });
+  if (isLoading) return <Skeleton className="h-40" />;
+  if (!data?.items.length) return <p className="py-8 text-center text-muted">{t('noOffers')}</p>;
+  return (
+    <ul className="space-y-2">
+      {data.items.map((o) => (
+        <li key={o.id}>
+          <Link href={`/offers/${o.id}`} className="card flex items-center gap-3 p-3.5 hover:border-primary/40">
+            <span className="grid h-11 w-11 place-items-center rounded-xl bg-primary-soft text-primary"><FileText size={18} /></span>
+            <div className="min-w-0 flex-1">
+              <div className="font-semibold">{o.number} <span className="font-normal text-muted">v.{String(o.current_version).padStart(2, '0')}</span></div>
+              <div className="text-xs text-muted">{date(o.created_at, locale)}{o.branch_name && ` · ${o.branch_name}`}</div>
+            </div>
+            <div className="text-right">
+              <div className="tabular font-semibold">{money(o.total_amount, locale)}</div>
+              <StatusBadge status={o.status} />
+            </div>
+          </Link>
+        </li>
+      ))}
+    </ul>
   );
 }
 
@@ -178,7 +390,7 @@ function ActivityTimeline({ customerId }: { customerId: string }) {
                   <span className="font-semibold">{a.title}</span>
                   <span className="shrink-0 text-xs text-muted">{relative(a.occurred_at, locale, { today: ta('today'), yesterday: ta('yesterday') })}</span>
                 </div>
-                {a.body && <div className="text-sm text-muted">{a.body}</div>}
+                {a.body && <div className="whitespace-pre-line text-sm text-muted">{a.body}</div>}
                 {a.actor_name && <div className="mt-1 flex items-center gap-1.5 text-xs text-muted"><Avatar name={a.actor_name} size={18} />{a.actor_name}</div>}
               </div>
             </li>
@@ -193,3 +405,4 @@ function ActivityTimeline({ customerId }: { customerId: string }) {
     </div>
   );
 }
+
