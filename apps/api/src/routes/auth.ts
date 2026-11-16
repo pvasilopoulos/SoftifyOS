@@ -46,7 +46,8 @@ export default async function authRoutes(app: FastifyInstance) {
     const [user] = await sql`SELECT id, email, full_name, avatar_url, locale FROM users WHERE id = ${userId}`;
     // (tenant defaults are used to pre-fill new offers)
     const tenants = await sql`
-      SELECT t.id, t.slug, t.name, m.role, m.title, t.currency, t.default_vat_rate, t.offer_validity_days, t.offer_terms
+      SELECT t.id, t.slug, t.name, m.role, m.title, t.currency, t.default_vat_rate, t.offer_validity_days, t.offer_terms,
+             coalesce((m.prefs->>'show_customer_avatar')::boolean, t.show_customer_avatar) AS show_customer_avatar
       FROM memberships m JOIN tenants t ON t.id = m.tenant_id
       WHERE m.user_id = ${userId} ORDER BY t.name`;
     return { user, tenant: tenants.find((t) => t.id === tenantId), tenants };

@@ -1,4 +1,5 @@
 'use client';
+import { CustomerAvatar } from '@/components/customer-avatar';
 import { useEffect, useRef, useState } from 'react';
 import { useInfiniteQuery } from '@tanstack/react-query';
 import { useWindowVirtualizer } from '@tanstack/react-virtual';
@@ -62,7 +63,7 @@ export default function OffersPage() {
             return (
               <div key={o.id} style={{ position: 'absolute', top: 0, left: 0, right: 0, transform: `translateY(${it.start - v.options.scrollMargin}px)` }} className="pb-3">
                 <Link href={`/offers/${o.id}`} className="card flex items-center gap-3.5 p-3.5 transition hover:border-primary/40">
-                  <EntityTile name={o.customer_name} />
+                  <CustomerAvatar name={o.customer_name} />
                   <div className="min-w-0 flex-1">
                     <div className="font-semibold">{o.number} <span className="font-normal text-muted">v.{String(o.current_version).padStart(2, '0')}</span></div>
                     <div className="truncate text-sm text-muted">{o.customer_name}{o.branch_name && ` • ${o.branch_name}`}</div>

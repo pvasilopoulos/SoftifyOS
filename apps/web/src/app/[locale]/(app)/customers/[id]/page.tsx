@@ -1,4 +1,5 @@
 'use client';
+import { CustomerAvatar } from '@/components/customer-avatar';
 import { use, useCallback, useState, type ReactNode } from 'react';
 import { useSearchParams } from 'next/navigation';
 import clsx from 'clsx';
@@ -94,7 +95,7 @@ export default function CustomerPage({ params }: { params: Promise<{ id: string 
 
       {/* Identity */}
       <section className="card flex items-start gap-4 p-4 sm:p-5">
-        <EntityTile name={c.name} size={72} />
+        <CustomerAvatar name={c.name} size={72} />
         <div className="min-w-0 flex-1">
           <h1 className="text-xl font-bold leading-tight sm:text-2xl">{c.name}</h1>
           <div className="mt-0.5 text-sm text-muted">
@@ -182,7 +183,7 @@ export default function CustomerPage({ params }: { params: Promise<{ id: string 
           )}
           {data.subsidiaries.length === 0 ? <p className="py-8 text-center text-muted">{t('noSubsidiaries')}</p> : data.subsidiaries.map((x) => (
             <Link key={x.id} href={`/customers/${x.id}`} className="card flex items-center gap-3 p-3.5 hover:border-primary/40">
-              <EntityTile name={x.name} size={44} />
+              <CustomerAvatar name={x.name} size={44} />
               <div className="min-w-0 flex-1">
                 <div className="truncate font-semibold">{x.name}</div>
                 <div className="text-xs text-muted">{x.code} · {t('branchesCount', { count: x.branches_count })}</div>

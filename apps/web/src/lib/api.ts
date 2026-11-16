@@ -35,6 +35,6 @@ export type Activity = { id: string; kind: string; title: string; body: string |
 export type CalEvent = { id: string; kind: string; title: string; location: string | null; starts_at: string; ends_at: string; customer_name: string | null };
 export type Me = {
   user: { id: string; email: string; full_name: string; avatar_url: string | null };
-  tenant: { id: string; slug: string; name: string; role: string; title: string | null };
+  tenant: { id: string; slug: string; name: string; role: string; title: string | null; show_customer_avatar?: boolean };
   tenants: { id: string; slug: string; name: string; role: string }[];
 };

@@ -8,6 +8,7 @@ import { decodeCursor, encodeCursor, searchKey, sql, withTenant, type Tx } from 
 import { hasRole, invalidateMembership, issueSession, requireAuth, ROLE_RANK, type Session } from '../auth.js';
 import { enqueue } from '../jobs.js';
 import { env } from '../env.js';
+import { forgetApiKey } from './integration.js';
 
 const opt = (max: number) => z.string().trim().max(max).nullish().transform((v) => (v ? v : null));
 const idParam = z.object({ id: z.string().uuid() });
@@ -394,6 +395,84 @@ export default async function settingsRoutes(app: FastifyInstance) {
         return l ? 200 : 404;
       });
       return res === 200 ? { ok: true } : reply.code(res).send({ error: res === 409 ? 'in_use' : 'not_found' });
+    });
+
+    // ---------- Customers display: organisation default + my override ----------
+    r.get('/settings/customers', async (req) => {
+      const { tenantId, userId } = req.session;
+      return withTenant(tenantId, async (tx) => {
+        const [t] = await tx`SELECT show_customer_avatar FROM tenants WHERE id = ${tenantId}`;
+        const [m] = await tx`SELECT prefs FROM memberships WHERE tenant_id = ${tenantId} AND user_id = ${userId}`;
+        const mine = (m?.prefs?.show_customer_avatar ?? null) as boolean | null;
+        return {
+          organization: { show_avatar: t.show_customer_avatar as boolean },
+          mine: { show_avatar: mine },
+          effective: { show_avatar: mine ?? (t.show_customer_avatar as boolean) },
+          can_edit_organization: hasRole(req.session, 'admin'),
+        };
+      });
+    });
+
+    r.put('/settings/customers/organization', async (req, reply) => {
+      if (!hasRole(req.session, 'admin')) return forbid(reply);
+      const b = z.object({ show_avatar: z.boolean() }).parse(req.body);
+      const s = req.session;
+      await withTenant(s.tenantId, async (tx) => {
+        await tx`UPDATE tenants SET show_customer_avatar = ${b.show_avatar}, updated_at = now() WHERE id = ${s.tenantId}`;
+        await audit(tx, s, 'customers_display.update', null, b);
+      });
+      return { ok: true };
+    });
+
+    // Any user: null = follow the organisation default
+    r.put('/me/preferences', async (req) => {
+      const b = z.object({ show_customer_avatar: z.boolean().nullable() }).parse(req.body);
+      const { tenantId, userId } = req.session;
+      await withTenant(tenantId, (tx) => b.show_customer_avatar === null
+        ? tx`UPDATE memberships SET prefs = prefs - 'show_customer_avatar' WHERE tenant_id = ${tenantId} AND user_id = ${userId}`
+        : tx`UPDATE memberships SET prefs = prefs || ${tx.json({ show_customer_avatar: b.show_customer_avatar })} WHERE tenant_id = ${tenantId} AND user_id = ${userId}`);
+      return { ok: true };
+    });
+
+    // ---------- Integrations: API keys ----------
+    r.get('/settings/api-keys', async (req, reply) => {
+      if (!hasRole(req.session, 'admin')) return forbid(reply);
+      const T = req.session.tenantId;
+      return withTenant(T, (tx) => tx`
+        SELECT k.id, k.name, k.prefix, k.scope, k.created_at, k.last_used_at, k.requests, k.revoked_at, u.full_name AS created_by_name
+        FROM api_keys k LEFT JOIN users u ON u.id = k.created_by
+        WHERE k.tenant_id = ${T} ORDER BY k.revoked_at NULLS FIRST, k.created_at DESC`);
+    });
+
+    r.post('/settings/api-keys', async (req, reply) => {
+      if (!hasRole(req.session, 'admin')) return forbid(reply);
+      const b = z.object({ name: z.string().trim().min(2).max(80), scope: z.enum(['read', 'write']) }).parse(req.body);
+      const s = req.session;
+      const prefix = randomBytes(6).toString('hex');
+      const secret = randomBytes(24).toString('base64url');
+      const row = await withTenant(s.tenantId, async (tx) => {
+        const [k] = await tx`
+          INSERT INTO api_keys (tenant_id, name, prefix, secret_hash, scope, created_by)
+          VALUES (${s.tenantId}, ${b.name}, ${prefix}, ${sha256(secret)}, ${b.scope}, ${s.userId}) RETURNING id`;
+        await audit(tx, s, 'apikey.create', b.name, { scope: b.scope, prefix });
+        return k;
+      });
+      // The full key is returned only once; only its hash is stored
+      return reply.code(201).send({ id: row.id, key: `sos_${prefix}_${secret}`, prefix, scope: b.scope });
+    });
+
+    r.delete('/settings/api-keys/:id', async (req, reply) => {
+      if (!hasRole(req.session, 'admin')) return forbid(reply);
+      const { id } = idParam.parse(req.params);
+      const s = req.session;
+      const k = await withTenant(s.tenantId, async (tx) => {
+        const [x] = await tx`UPDATE api_keys SET revoked_at = now() WHERE id = ${id} AND revoked_at IS NULL RETURNING name, prefix`;
+        if (x) await audit(tx, s, 'apikey.revoke', x.name, { prefix: x.prefix });
+        return x;
+      });
+      if (!k) return reply.code(404).send({ error: 'not_found' });
+      forgetApiKey(k.prefix); // stops working immediately
+      return { ok: true };
     });
 
     // ---------- Audit log ----------

@@ -1,4 +1,5 @@
 'use client';
+import { CustomerAvatar } from './customer-avatar';
 // Customers page: toolbar controls (filters / sort / expand), "Customers & stores" tree and "Stores" list.
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import clsx from 'clsx';
@@ -247,7 +248,7 @@ export function CustomerTreeView({ filters, mode }: { filters: ListFilters; mode
                       {c.branches.length ? (open ? <ChevronDown size={20} className="text-primary" /> : <ChevronRight size={20} />) : <span className="h-1.5 w-1.5 rounded-full bg-border" />}
                     </button>
                     <Link href={`/customers/${c.id}`} className="flex min-w-0 flex-1 items-center gap-3">
-                      <EntityTile name={c.name} size={44} />
+                      <CustomerAvatar name={c.name} size={44} />
                       <div className="min-w-0 flex-1">
                         <div className="truncate font-semibold hover:text-primary">{c.name}</div>
                         <div className="flex min-w-0 items-center gap-1 truncate text-xs text-muted">

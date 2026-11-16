@@ -1,4 +1,5 @@
 'use client';
+import { CustomerAvatar } from './customer-avatar';
 import { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useLocale, useTranslations } from 'next-intl';
@@ -125,7 +126,7 @@ export function OfferEditor({ initial }: { initial: EditorInitial }) {
           <span className={label}>{t('customer')}</span>
           {customer ? (
             <div className="flex items-center gap-3 rounded-xl border border-border p-2.5">
-              <EntityTile name={customer.name} size={40} />
+              <CustomerAvatar name={customer.name} size={40} />
               <span className="flex-1 font-semibold">{customer.name}</span>
               {!isEdit && <button onClick={() => { setCustomer(null); setBranchId(''); setSpaceId(''); }} className="text-sm font-medium text-primary">{t('change')}</button>}
             </div>
@@ -268,7 +269,7 @@ function CustomerSearch({ onPick }: { onPick: (c: Customer) => void }) {
           {res.data.items.map((c) => (
             <li key={c.id}>
               <button onClick={() => onPick(c)} className="flex w-full items-center gap-3 p-2.5 text-left hover:bg-surface-2">
-                <EntityTile name={c.name} size={34} />
+                <CustomerAvatar name={c.name} size={34} />
                 <span className="min-w-0 flex-1 truncate font-medium">{c.name}</span>
                 <span className="text-xs text-muted">{c.code}</span>
               </button>

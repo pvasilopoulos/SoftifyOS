@@ -3,20 +3,23 @@ import { Suspense, type ComponentType } from 'react';
 import clsx from 'clsx';
 import { useSearchParams } from 'next/navigation';
 import { useTranslations } from 'next-intl';
-import { ArrowLeft, Building2, ChevronRight, History, Landmark, ListChecks, Package, ShieldCheck, UserRound, Users } from 'lucide-react';
+import { ArrowLeft, Building2, ChevronRight, Contact, History, Landmark, ListChecks, Package, Plug, ShieldCheck, UserRound, Users } from 'lucide-react';
 import { Link, useRouter } from '@/i18n/navigation';
 import { IconButton } from '@/components/ui';
 import {
   ApprovalsSection, AuditSection, CompaniesSection, ListsSection, OrganizationSection, ProductsSection, ProfileSection, UsersSection,
 } from '@/components/settings-sections';
+import { CustomersSettingsSection, IntegrationsSection } from '@/components/settings-sections-2';
 
 const SECTIONS: { key: string; icon: typeof Users; Component: ComponentType }[] = [
   { key: 'organization', icon: Building2, Component: OrganizationSection },
   { key: 'companies', icon: Landmark, Component: CompaniesSection },
   { key: 'users', icon: Users, Component: UsersSection },
   { key: 'approvals', icon: ShieldCheck, Component: ApprovalsSection },
+  { key: 'customers', icon: Contact, Component: CustomersSettingsSection },
   { key: 'products', icon: Package, Component: ProductsSection },
   { key: 'lists', icon: ListChecks, Component: ListsSection },
+  { key: 'integrations', icon: Plug, Component: IntegrationsSection },
   { key: 'profile', icon: UserRound, Component: ProfileSection },
   { key: 'audit', icon: History, Component: AuditSection },
 ];

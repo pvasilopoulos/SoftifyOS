@@ -1,4 +1,5 @@
 'use client';
+import { CustomerAvatar } from '@/components/customer-avatar';
 import { useEffect, useRef, useState } from 'react';
 import clsx from 'clsx';
 import { useInfiniteQuery, useQuery } from '@tanstack/react-query';
@@ -167,7 +168,7 @@ export default function CustomersPage() {
             return (
               <div key={c.id} style={{ position: 'absolute', top: 0, left: 0, right: 0, transform: `translateY(${it.start - v.options.scrollMargin}px)` }} className="pb-3">
                 <Link href={`/customers/${c.id}`} className={clsx('card flex items-center gap-3.5 p-3.5 transition hover:border-primary/40', c.archived_at && 'opacity-60')}>
-                  <EntityTile name={c.name} />
+                  <CustomerAvatar name={c.name} />
                   <div className="min-w-0 flex-1">
                     <div className="truncate font-semibold">{c.name}</div>
                     <div className="flex min-w-0 items-center gap-1 truncate text-sm text-muted">
