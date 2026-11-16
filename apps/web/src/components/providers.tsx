@@ -1,4 +1,5 @@
 'use client';
+import { DialogHost } from './confirm';
 import { QueryClient, QueryClientProvider, useQueryClient } from '@tanstack/react-query';
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
 import { registerSW } from '@/lib/push';
@@ -64,6 +65,7 @@ export function Providers({ children }: { children: ReactNode }) {
             ))}
           </div>
         </LiveCtx.Provider>
+        <DialogHost />
       </ToastCtx.Provider>
     </QueryClientProvider>
   );

@@ -1,4 +1,5 @@
 'use client';
+import { appPrompt } from './confirm';
 // Pick-lists, all read from the database (Settings → Value lists).
 //  - LookupSelect: lists whose records keep the value id (zones, fee schedules, tours, ongoing status)
 //  - NameSelect:   lists whose records keep the value name (prefecture, category, source, payment terms, space kind)
@@ -23,7 +24,7 @@ function useAddValue(list: LookupList) {
   const t = useTranslations('lookup');
   const qc = useQueryClient();
   return async () => {
-    const name = window.prompt(t('prompt', { list: t(list) }))?.trim();
+    const name = (await appPrompt(t('prompt', { list: t(list) })))?.trim();
     if (!name) return null;
     const created = await api<{ id: string; name: string }>('/lookups', { method: 'POST', json: { list, name } });
     await qc.invalidateQueries({ queryKey: ['lookups', list] });

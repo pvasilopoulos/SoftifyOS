@@ -1,4 +1,5 @@
 'use client';
+import { appConfirm } from './confirm';
 // Settings module sections. Each section loads its own data; admin-only edits are enforced by the API too.
 import { useEffect, useState, type ReactNode } from 'react';
 import clsx from 'clsx';
@@ -187,7 +188,7 @@ export function CompaniesSection() {
           {isAdmin && (
             <>
               <button onClick={() => setEdit(c)} aria-label={ts('edit')} className="grid h-9 w-9 place-items-center rounded-lg text-muted hover:bg-surface-2 hover:text-primary"><Pencil size={16} /></button>
-              <button onClick={() => { if (confirm(t('confirmDelete', { name: c.name }))) del.mutate(c.id); }} aria-label={ts('delete')}
+              <button onClick={async () => { if (await appConfirm(t('confirmDelete', { name: c.name }))) del.mutate(c.id); }} aria-label={ts('delete')}
                 className="grid h-9 w-9 place-items-center rounded-lg text-muted hover:bg-danger-soft hover:text-danger"><Trash2 size={16} /></button>
             </>
           )}
@@ -371,7 +372,7 @@ export function UsersSection() {
                   <button onClick={() => resend.mutate(u.id)} title={t('resend')} aria-label={t('resend')} className="grid h-9 w-9 place-items-center rounded-lg text-muted hover:bg-surface-2 hover:text-primary"><Mail size={16} /></button>
                 )}
                 {editable && (
-                  <button onClick={() => { if (confirm(t('confirmRemove', { name: u.full_name }))) remove.mutate(u.id); }} title={t('remove')} aria-label={t('remove')}
+                  <button onClick={async () => { if (await appConfirm(t('confirmRemove', { name: u.full_name }))) remove.mutate(u.id); }} title={t('remove')} aria-label={t('remove')}
                     className="grid h-9 w-9 place-items-center rounded-lg text-muted hover:bg-danger-soft hover:text-danger"><Trash2 size={16} /></button>
                 )}
               </div>

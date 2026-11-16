@@ -1,16 +1,17 @@
 'use client';
+import { useTabDraft } from './tabs';
 import { CustomerAvatar } from './customer-avatar';
 import { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useLocale, useTranslations } from 'next-intl';
-import { ArrowLeft, Loader2, Package, Plus, Search, Trash2, X } from 'lucide-react';
+import { ArrowLeft, Loader2, MapPin, Package, Plus, Search, Trash2, X } from 'lucide-react';
 import { api, ApiError, type Customer, type Page } from '@/lib/api';
 import { money } from '@/lib/format';
 import { useRouter } from '@/i18n/navigation';
 import { EntityTile, IconButton } from './ui';
 
 export type EditorItem = {
-  key: string; product_id: string | null; description: string; unit: string;
+  key: string; product_id: string | null; space_id?: string | null; description: string; unit: string;
   quantity: number; unit_price: number; discount: number; vat_rate: number;
 };
 type Product = { id: string; sku: string; name: string; unit: string; unit_price: string; vat_rate: string };
@@ -53,13 +54,28 @@ export function OfferEditor({ initial }: { initial: EditorInitial }) {
 
   const [customer, setCustomer] = useState(initial.customer ?? null);
   const [branchId, setBranchId] = useState(initial.branch_id ?? '');
-  const [spaceId, setSpaceId] = useState(initial.space_id ?? '');
   const [companyId, setCompanyId] = useState(initial.company_id ?? '');
   const [validUntil, setValidUntil] = useState(initial.valid_until?.slice(0, 10) ?? inDays(30));
   const [notes, setNotes] = useState(initial.notes ?? '');
   const [versionNote, setVersionNote] = useState('');
-  const [items, setItems] = useState<EditorItem[]>(initial.items ?? []);
+  const initialItems = useMemo(() => (initial.items ?? []).map((i) => ({ ...i, space_id: i.space_id ?? initial.space_id ?? null })),
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  []);
+  const [items, setItems] = useState<EditorItem[]>(initialItems);
   const [picker, setPicker] = useState(false);
+  // Draft of the whole editor, kept with the tab
+  type Draft = { customer: typeof customer; branchId: string; validUntil: string; notes: string; versionNote: string; items: EditorItem[] };
+  const draft: Draft = { customer, branchId, validUntil, notes, versionNote, items };
+  const initialDraft = useMemo<Draft>(() => ({
+    customer: initial.customer ?? null, branchId: initial.branch_id ?? '',
+    validUntil: initial.valid_until?.slice(0, 10) ?? inDays(30), notes: initial.notes ?? '', versionNote: '', items: initialItems,
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }), []);
+  const applyDraft = (d: Draft) => {
+    setCustomer(d.customer); setBranchId(d.branchId); setValidUntil(d.validUntil);
+    setNotes(d.notes); setVersionNote(d.versionNote); setItems(d.items);
+  };
+  const clearDraft = useTabDraft(`offer.${initial.offerId ?? 'new'}`, draft, applyDraft, initialDraft);
   const [error, setError] = useState<string | null>(null);
 
   const companies = useQuery({ queryKey: ['companies'], queryFn: () => api<{ id: string; name: string }[]>('/companies') });
@@ -69,6 +85,8 @@ export function OfferEditor({ initial }: { initial: EditorInitial }) {
     queryFn: () => api<Branch[]>(`/customers/${customer!.id}/branches`),
   });
   const spaces = branches.data?.find((b) => b.id === branchId)?.spaces ?? [];
+  // Store changed: spaces of the previous store no longer apply
+  const changeBranch = (id: string) => { setBranchId(id); setItems((xs) => xs.map((x) => (x.space_id ? { ...x, space_id: null } : x))); };
 
   const totals = useMemo(() => {
     const net = r2(items.reduce((a, i) => a + lineNet(i), 0));
@@ -86,9 +104,9 @@ export function OfferEditor({ initial }: { initial: EditorInitial }) {
   const save = useMutation({
     mutationFn: async () => {
       const payload = {
-        branch_id: branchId || null, space_id: spaceId || null, company_id: companyId || null,
+        branch_id: branchId || null, space_id: null, company_id: companyId || null,
         valid_until: validUntil || null, notes: notes || null,
-        items: items.map(({ key: _k, ...i }) => ({ ...i, description: i.description.trim() })),
+        items: items.map(({ key: _k, ...i }) => ({ ...i, space_id: spaces.some((s) => s.id === i.space_id) ? i.space_id : null, description: i.description.trim() })),
       };
       if (isEdit) {
         await api(`/offers/${initial.offerId}/items`, { method: 'PUT', json: { ...payload, note: versionNote || null } });
@@ -98,6 +116,7 @@ export function OfferEditor({ initial }: { initial: EditorInitial }) {
       return o.id;
     },
     onSuccess: (id) => {
+      clearDraft();
       qc.invalidateQueries({ queryKey: ['offers'] });
       qc.invalidateQueries({ queryKey: ['offer', id] });
       qc.invalidateQueries({ queryKey: ['dashboard'] });
@@ -128,23 +147,16 @@ export function OfferEditor({ initial }: { initial: EditorInitial }) {
             <div className="flex items-center gap-3 rounded-xl border border-border p-2.5">
               <CustomerAvatar name={customer.name} size={40} />
               <span className="flex-1 font-semibold">{customer.name}</span>
-              {!isEdit && <button onClick={() => { setCustomer(null); setBranchId(''); setSpaceId(''); }} className="text-sm font-medium text-primary">{t('change')}</button>}
+              {!isEdit && <button onClick={() => { setCustomer(null); changeBranch(''); }} className="text-sm font-medium text-primary">{t('change')}</button>}
             </div>
           ) : <CustomerSearch onPick={(c) => setCustomer({ id: c.id, name: c.name })} />}
         </div>
         <div className="grid gap-3 sm:grid-cols-2">
           <div>
             <label className={label} htmlFor="branch">{t('branch')}</label>
-            <select id="branch" className={input} value={branchId} disabled={!customer} onChange={(e) => { setBranchId(e.target.value); setSpaceId(''); }}>
+            <select id="branch" className={input} value={branchId} disabled={!customer} onChange={(e) => changeBranch(e.target.value)}>
               <option value="">{t('none')}</option>
               {branches.data?.map((b) => <option key={b.id} value={b.id}>{b.name}{b.city ? ` · ${b.city}` : ''}</option>)}
-            </select>
-          </div>
-          <div>
-            <label className={label} htmlFor="space">{t('space')}</label>
-            <select id="space" className={input} value={spaceId} disabled={!spaces.length} onChange={(e) => setSpaceId(e.target.value)}>
-              <option value="">{t('none')}</option>
-              {spaces.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
             </select>
           </div>
           <div>
@@ -176,6 +188,16 @@ export function OfferEditor({ initial }: { initial: EditorInitial }) {
                     onChange={(e) => update(it.key, { description: e.target.value })} />
                   <IconButton label={t('remove')} onClick={() => setItems((xs) => xs.filter((x) => x.key !== it.key))} className="shrink-0 text-danger"><Trash2 size={18} /></IconButton>
                 </div>
+                {spaces.length > 0 && (
+                  <div className="flex items-center gap-2 pl-7">
+                    <MapPin size={16} className="shrink-0 text-muted" />
+                    <select aria-label={t('space')} className={`${cell} ${it.space_id ? 'border-primary/40 text-primary' : 'text-muted'}`}
+                      value={it.space_id ?? ''} onChange={(e) => update(it.key, { space_id: e.target.value || null })}>
+                      <option value="">{t('space')}: {t('none')}</option>
+                      {spaces.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+                    </select>
+                  </div>
+                )}
                 <div className="min-w-0">
                   {/* All fields share one row height: single-line labels, inputs aligned to the bottom */}
                   <div className="grid grid-cols-3 items-end gap-2 sm:grid-cols-6">

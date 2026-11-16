@@ -1,4 +1,5 @@
 'use client';
+import { appConfirm } from './confirm';
 // Saved views of the Customers module: chips bar with live counts, save / save as / revert, sharing,
 // favourites, personal order (drag & drop), default view, copy link, CSV export.
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
@@ -79,7 +80,10 @@ export function SavedViewsBar({ activeId, dirty, onApply, onManage }: {
   const { data } = useSavedViews();
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState('');
-  const all = data?.views ?? [];
+  // Rendered after mount only: the views may already be in the browser's query cache (server has none → hydration mismatch)
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
+  const all = mounted ? data?.views ?? [] : [];
   // In the bar: favourites meant for me (+ the active one even if not a favourite)
   const bar = all.filter((v) => (v.favorite && v.applies) || v.id === activeId);
   const counts = useCounts(bar.map((v) => v.id));
@@ -386,7 +390,7 @@ export function ManageViews({ onApply }: { onApply?: (v: SavedView) => void }) {
               <button onClick={() => dup.mutate(v)} aria-label={t('duplicate')} title={t('duplicate')} className="grid h-8 w-8 place-items-center rounded-lg text-muted hover:text-text"><Copy size={15} /></button>
               {v.can_edit && <button onClick={() => setEditing(v)} aria-label={t('edit')} title={t('edit')} className="grid h-8 w-8 place-items-center rounded-lg text-muted hover:text-primary"><PenLine size={15} /></button>}
               {v.can_edit && !v.is_system && (
-                <button onClick={() => { if (confirm(t('confirmDelete', { name: v.name }))) del.mutate(v); }} aria-label={t('delete')} title={t('delete')}
+                <button onClick={async () => { if (await appConfirm(t('confirmDelete', { name: v.name }))) del.mutate(v); }} aria-label={t('delete')} title={t('delete')}
                   className="grid h-8 w-8 place-items-center rounded-lg text-muted hover:text-danger"><Trash2 size={15} /></button>
               )}
             </span>

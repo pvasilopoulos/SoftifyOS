@@ -1,4 +1,5 @@
 'use client';
+import { appConfirm } from './confirm';
 import { CustomerAvatar } from './customer-avatar';
 // Customers page: toolbar controls (filters / sort / expand), "Customers & stores" tree and "Stores" list.
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
@@ -297,7 +298,7 @@ export function CustomerTreeView({ filters, mode }: { filters: ListFilters; mode
                                 className="grid h-8 w-8 shrink-0 place-items-center rounded-lg text-muted hover:bg-primary-soft hover:text-primary"><FilePlus2 size={16} /></Link>
                               <button onClick={() => setDialog({ customerId: c.id, branch: b })} title={tc('editBranch')} aria-label={tc('editBranch')}
                                 className="grid h-8 w-8 shrink-0 place-items-center rounded-lg text-muted hover:bg-primary-soft hover:text-primary"><Pencil size={15} /></button>
-                              <button onClick={() => { if (confirm(tc('confirmDeleteBranch', { name: b.name }))) del.mutate(b.id); }}
+                              <button onClick={async () => { if (await appConfirm(tc('confirmDeleteBranch', { name: b.name }))) del.mutate(b.id); }}
                                 title={tc('deleteBranch')} aria-label={tc('deleteBranch')}
                                 className="grid h-8 w-8 shrink-0 place-items-center rounded-lg text-muted hover:bg-danger-soft hover:text-danger"><Trash2 size={15} /></button>
                               </div>

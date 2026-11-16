@@ -20,7 +20,7 @@ export default function EditOfferPage({ params }: { params: Promise<{ id: string
       branch_id: o.branch_id, space_id: o.space_id, company_id: o.company_id,
       valid_until: o.valid_until, notes: o.notes,
       items: data.items.map((i) => ({
-        key: i.id, product_id: i.product_id ?? null, description: i.description, unit: i.unit,
+        key: i.id, product_id: i.product_id ?? null, space_id: i.space_id ?? null, description: i.description, unit: i.unit,
         quantity: Number(i.quantity), unit_price: Number(i.unit_price), discount: Number(i.discount), vat_rate: Number(i.vat_rate),
       })),
     }} />

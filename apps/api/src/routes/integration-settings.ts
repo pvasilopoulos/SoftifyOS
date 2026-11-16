@@ -13,7 +13,7 @@ const sha256 = (s: string) => createHash('sha256').update(s).digest('hex');
 const forbid = (reply: FastifyReply) => reply.code(403).send({ error: 'forbidden' });
 
 const level = z.enum(['none', 'read', 'write']);
-const permissions = z.object({ customers: level, branches: level, spaces: level })
+const permissions = z.object({ customers: level, branches: level, spaces: level, lists: level.default('none') })
   .refine((p) => Object.values(p).some((v) => v !== 'none'), { message: 'no_permissions' });
 const ipList = z.array(z.string().trim().min(1).max(64).refine(validIpEntry, { message: 'invalid_ip' })).max(50);
 const keyBody = z.object({

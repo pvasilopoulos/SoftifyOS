@@ -1,4 +1,5 @@
 'use client';
+import { useTabTitle } from '@/components/tabs';
 import { Suspense, useState, type ComponentType } from 'react';
 import clsx from 'clsx';
 import { useSearchParams } from 'next/navigation';
@@ -34,6 +35,7 @@ function SettingsInner() {
   const sp = useSearchParams();
   const current = SECTIONS.find((s) => s.key === sp.get('s'));
   const active = current ?? SECTIONS[0];
+  useTabTitle(`${t('title')} · ${t(`nav.${active.key}` as never)}`);
   const Section = active.Component;
 
   // Search across section names, descriptions and keywords (accent/case-insensitive)

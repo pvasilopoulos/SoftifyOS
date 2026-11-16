@@ -1,4 +1,6 @@
 'use client';
+import { RegistryLookup } from './registry';
+import { useTabDraft, useTabTitle } from './tabs';
 import { useEffect, useState, type ReactNode } from 'react';
 import clsx from 'clsx';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -69,6 +71,9 @@ export function CustomerForm({ customerId, initial }: { customerId?: string; ini
   const router = useRouter();
   const qc = useQueryClient();
   const [v, setV] = useState(initial);
+  // Unsaved values stay with the tab (switching tabs / reloading keeps them); the tab shows an "unsaved" dot
+  useTabTitle(v.name.trim() ? `${customerId ? '✎ ' : '+ '}${v.name.trim()}` : null);
+  const clearDraft = useTabDraft(`customer-form.${customerId ?? 'new'}`, v, setV, initial);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [tagDraft, setTagDraft] = useState('');
   const set = <K extends keyof CustomerFormValues>(k: K, val: CustomerFormValues[K]) => setV((x) => ({ ...x, [k]: val }));
@@ -101,6 +106,7 @@ export function CustomerForm({ customerId, initial }: { customerId?: string; ini
       return (await api<{ id: string }>('/customers', { method: 'POST', json: body })).id;
     },
     onSuccess: (id) => {
+      clearDraft();
       qc.invalidateQueries({ queryKey: ['customers'] });
       qc.invalidateQueries({ queryKey: ['customer', id] });
       router.replace(`/customers/${id}`);
@@ -160,6 +166,9 @@ export function CustomerForm({ customerId, initial }: { customerId?: string; ini
           ) : v.vat.trim() && v.address_country === 'GR' && afmOk ? <span className="flex items-center gap-1 text-success"><CircleCheck size={13} /> {t('afmValid')}</span> : null
         }>
           <input className={`${input} tabular`} inputMode="numeric" maxLength={20} value={v.vat} aria-invalid={!afmOk} onChange={(e) => set('vat', e.target.value.replace(/\s/g, ''))} />
+          <RegistryLookup vat={v.vat} country={v.address_country || 'GR'} valid={afmOk && !!v.vat.trim()}
+            values={{ name: v.name, trade_name: v.trade_name, tax_office: v.tax_office, activity: v.activity, address_street: v.address_street, address_postal: v.address_postal, address_city: v.address_city }}
+            onApply={(patch) => setV((x) => ({ ...x, ...patch }))} />
         </Field>
         <Field label={t('taxOffice')}><input className={input} value={v.tax_office} onChange={(e) => set('tax_office', e.target.value)} /></Field>
         <Field label={t('gemi')}><input className={input} value={v.gemi} onChange={(e) => set('gemi', e.target.value)} /></Field>

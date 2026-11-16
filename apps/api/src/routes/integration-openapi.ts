@@ -83,11 +83,45 @@ function resource(name: string, tag: string, schema: object, extraListParams: ob
   };
 }
 
+const ListName = { type: 'string', enum: ['geo_zone', 'fee_schedule', 'tour', 'ongoing_status', 'prefecture', 'customer_category', 'customer_source', 'payment_terms', 'space_kind'] };
+const ListValue = { type: 'object', properties: { name: { type: 'string' }, active: { type: 'boolean' }, sort: { type: 'integer' }, created_at: { type: 'string', format: 'date-time' } } };
+const ListValueIn = {
+  type: 'object', required: ['name'], additionalProperties: false,
+  properties: {
+    name: { type: 'string', maxLength: 80, description: 'Value (matched accent/case-insensitively). Created if missing.' },
+    rename_from: { type: 'string', maxLength: 80, description: 'Rename this existing value to name; records that use it are updated too.' },
+    active: { type: 'boolean', description: 'false = hidden from new selections (records keep it)' },
+    sort: { type: 'integer', minimum: 0 },
+  },
+};
+const listPaths = {
+  '/api/v1/lists': {
+    get: { tags: ['Value lists'], summary: 'All value lists with counts', description: 'Needs the "Value lists" read permission.',
+      responses: { 200: { description: 'Lists', content: { 'application/json': { schema: { type: 'object', properties: { items: { type: 'array', items: { type: 'object', properties: {
+        list: ListName, description: { type: 'string' }, stored_as: { type: 'string', enum: ['name', 'reference'] }, values: { type: 'integer' }, active: { type: 'integer' } } } } } } } } } } },
+  },
+  '/api/v1/lists/{list}': {
+    parameters: [{ name: 'list', in: 'path', required: true, schema: ListName }],
+    get: { tags: ['Value lists'], summary: 'Values of a list', parameters: [{ name: 'include_inactive', in: 'query', schema: { type: 'string', enum: ['0', '1'], default: '1' } }],
+      responses: { 200: { description: 'Values', content: { 'application/json': { schema: { type: 'object', properties: { list: ListName, values: { type: 'array', items: ListValue } } } } } } } },
+  },
+  '/api/v1/lists/{list}/values': {
+    parameters: [{ name: 'list', in: 'path', required: true, schema: ListName }],
+    put: { tags: ['Value lists'], summary: 'Create / update / rename up to 500 values', description: 'Each value is processed independently (per-item results).',
+      requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', required: ['values'], properties: { values: { type: 'array', maxItems: 500, items: ListValueIn } } } } } },
+      responses: { 200: { description: 'Per-item results (name, status created/updated/error)' }, 403: { description: 'No write permission for value lists' } } },
+  },
+  '/api/v1/lists/{list}/values/{name}': {
+    parameters: [{ name: 'list', in: 'path', required: true, schema: ListName }, { name: 'name', in: 'path', required: true, schema: { type: 'string' } }],
+    delete: { tags: ['Value lists'], summary: 'Delete a value nobody uses', responses: { 200: { description: 'Deleted' }, 404: { description: 'Not found' }, 409: { description: 'in_use: deactivate it with active=false instead' } } },
+  },
+};
+
 export const openApiSpec = {
   openapi: '3.1.0',
   info: {
     title: 'SoftifyOS Integration API', version: '1.0.0',
-    description: 'Sync customers, stores and spaces from your ERP. Records are identified by your own ids (external_id); '
+    description: 'Sync customers, stores, spaces and value lists from your ERP. Records are identified by your own ids (external_id); '
       + 'sending a record again updates it. Create an API key in Settings → Integrations. Rate limit: 1200 requests/minute per key.',
   },
   servers: [{ url: '/' }],
@@ -101,5 +135,6 @@ export const openApiSpec = {
     ...resource('customers', 'Customers', Customer),
     ...resource('branches', 'Stores', Branch, [{ name: 'customer_external_id', in: 'query', schema: { type: 'string' } }]),
     ...resource('spaces', 'Spaces', Space, [{ name: 'branch_external_id', in: 'query', schema: { type: 'string' } }]),
+    ...listPaths,
   },
 };

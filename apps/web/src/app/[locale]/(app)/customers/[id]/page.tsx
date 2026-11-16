@@ -1,4 +1,7 @@
 'use client';
+import { RegistryRefreshButton } from '@/components/registry';
+import { useTabTitle } from '@/components/tabs';
+import { appConfirm } from '@/components/confirm';
 import { CustomerAvatar } from '@/components/customer-avatar';
 import { use, useCallback, useState, type ReactNode } from 'react';
 import { useSearchParams } from 'next/navigation';
@@ -48,6 +51,7 @@ export default function CustomerPage({ params }: { params: Promise<{ id: string 
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['customer', id] }); qc.invalidateQueries({ queryKey: ['customers'] }); },
   });
 
+  useTabTitle(data?.customer.name);
   if (isLoading || !data) {
     return <div className="space-y-4"><Skeleton className="h-10 w-40" /><Skeleton className="h-32" /><Skeleton className="h-20" /><Skeleton className="h-64" /></div>;
   }
@@ -76,10 +80,11 @@ export default function CustomerPage({ params }: { params: Promise<{ id: string 
         <span className="flex-1 text-lg font-semibold">{t('back')}</span>
         {data.can.archive && (
           <IconButton label={c.archived_at ? t('restore') : t('archive')}
-            onClick={() => { if (c.archived_at || confirm(t('confirmArchive'))) archive.mutate(!c.archived_at); }}>
+            onClick={async () => { if (c.archived_at || await appConfirm(t('confirmArchive'))) archive.mutate(!c.archived_at); }}>
             {c.archived_at ? <ArchiveRestore size={20} /> : <Archive size={20} />}
           </IconButton>
         )}
+        {data.can.edit && <RegistryRefreshButton customerId={id} hasVat={!!c.vat} />}
         {data.can.edit && (
           <Link href={`/customers/${id}/edit`} className="flex items-center gap-1.5 rounded-full bg-primary-soft px-4 py-2 text-sm font-semibold text-primary">
             <Pencil size={16} /> {t('edit')}
@@ -324,7 +329,7 @@ function BranchCard({ branch: b, canEdit, onEdit, onAddSpace, onEditSpace, focus
           <>
             <IconButton label={t('editBranch')} onClick={onEdit} className="text-muted hover:text-primary"><Pencil size={17} /></IconButton>
             <IconButton label={t('deleteBranch')} className="text-muted hover:bg-danger-soft hover:text-danger"
-              onClick={() => { if (confirm(t('confirmDeleteBranch', { name: b.name }))) del.mutate(); }}><Trash2 size={17} /></IconButton>
+              onClick={async () => { if (await appConfirm(t('confirmDeleteBranch', { name: b.name }))) del.mutate(); }}><Trash2 size={17} /></IconButton>
           </>
         )}
       </div>
@@ -351,7 +356,7 @@ function BranchCard({ branch: b, canEdit, onEdit, onAddSpace, onEditSpace, focus
             <div className="mt-3 flex gap-2">
               <button onClick={onAddSpace} className="flex flex-1 items-center justify-center gap-1.5 rounded-xl bg-primary-soft py-2.5 text-sm font-semibold text-primary"><Plus size={16} /> {t('addSpace')}</button>
               <button onClick={onEdit} className="flex items-center gap-1.5 rounded-xl border border-border bg-surface px-4 py-2.5 text-sm font-medium"><Pencil size={15} /> {t('edit')}</button>
-              <button onClick={() => { if (confirm(t('confirmDeleteBranch', { name: b.name }))) del.mutate(); }}
+              <button onClick={async () => { if (await appConfirm(t('confirmDeleteBranch', { name: b.name }))) del.mutate(); }}
                 className="flex items-center gap-1.5 rounded-xl border border-border bg-surface px-4 py-2.5 text-sm font-medium text-danger"><Trash2 size={15} /> <span className="hidden sm:inline">{t('delete')}</span></button>
             </div>
           )}

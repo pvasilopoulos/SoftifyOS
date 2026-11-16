@@ -1,4 +1,5 @@
 'use client';
+import { useTabTitle } from '@/components/tabs';
 import { CustomerAvatar } from '@/components/customer-avatar';
 import { Suspense, useEffect, useRef, useState } from 'react';
 import clsx from 'clsx';
@@ -13,6 +14,7 @@ import { EntityTile, PageHeader, Skeleton, StatusBadge } from '@/components/ui';
 import { ActiveFilterChips, CustomerTreeView, ExpandToggle, SortMenu, StoresView, type ExpandMode } from '@/components/customer-views';
 import { IndexFilterMenu, useFilterChips, useIndexFilters } from '@/components/index-filters';
 import { useMe } from '@/components/app-shell';
+import { tabStore } from '@/lib/tab-store';
 import { decodeConfig, ManageViewsDialog, sameConfig, SavedViewsBar, SaveViewButton, useSavedViews, type SavedView, type ViewConfig } from '@/components/saved-views';
 import { useRouter, usePathname } from '@/i18n/navigation';
 import { useSearchParams } from 'next/navigation';
@@ -29,8 +31,8 @@ function useDebounced<T>(v: T, ms = 250) {
 // Filters survive navigation (back from a customer card keeps your view)
 function usePersisted<T>(key: string, initial: T): [T, (v: T) => void] {
   const [v, setV] = useState<T>(initial);
-  useEffect(() => { try { const s = sessionStorage.getItem(key); if (s) setV(JSON.parse(s)); } catch {} }, [key]);
-  return [v, (x: T) => { setV(x); try { sessionStorage.setItem(key, JSON.stringify(x)); } catch {} }];
+  useEffect(() => { try { const s = tabStore.getItem(key); if (s) setV(JSON.parse(s)); } catch {} }, [key]);
+  return [v, (x: T) => { setV(x); try { tabStore.setItem(key, JSON.stringify(x)); } catch {} }];
 }
 
 function CustomersPageInner() {
@@ -46,11 +48,11 @@ function CustomersPageInner() {
   useEffect(() => {
     if (view) return;
     let saved: View | null = null;
-    try { saved = JSON.parse(sessionStorage.getItem('cust.view') ?? 'null'); } catch {}
+    try { saved = JSON.parse(tabStore.getItem('cust.view') ?? 'null'); } catch {}
     if (saved) setViewState(saved);
     else if (defaultView) setViewState(defaultView);
   }, [view, defaultView]);
-  const setView = (v: View) => { setViewState(v); try { sessionStorage.setItem('cust.view', JSON.stringify(v)); } catch {} };
+  const setView = (v: View) => { setViewState(v); try { tabStore.setItem('cust.view', JSON.stringify(v)); } catch {} };
   const [q, setQ] = useState('');
   const dq = useDebounced(q.trim());
   const [expand, setExpand] = useState<ExpandMode>('none');
@@ -76,7 +78,7 @@ function CustomersPageInner() {
   const [manage, setManage] = useState(false);
   const setActiveId = (id: string | null) => {
     setActiveIdState(id);
-    try { if (id) sessionStorage.setItem('cust.activeView', id); else sessionStorage.removeItem('cust.activeView'); } catch {}
+    try { if (id) tabStore.setItem('cust.activeView', id); else tabStore.removeItem('cust.activeView'); } catch {}
   };
   const filtersFor = (v: View) => (v === 'stores' ? storeFilters : v === 'tree' ? treeFilters : custFilters);
   const current: ViewConfig | null = view ? {
@@ -84,6 +86,7 @@ function CustomersPageInner() {
   } : null;
   const active = views.data?.views.find((x) => x.id === activeId) ?? null;
   const dirty = !!active && !!current && !sameConfig(current, active.config);
+  useTabTitle(active ? `${t('title')} · ${active.name}` : view ? `${t('title')} · ${t(view === 'list' ? 'viewList' : view === 'tree' ? 'viewTree' : 'viewStores')}` : null);
   const applyConfig = (c: ViewConfig) => {
     setView(c.view);
     filtersFor(c.view).replace(c.filters ?? {});
@@ -105,12 +108,12 @@ function CustomersPageInner() {
     const linked = link ? views.data.views.find((x) => x.id === link) : null;
     const cfg = decodeConfig(params.get('cfg'));
     let sessionId: string | null = null;
-    try { sessionId = sessionStorage.getItem('cust.activeView'); } catch {}
+    try { sessionId = tabStore.getItem('cust.activeView'); } catch {}
     if (linked) { applyView(linked); return; }
     if (cfg) { applyConfig(cfg); setActiveId(null); return; }
     if (sessionId && views.data.views.some((x) => x.id === sessionId)) { setActiveIdState(sessionId); return; }
     let touched = false;
-    try { touched = !!sessionStorage.getItem('cust.view'); } catch {}
+    try { touched = !!tabStore.getItem('cust.view'); } catch {}
     const def = views.data.views.find((x) => x.id === views.data!.default_view);
     if (def && !touched) applyView(def);
     // eslint-disable-next-line react-hooks/exhaustive-deps

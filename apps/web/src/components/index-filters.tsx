@@ -7,6 +7,7 @@ import { useQuery } from '@tanstack/react-query';
 import { useLocale, useTranslations } from 'next-intl';
 import { ListFilter } from 'lucide-react';
 import { api } from '@/lib/api';
+import { tabStore } from '@/lib/tab-store';
 import { useMe } from './app-shell';
 import { Popover } from './customer-views';
 import type { LookupValue } from './lookup-select';
@@ -63,8 +64,8 @@ export function useIndexFilters(index: IndexKey) {
   const visible = (me?.tenant as { index_filters?: Record<IndexKey, string[]> } | undefined)?.index_filters?.[index] ?? DEFAULT_FILTERS[index];
   const storageKey = `ixf.${index}`;
   const [values, setValues] = useState<Record<string, string>>({});
-  useEffect(() => { try { setValues(JSON.parse(sessionStorage.getItem(storageKey) ?? '{}')); } catch {} }, [storageKey]);
-  const save = (v: Record<string, string>) => { setValues(v); try { sessionStorage.setItem(storageKey, JSON.stringify(v)); } catch {} };
+  useEffect(() => { try { setValues(JSON.parse(tabStore.getItem(storageKey) ?? '{}')); } catch {} }, [storageKey]);
+  const save = (v: Record<string, string>) => { setValues(v); try { tabStore.setItem(storageKey, JSON.stringify(v)); } catch {} };
   // Every set value applies (a saved view may use filters that are hidden in this user's menu: they show as chips)
   const active = Object.fromEntries(Object.entries(values).filter(([, v]) => v !== '' && v != null));
   const query = Object.entries(active).map(([k, v]) => `f_${encodeURIComponent(k)}=${encodeURIComponent(v)}`).join('&');

@@ -1,4 +1,5 @@
 'use client';
+import { appConfirm } from './confirm';
 // Settings → Integrations: overview, API keys, webhooks, request log, documentation.
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import clsx from 'clsx';
@@ -21,8 +22,8 @@ const input = 'w-full min-w-0 rounded-xl border border-border bg-surface-2 px-3 
 const chip = 'rounded-full px-2 py-0.5 text-xs font-medium';
 
 type Level = 'none' | 'read' | 'write';
-type Resource = 'customers' | 'branches' | 'spaces';
-const RESOURCES: Resource[] = ['customers', 'branches', 'spaces'];
+type Resource = 'customers' | 'branches' | 'spaces' | 'lists';
+const RESOURCES: Resource[] = ['customers', 'branches', 'spaces', 'lists'];
 type Perms = Record<Resource, Level>;
 type ApiKey = {
   id: string; name: string; prefix: string; permissions: Perms; expires_at: string | null; allowed_ips: string[]; rotated_from: string | null;
@@ -294,9 +295,9 @@ function KeysTab() {
                       </div>
                       <div className="mt-1.5 flex flex-wrap gap-1.5">
                         {RESOURCES.map((r) => (
-                          <span key={r} className={clsx(chip, 'border', k.permissions[r] === 'write' ? 'border-warning/30 bg-warning-soft text-warning'
-                            : k.permissions[r] === 'read' ? 'border-info/30 bg-info-soft text-info' : 'border-border text-muted line-through')}>
-                            {t(`res_${r}`)}: {lvl(k.permissions[r])}
+                          <span key={r} className={clsx(chip, 'border', (k.permissions[r] ?? 'none') === 'write' ? 'border-warning/30 bg-warning-soft text-warning'
+                            : (k.permissions[r] ?? 'none') === 'read' ? 'border-info/30 bg-info-soft text-info' : 'border-border text-muted line-through')}>
+                            {t(`res_${r}`)}: {lvl(k.permissions[r] ?? 'none')}
                           </span>
                         ))}
                         {k.allowed_ips.length > 0 && <span className={clsx(chip, 'flex items-center gap-1 border border-border text-muted')}><Globe size={11} />{t('ipCount', { count: k.allowed_ips.length })}</span>}
@@ -313,10 +314,10 @@ function KeysTab() {
                     {!k.revoked_at && <button onClick={() => setEditing(k)} className={smallBtn}><PenLine size={15} /> {t('edit')}</button>}
                     {!k.revoked_at && <button onClick={() => setRotating(k)} className={smallBtn}><RotateCw size={15} /> {t('rotate')}</button>}
                     {!k.revoked_at && (
-                      <button onClick={() => { if (confirm(t('confirmRevoke', { name: k.name }))) revoke.mutate(k.id); }}
+                      <button onClick={async () => { if (await appConfirm(t('confirmRevoke', { name: k.name }))) revoke.mutate(k.id); }}
                         className={clsx(smallBtn, 'text-danger hover:bg-danger-soft')}><Ban size={15} /> {t('revoke')}</button>
                     )}
-                    <button onClick={() => { if (confirm(t('confirmDelete', { name: k.name }))) remove.mutate(k.id); }}
+                    <button onClick={async () => { if (await appConfirm(t('confirmDelete', { name: k.name }))) remove.mutate(k.id); }}
                       className={clsx(smallBtn, 'text-danger hover:bg-danger-soft')}><Trash2 size={15} /> {t('delete')}</button>
                   </div>
                 </li>
@@ -356,7 +357,8 @@ function KeyDialog({ k, onClose, onSaved }: { k: ApiKey | null; onClose: () => v
   const t = useTranslations('integ');
   const ts = useTranslations('settings');
   const [name, setName] = useState(k?.name ?? '');
-  const [perms, setPerms] = useState<Perms>(k?.permissions ?? { customers: 'write', branches: 'write', spaces: 'write' });
+  // Older keys have no 'lists' entry: treat it as no access
+  const [perms, setPerms] = useState<Perms>(k ? { ...k.permissions, lists: k.permissions.lists ?? 'none' } : { customers: 'write', branches: 'write', spaces: 'write', lists: 'read' });
   const [expiry, setExpiry] = useState<(typeof EXPIRY)[number]>(k?.expires_at ? 'custom' : 'never');
   const [customDate, setCustomDate] = useState(k?.expires_at ? k.expires_at.slice(0, 10) : '');
   const [ips, setIps] = useState((k?.allowed_ips ?? []).join('\n'));
@@ -377,9 +379,9 @@ function KeyDialog({ k, onClose, onSaved }: { k: ApiKey | null; onClose: () => v
       : ts('error')),
   });
   const presets: [string, Perms][] = [
-    [t('presetFull'), { customers: 'write', branches: 'write', spaces: 'write' }],
-    [t('presetRead'), { customers: 'read', branches: 'read', spaces: 'read' }],
-    [t('presetCustomers'), { customers: 'write', branches: 'none', spaces: 'none' }],
+    [t('presetFull'), { customers: 'write', branches: 'write', spaces: 'write', lists: 'write' }],
+    [t('presetRead'), { customers: 'read', branches: 'read', spaces: 'read', lists: 'read' }],
+    [t('presetCustomers'), { customers: 'write', branches: 'none', spaces: 'none', lists: 'read' }],
   ];
   return (
     <Dialog title={k ? t('editKey') : t('newKey')} onClose={onClose}>
@@ -553,8 +555,8 @@ function WebhooksTab() {
                     <button onClick={() => setEditing(h)} className={smallBtn}><PenLine size={15} /> {t('edit')}</button>
                     <button onClick={() => toggle.mutate(h)} className={smallBtn}>{h.active ? <><Pause size={15} /> {t('pause')}</> : <><Play size={15} /> {t('resume')}</>}</button>
                     <button onClick={() => reveal.mutate(h)} className={smallBtn}><Eye size={15} /> {t('secret')}</button>
-                    <button onClick={() => { if (confirm(t('confirmRotateSecret'))) rotate.mutate(h); }} className={smallBtn}><RotateCw size={15} /> {t('rotateSecret')}</button>
-                    <button onClick={() => { if (confirm(t('confirmDeleteWebhook', { name: h.name }))) del.mutate(h.id); }} className={clsx(smallBtn, 'text-danger hover:bg-danger-soft')}><Trash2 size={15} /> {t('delete')}</button>
+                    <button onClick={async () => { if (await appConfirm(t('confirmRotateSecret'))) rotate.mutate(h); }} className={smallBtn}><RotateCw size={15} /> {t('rotateSecret')}</button>
+                    <button onClick={async () => { if (await appConfirm(t('confirmDeleteWebhook', { name: h.name }))) del.mutate(h.id); }} className={clsx(smallBtn, 'text-danger hover:bg-danger-soft')}><Trash2 size={15} /> {t('delete')}</button>
                   </div>
                 </li>
               );
@@ -884,6 +886,17 @@ function DocsTab() {
     "name":"Εκθεσιακός χώρος","kind":"retail","area_sqm":220}]}'`,
     sync: `curl "${origin}/api/v1/customers?updated_since=2026-11-01T00:00:00Z&limit=500" \\
   -H "Authorization: Bearer $SOFTIFY_KEY"`,
+    lists: `# Read a list
+curl ${origin}/api/v1/lists/payment_terms -H "Authorization: Bearer $SOFTIFY_KEY"
+
+# Create / update / rename values (records follow a rename)
+curl -X PUT ${origin}/api/v1/lists/payment_terms/values \\
+  -H "Authorization: Bearer $SOFTIFY_KEY" -H "Content-Type: application/json" \\
+  -d '{"values":[
+    {"name":"Πίστωση 120 ημερών","sort":8},
+    {"name":"Μετρητά με την παράδοση","rename_from":"Μετρητά"},
+    {"name":"Κάρτα","active":false}
+  ]}'`,
     verify: `// Node.js: verify X-Softify-Signature (use the raw request body)
 import { createHmac, timingSafeEqual } from 'node:crypto';
 
@@ -911,9 +924,10 @@ X-Softify-Signature: t=1763300000,v1=5f2c…
           <Step n={3} title={t('step3')}><Code>{example.branches}</Code></Step>
           <Step n={4} title={t('step4')}><Code>{example.spaces}</Code></Step>
           <Step n={5} title={t('step5')}><Code>{example.sync}</Code></Step>
+          <Step n={6} title={ti('docLists')}><Code>{example.lists}</Code></Step>
           <ul className="list-disc space-y-1 pl-5 text-muted">
             <li>{t('rule1')}</li><li>{t('rule2')}</li><li>{t('rule3')}</li><li>{t('rule4')}</li><li>{t('rule5')}</li>
-            <li>{ti('rule6')}</li><li>{ti('rule7')}</li>
+            <li>{ti('rule6')}</li><li>{ti('rule7')}</li><li>{ti('rule8')}</li>
           </ul>
           <a href="/api/v1/openapi.json" target="_blank" rel="noopener" className={clsx(ghostBtn, 'w-full sm:w-auto')}><ExternalLink size={16} /> {t('openapi')}</a>
         </div>

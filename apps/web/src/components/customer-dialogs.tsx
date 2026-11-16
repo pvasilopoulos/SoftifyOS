@@ -1,4 +1,5 @@
 'use client';
+import { appConfirm } from './confirm';
 import { useState, type ReactNode } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useTranslations } from 'next-intl';
@@ -38,7 +39,7 @@ function F({ label, children, wide }: { label: string; children: ReactNode; wide
 function Actions({ busy, error, onCancel, onDelete }: { busy: boolean; error?: string | null; onCancel: () => void; onDelete?: () => void }) {
   const t = useTranslations('customer');
   return (
-    <div className="mt-5 flex items-center gap-2 sm:col-span-2">
+    <div className="mt-1 flex items-center gap-2 border-t border-border pt-4 sm:col-span-2">
       {onDelete && <button type="button" onClick={onDelete} className="rounded-xl px-3 py-2.5 text-sm font-semibold text-danger hover:bg-danger-soft">{t('delete')}</button>}
       {error && <span className="text-sm text-danger">{error}</span>}
       <span className="flex-1" />
@@ -131,7 +132,7 @@ export function BranchDialog({ customerId, branch, onClose }: { customerId: stri
         <F label={t('phone')}><input type="tel" className={input} value={v.phone} onChange={set('phone')} /></F>
         <F label={t('branchManager')}><input className={input} value={v.manager_name} onChange={set('manager_name')} /></F>
         <Actions busy={busy} error={error} onCancel={onClose}
-          onDelete={branch ? () => { if (confirm(t('confirmDeleteBranch', { name: branch.name }))) run(() => api(`/branches/${branch.id}`, { method: 'DELETE' })); } : undefined} />
+          onDelete={branch ? async () => { if (await appConfirm(t('confirmDeleteBranch', { name: branch.name }))) run(() => api(`/branches/${branch.id}`, { method: 'DELETE' })); } : undefined} />
       </form>
     </Dialog>
   );
@@ -155,7 +156,7 @@ export function SpaceDialog({ customerId, branchId, space, onClose }: { customer
         <F label={t('area')}><input type="number" min={0} step="0.5" className={input} value={v.area_sqm} onChange={(e) => setV({ ...v, area_sqm: e.target.value })} /></F>
         <F label={t('notes')} wide><input className={input} value={v.notes} onChange={(e) => setV({ ...v, notes: e.target.value })} /></F>
         <Actions busy={busy} error={error} onCancel={onClose}
-          onDelete={space ? () => { if (confirm(t('confirmDelete'))) run(() => api(`/spaces/${space.id}`, { method: 'DELETE' })); } : undefined} />
+          onDelete={space ? async () => { if (await appConfirm(t('confirmDelete'))) run(() => api(`/spaces/${space.id}`, { method: 'DELETE' })); } : undefined} />
       </form>
     </Dialog>
   );
@@ -186,7 +187,7 @@ export function ContactDialog({ customerId, contact, onClose }: { customerId: st
           {t('primary')}
         </label>
         <Actions busy={busy} error={error} onCancel={onClose}
-          onDelete={contact ? () => { if (confirm(t('confirmDelete'))) run(() => api(`/contacts/${contact.id}`, { method: 'DELETE' })); } : undefined} />
+          onDelete={contact ? async () => { if (await appConfirm(t('confirmDelete'))) run(() => api(`/contacts/${contact.id}`, { method: 'DELETE' })); } : undefined} />
       </form>
     </Dialog>
   );
@@ -208,17 +209,21 @@ export function ActivityDialog({ customerId, initialKind = 'call', onClose }: { 
   const { run, busy, error } = useSave(customerId, onClose);
   return (
     <Dialog title={t('logActivity')} onClose={onClose}>
-      <form className="grid grid-cols-1 gap-3" onSubmit={(e) => { e.preventDefault(); run(() => api(`/customers/${customerId}/activities`, { method: 'POST', json: { kind, title, body } })); }}>
-        <div className="grid grid-cols-4 gap-2">
+      {/* One column on every screen; the kind picker is a full-width segmented control */}
+      <form className="grid grid-cols-1 gap-4 sm:grid-cols-2" onSubmit={(e) => { e.preventDefault(); run(() => api(`/customers/${customerId}/activities`, { method: 'POST', json: { kind, title, body } })); }}>
+        <div role="radiogroup" aria-label={t('activityTitle')} className="grid grid-cols-4 gap-1 rounded-2xl bg-surface-2 p-1 sm:col-span-2">
           {KINDS.map(({ value, icon: Icon, key }) => (
-            <button key={value} type="button" onClick={() => { if (title === defaultTitle(kind)) setTitle(t(key)); setKind(value); }}
-              className={clsx('flex flex-col items-center gap-1 rounded-xl border py-2.5 text-xs font-medium', kind === value ? 'border-primary bg-primary-soft text-primary' : 'border-border')}>
-              <Icon size={18} /> {t(key)}
+            <button key={value} type="button" role="radio" aria-checked={kind === value}
+              onClick={() => { if (title === defaultTitle(kind)) setTitle(t(key)); setKind(value); }}
+              className={clsx('flex min-w-0 flex-col items-center gap-1 rounded-xl px-1 py-2.5 text-[12px] font-semibold leading-tight transition',
+                kind === value ? 'bg-surface text-primary shadow-sm' : 'text-muted hover:text-text')}>
+              <Icon size={19} className="shrink-0" />
+              <span className="w-full truncate text-center">{t(key)}</span>
             </button>
           ))}
         </div>
-        <F label={t('activityTitle')}><input required className={input} value={title} onChange={(e) => setTitle(e.target.value)} /></F>
-        <F label={t('activityBody')}><textarea rows={4} autoFocus className={input} value={body} onChange={(e) => setBody(e.target.value)} /></F>
+        <F label={t('activityTitle')} wide><input required className={input} value={title} onChange={(e) => setTitle(e.target.value)} /></F>
+        <F label={t('activityBody')} wide><textarea rows={5} autoFocus className={clsx(input, 'resize-y')} value={body} onChange={(e) => setBody(e.target.value)} /></F>
         <Actions busy={busy} error={error} onCancel={onClose} />
       </form>
     </Dialog>

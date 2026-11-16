@@ -66,6 +66,7 @@ export function OfferDocument({ doc, banner }: { doc: Doc; banner?: ReactNode })
               <td className="py-2.5 pr-2 text-[#6b6785]">{i.position}</td>
               <td className="py-2.5 pr-2">
                 {i.description}
+                {i.space_name && <div className="text-xs text-[#6b6785]">{to('space')}: {i.space_name}</div>}
                 <div className="text-xs text-[#6b6785] sm:hidden print:hidden">{Number(i.quantity).toLocaleString(locale)} {i.unit} × {money(i.unit_price, locale)}{Number(i.discount) > 0 && ` −${Number(i.discount)}%`}</div>
               </td>
               <td className="tabular py-2.5 pr-2 text-right whitespace-nowrap">{Number(i.quantity).toLocaleString(locale)} {i.unit}</td>

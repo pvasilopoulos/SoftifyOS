@@ -36,9 +36,10 @@ export function QuickSettings({ variant = 'light', expanded = false }: { variant
 
   return (
     <div className={clsx('flex gap-1.5', expanded && 'w-full')}>
-      <Link href={pathname} locale={other} className={btn} title={`${t('language')}: ${other === 'el' ? 'Ελληνικά' : 'English'}`}>
+      {/* Language: icon only too (tooltip / aria-label name the language it switches to) */}
+      <Link href={pathname} locale={other} className={clsx(btn, expanded && 'flex-none px-3')}
+        title={`${t('language')}: ${other === 'el' ? 'Ελληνικά' : 'English'} (${locale.toUpperCase()})`} aria-label={`${t('language')}: ${other === 'el' ? 'Ελληνικά' : 'English'}`}>
         <Globe size={18} />
-        <span className="font-semibold">{locale === 'el' ? 'ΕΛ' : 'EN'}</span>
       </Link>
       {/* Theme: icon only (the tooltip / aria-label say which mode is on) */}
       <button onClick={() => applyTheme(NEXT[theme])} className={clsx(btn, expanded && 'flex-none px-3')} title={`${t('theme')}: ${t(theme)}`} aria-label={`${t('theme')}: ${t(theme)}`}>

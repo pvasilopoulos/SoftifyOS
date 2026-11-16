@@ -1,5 +1,5 @@
 export type OfferItem = {
-  id?: string; position: number; product_id?: string | null; description: string; unit: string;
+  id?: string; position: number; product_id?: string | null; space_id?: string | null; space_name?: string | null; description: string; unit: string;
   quantity: string; unit_price: string; discount: string; vat_rate: string; net_amount: string; vat_amount: string;
 };
 

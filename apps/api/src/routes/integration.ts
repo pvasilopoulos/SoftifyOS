@@ -12,7 +12,7 @@ import { decodeCursor, encodeCursor, sql, withTenant, type Tx } from '../db.js';
 import { isValidAfm } from './customers.js';
 import { openApiSpec } from './integration-openapi.js';
 import { emitEntityEvents, emitEvents, type EventSource } from '../webhooks.js';
-import { canonicalName, type NameList } from '../lookups.js';
+import { ALL_LISTS, canonicalName, isNameList, nameInUse, renameInRecords, type NameList } from '../lookups.js';
 
 /** Name-list fields: unknown values are added to the list (like zones), and the list's spelling is stored. */
 async function listNames(sp: Tx, T: string, cols: Record<string, unknown>, fields: [string, NameList][], cache: Map<string, string>) {
@@ -24,7 +24,7 @@ import type postgres from 'postgres';
 
 type Frag = postgres.PendingQuery<postgres.Row[]>;
 
-type Resource = 'customers' | 'branches' | 'spaces';
+type Resource = 'customers' | 'branches' | 'spaces' | 'lists';
 type Level = 'none' | 'read' | 'write';
 type ApiKeyCtx = { id: string; tenantId: string; name: string; permissions: Record<Resource, Level>; expiresAt: number | null; ips: BlockList | null };
 type ApiLog = { tenantId?: string; keyId?: string; items?: number; created?: number; updated?: number; failed?: number; error?: string; errors?: unknown };
@@ -235,10 +235,11 @@ async function lookupId(tx: Tx, tenantId: string, list: LookupList, name: string
 const zodDetail = (e: ZodError) => e.issues.map((i) => ({ path: i.path.join('.'), message: i.message }));
 
 /** Runs each item in its own savepoint: a bad row is reported and the rest of the batch continues. */
-async function runBatch<T>(tx: Tx, items: unknown[], schema: z.ZodType<T>, fn: (row: T, sp: Tx) => Promise<Omit<ItemResult, 'external_id'>>) {
+async function runBatch<T>(tx: Tx, items: unknown[], schema: z.ZodType<T>, fn: (row: T, sp: Tx) => Promise<Omit<ItemResult, 'external_id'>>,
+  idOf: (raw: unknown) => string = (raw) => (typeof (raw as { external_id?: unknown })?.external_id === 'string' ? (raw as { external_id: string }).external_id : '')) {
   const results: ItemResult[] = [];
   for (const raw of items) {
-    const externalId = typeof (raw as { external_id?: unknown })?.external_id === 'string' ? (raw as { external_id: string }).external_id : '';
+    const externalId = idOf(raw);
     const parsed = schema.safeParse(raw);
     if (!parsed.success) { results.push({ external_id: externalId, status: 'error', error: 'validation', detail: zodDetail(parsed.error) }); continue; }
     try {
@@ -626,5 +627,96 @@ export default async function integrationRoutes(app: FastifyInstance) {
         return ok ? { ok: true } : problem(reply, 404, 'not_found');
       });
     }
+
+    // ----- value lists (pick-lists of the forms): read & write by name
+    const LIST_INFO: Record<string, string> = {
+      geo_zone: 'Geographic zone (customers, stores)', fee_schedule: 'Fee schedule (stores)', tour: 'Field tour (stores)',
+      ongoing_status: 'Status on going (stores)', prefecture: 'Prefecture (customers address.region, stores region)',
+      customer_category: 'Customer category', customer_source: 'Customer source', payment_terms: 'Payment terms (customers)', space_kind: 'Space kind',
+    };
+    const listParam = z.object({ list: z.enum(ALL_LISTS) });
+
+    r.get('/v1/lists', async (req, reply) => {
+      if (!need(req, reply, 'lists', 'read')) return;
+      const T = req.apiKey!.tenantId;
+      const counts = await withTenant(T, (tx) => tx`
+        SELECT list, count(*)::int AS values, count(*) FILTER (WHERE active)::int AS active FROM lookup_values WHERE tenant_id = ${T} GROUP BY list`);
+      return {
+        items: ALL_LISTS.map((l) => {
+          const c = counts.find((x) => x.list === l);
+          return { list: l, description: LIST_INFO[l], stored_as: isNameList(l) ? 'name' : 'reference', values: c?.values ?? 0, active: c?.active ?? 0 };
+        }),
+      };
+    });
+
+    r.get('/v1/lists/:list', async (req, reply) => {
+      if (!need(req, reply, 'lists', 'read')) return;
+      const { list } = listParam.parse(req.params);
+      const { include_inactive } = z.object({ include_inactive: z.enum(['0', '1']).default('1') }).parse(req.query);
+      const T = req.apiKey!.tenantId;
+      const values = await withTenant(T, (tx) => tx`
+        SELECT name, active, sort, created_at FROM lookup_values
+        WHERE tenant_id = ${T} AND list = ${list} ${include_inactive === '0' ? tx`AND active` : tx``} ORDER BY sort, name`);
+      return { list, description: LIST_INFO[list], values };
+    });
+
+    // Upsert values by name (accent/case-insensitive). rename_from renames an existing value; records using it follow.
+    const valueIn = z.object({
+      name: z.string().trim().min(1).max(80),
+      rename_from: z.string().trim().min(1).max(80).optional(),
+      active: z.boolean().optional(),
+      sort: z.number().int().min(0).max(100000).optional(),
+    }).strict();
+    r.put('/v1/lists/:list/values', async (req, reply) => {
+      if (!need(req, reply, 'lists', 'write')) return;
+      const { list } = listParam.parse(req.params);
+      const { values } = z.object({ values: z.array(z.unknown()).min(1).max(500) }).parse(req.body);
+      const key = req.apiKey!;
+      const T = key.tenantId;
+      const results = await withTenant(T, async (tx) => {
+        const out = await runBatch(tx, values, valueIn, async (v, sp) => {
+          const findBy = v.rename_from ?? v.name;
+          const [found] = await sp`SELECT id, name, active, sort FROM lookup_values WHERE tenant_id = ${T} AND list = ${list} AND search_key(name) = search_key(${findBy})`;
+          if (v.rename_from && !found) throw new RowError('not_found', v.rename_from);
+          if (found) {
+            if (v.rename_from && found.name !== v.name) {
+              const [dup] = await sp`SELECT 1 FROM lookup_values WHERE tenant_id = ${T} AND list = ${list} AND id <> ${found.id} AND search_key(name) = search_key(${v.name})`;
+              if (dup) throw new RowError('duplicate', v.name);
+              if (isNameList(list)) await renameInRecords(sp, T, list, found.name, v.name);
+            }
+            await sp`UPDATE lookup_values SET name = ${v.rename_from ? v.name : found.name}, active = ${v.active ?? found.active}, sort = ${v.sort ?? found.sort} WHERE id = ${found.id}`;
+            return { status: 'updated', id: found.id };
+          }
+          const [{ next }] = await sp`SELECT coalesce(max(sort), 0) + 1 AS next FROM lookup_values WHERE tenant_id = ${T} AND list = ${list}`;
+          const [row] = await sp`INSERT INTO lookup_values (tenant_id, list, name, active, sort) VALUES (${T}, ${list}, ${v.name}, ${v.active ?? true}, ${v.sort ?? next}) RETURNING id`;
+          return { status: 'created', id: row.id };
+        }, (raw) => (raw as { name?: string })?.name ?? '');
+        const sum = summary(out);
+        await audit(tx, key, 'api.lists.batch', { list, created: sum.created, updated: sum.updated, failed: sum.failed });
+        return out;
+      });
+      req.apiLog = { ...req.apiLog, items: results.length, ...(({ created, updated, failed }) => ({ created, updated, failed }))(summary(results)) };
+      return { list, ...summary(results).valueOf(), results: results.map(({ id: _id, external_id, ...x }) => ({ name: external_id, ...x })) };
+    });
+
+    // Delete a value that nothing uses (otherwise 409 in_use: deactivate it with active=false instead)
+    r.delete('/v1/lists/:list/values/:name', async (req, reply) => {
+      if (!need(req, reply, 'lists', 'write')) return;
+      const { list, name } = z.object({ list: z.enum(ALL_LISTS), name: z.string().trim().min(1).max(80) }).parse(req.params);
+      const key = req.apiKey!;
+      const T = key.tenantId;
+      const res = await withTenant(T, async (tx) => {
+        const [v] = await tx`SELECT id, name FROM lookup_values WHERE tenant_id = ${T} AND list = ${list} AND search_key(name) = search_key(${name})`;
+        if (!v) return 404;
+        const used = isNameList(list) ? await nameInUse(tx, T, list, v.name) : (await tx`
+          SELECT 1 WHERE EXISTS (SELECT 1 FROM branches WHERE geo_zone_id = ${v.id} OR fee_schedule_id = ${v.id} OR tour_id = ${v.id} OR ongoing_status_id = ${v.id})
+                      OR EXISTS (SELECT 1 FROM customers WHERE geo_zone_id = ${v.id})`).length > 0;
+        if (used) return 409;
+        await tx`DELETE FROM lookup_values WHERE id = ${v.id}`;
+        await audit(tx, key, 'api.lists.delete', { list, name: v.name });
+        return 200;
+      });
+      return res === 200 ? { ok: true } : problem(reply, res, res === 404 ? 'not_found' : 'in_use');
+    });
   });
 }

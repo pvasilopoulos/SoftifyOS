@@ -4,13 +4,14 @@ import { useState, type ReactNode } from 'react';
 import clsx from 'clsx';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useTranslations } from 'next-intl';
-import { Bookmark, Check, ChevronDown, CircleUser, Contact, LayoutList, ListFilter, ListTree, Loader2, PenLine, Search, ShieldCheck, Store, Users, X } from 'lucide-react';
+import { Bookmark, Check, ChevronDown, CircleUser, Contact, DatabaseZap, Landmark, LayoutList, ListFilter, ListTree, Loader2, PenLine, Search, ShieldCheck, Store, Users, X } from 'lucide-react';
 import { api } from '@/lib/api';
 import { useRoles } from './roles-settings';
 import { Dialog } from './customer-dialogs';
 import { FILTER_GROUPS, type IndexKey } from './index-filters';
 import { EntityTile } from './ui';
 import { ManageViews, useSavedViews } from './saved-views';
+import { RegistrySettingsPanel, useRegistryConfig } from './registry';
 import { matchRank } from '@/lib/search';
 import { useToast } from './providers';
 
@@ -103,6 +104,7 @@ export function CustomersSettingsSection() {
   const qc = useQueryClient();
   const [open, setOpen] = useState(false);
   const { data } = useQuery({ queryKey: ['settings', 'customers'], queryFn: () => api<CustomersPrefs>('/settings/customers') });
+  const regCfg = useRegistryConfig();
   const refresh = () => { qc.invalidateQueries({ queryKey: ['settings', 'customers'] }); qc.invalidateQueries({ queryKey: ['me'] }); toast({ title: ts('saved') }); };
   const org = useMutation({ mutationFn: (show: boolean) => api('/settings/customers/organization', { method: 'PUT', json: { show_avatar: show } }), onSuccess: refresh });
   const mine = useMutation({ mutationFn: (v: boolean | null) => api('/me/preferences', { method: 'PUT', json: { show_customer_avatar: v } }), onSuccess: refresh });
@@ -110,6 +112,9 @@ export function CustomersSettingsSection() {
   const orgLabel = data.organization.show_avatar ? t('shown') : t('hidden');
 
   void open; void setOpen;
+  const reg = regCfg.data;
+  const registrySummary = !reg ? '' : reg.lookup_mode === 'off' ? t('registryOff')
+    : [reg.aade_ready ? 'ΑΑΔΕ' : null, reg.vies_enabled ? 'VIES' : null].filter(Boolean).join(' + ') + ` · ${t(`registryMode_${reg.lookup_mode}`)}`;
   return (
     <SettingsItems placeholder={ts('searchIn')} groups={[{ key: 'display', icon: Contact, title: t('groupDisplay'), items: [{
       key: 'avatar', icon: CircleUser, title: t('avatarTitle'), keywords: 'avatar εικονίδιο αρχικά logo initials',
@@ -133,6 +138,9 @@ export function CustomersSettingsSection() {
           <Choice active={data.mine.show_avatar === false} disabled={mine.isPending} onClick={() => mine.mutate(false)} title={t('hide')} />
         </div>
       </>),
+    }] }, { key: 'registries', icon: Landmark, title: t('groupRegistries'), hint: t('groupRegistriesHint'), items: [{
+      key: 'aade-vies', icon: DatabaseZap, title: t('registriesTitle'), keywords: 'ΑΑΔΕ AADE VIES ΑΦΜ μητρώο gsis taxisnet άντληση ενημέρωση',
+      summary: registrySummary, content: <RegistrySettingsPanel />,
     }] }]} />
   );
 }
@@ -184,7 +192,7 @@ export function IndexesSettingsSection() {
   const saveOrg = useMutation({ mutationFn: (body: object) => api('/settings/indexes/organization', { method: 'PUT', json: body }), onSuccess: done, onError: fail });
   const saveMine = useMutation({
     mutationFn: (body: object) => api('/me/preferences', { method: 'PUT', json: body }),
-    onSuccess: () => { try { sessionStorage.removeItem('cust.view'); } catch {} done(); }, onError: fail,
+    onSuccess: done, onError: fail,
   });
   if (!data) return <Loader2 className="mx-auto animate-spin text-muted" />;
   const cv = data.customers_view;

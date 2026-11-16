@@ -1,10 +1,11 @@
 'use client';
+import { useTabTitle } from '@/components/tabs';
 import { use, useState } from 'react';
 import clsx from 'clsx';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useLocale, useTranslations } from 'next-intl';
 import {
-  ArrowLeft, Check, CheckCircle2, Clock, Copy, ExternalLink, FilePlus2, Link2, Loader2, Printer, Send, ShieldCheck, X, XCircle,
+  ArrowLeft, Check, CheckCircle2, Clock, Copy, ExternalLink, FilePlus2, Link2, Loader2, MapPin, Printer, Send, ShieldCheck, X, XCircle,
 } from 'lucide-react';
 import { api, ApiError } from '@/lib/api';
 import { date, money, relative } from '@/lib/format';
@@ -42,6 +43,7 @@ export default function OfferPage({ params }: { params: Promise<{ id: string }> 
     onSuccess: () => { setRejecting(false); refresh(); }, onError,
   });
 
+  useTabTitle(data ? `${data.offer.number}${data.offer.customer_name ? ` · ${data.offer.customer_name}` : ''}` : null);
   if (isLoading || !data) return <div className="space-y-4"><Skeleton className="h-10 w-48" /><Skeleton className="h-56" /><Skeleton className="h-40" /></div>;
   const o = data.offer;
   const current = stepIndex[o.status] ?? 0;
@@ -147,6 +149,7 @@ export default function OfferPage({ params }: { params: Promise<{ id: string }> 
               <span className="w-5 pt-0.5 text-xs font-semibold text-muted">{i.position}</span>
               <div className="min-w-0 flex-1">
                 <div className="font-medium">{i.description}</div>
+                {i.space_name && <div className="mt-0.5 inline-flex items-center gap-1 rounded-md bg-primary-soft px-1.5 py-0.5 text-xs font-medium text-primary"><MapPin size={12} /> {i.space_name}</div>}
                 <div className="tabular text-sm text-muted">
                   {Number(i.quantity).toLocaleString(locale)} {i.unit} × {money(i.unit_price, locale)}{Number(i.discount) > 0 && ` · −${Number(i.discount)}%`} · {t('vat')} {Number(i.vat_rate)}%
                 </div>

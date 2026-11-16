@@ -25,6 +25,7 @@ const EDITABLE = new Set(['draft', 'in_progress', 'approved', 'sent', 'rejected'
 
 const itemSchema = z.object({
   product_id: z.string().uuid().nullish(),
+  space_id: z.string().uuid().nullish(),
   description: z.string().trim().min(1).max(500),
   unit: z.string().trim().max(20).default('τεμ.'),
   quantity: z.coerce.number().positive().max(1e7),
@@ -47,8 +48,12 @@ function computeLines(items: Item[]) {
   return { lines, net, vat, total: r2(net + vat) };
 }
 
-async function insertVersion(tx: Tx, s: Session, offerId: string, version: number, items: Item[], note?: string | null) {
+async function insertVersion(tx: Tx, s: Session, offerId: string, version: number, items: Item[], branchId: string | null, note?: string | null) {
   const c = computeLines(items);
+  // A line's space must belong to the offer's store; anything else is dropped
+  const wanted = [...new Set(items.map((i) => i.space_id).filter((x): x is string => !!x))];
+  const ok = new Set<string>(wanted.length && branchId
+    ? (await tx`SELECT id FROM spaces WHERE branch_id = ${branchId} AND id IN ${tx(wanted)}`).map((r) => r.id as string) : []);
   const [v] = await tx`
     INSERT INTO offer_versions (tenant_id, offer_id, version, net_amount, vat_amount, total_amount, created_by, note)
     VALUES (${s.tenantId}, ${offerId}, ${version}, ${c.net}, ${c.vat}, ${c.total}, ${s.userId}, ${note ?? null})
@@ -56,6 +61,7 @@ async function insertVersion(tx: Tx, s: Session, offerId: string, version: numbe
   if (c.lines.length) {
     await tx`INSERT INTO offer_items ${tx(c.lines.map((l) => ({
       tenant_id: s.tenantId, version_id: v.id, position: l.position, product_id: l.product_id ?? null,
+      space_id: l.space_id && ok.has(l.space_id) ? l.space_id : null,
       description: l.description, unit: l.unit, quantity: l.quantity, unit_price: l.unit_price,
       discount: l.discount, vat_rate: l.vat_rate, net_amount: l.net, vat_amount: l.vat,
     })))}`;
@@ -182,7 +188,7 @@ export default async function offerRoutes(app: FastifyInstance) {
                   ${b.company_id ?? null}, ${s.userId}, 'draft', 1, ${b.valid_until ?? null}, ${b.notes ?? null})
           RETURNING id, number, customer_id`;
         await offerEvent(tx, s.tenantId, o.id, 'offer.created', by(s));
-        const c = await insertVersion(tx, s, o.id, 1, b.items);
+        const c = await insertVersion(tx, s, o.id, 1, b.items, b.branch_id ?? null);
         await tx`UPDATE offers SET net_amount = ${c.net}, vat_amount = ${c.vat}, total_amount = ${c.total} WHERE id = ${o.id}`;
         await logActivity(tx, s, o, 'offer_updated', 'Νέα προσφορά', `${o.number} · v.01`);
         return o;
@@ -213,8 +219,8 @@ export default async function offerRoutes(app: FastifyInstance) {
           FROM offer_versions v LEFT JOIN users u ON u.id = v.created_by
           WHERE v.tenant_id = ${s.tenantId} AND v.offer_id = ${id} ORDER BY v.version DESC`;
         const items = await tx`
-          SELECT i.id, i.position, i.product_id, i.description, i.unit, i.quantity, i.unit_price, i.discount, i.vat_rate, i.net_amount, i.vat_amount
-          FROM offer_items i JOIN offer_versions v ON v.id = i.version_id
+          SELECT i.id, i.position, i.product_id, i.space_id, sp.name AS space_name, i.description, i.unit, i.quantity, i.unit_price, i.discount, i.vat_rate, i.net_amount, i.vat_amount
+          FROM offer_items i JOIN offer_versions v ON v.id = i.version_id LEFT JOIN spaces sp ON sp.id = i.space_id
           WHERE v.tenant_id = ${s.tenantId} AND v.offer_id = ${id} AND v.version = ${v}
           ORDER BY i.position`;
         const approvals = await tx`
@@ -255,11 +261,11 @@ export default async function offerRoutes(app: FastifyInstance) {
       const s = req.session;
       if (!can(s, 'offers.edit')) return reply.code(403).send({ error: 'forbidden' });
       const res = await withTenant(s.tenantId, async (tx) => {
-        const [o] = await tx`SELECT id, number, status, current_version, customer_id FROM offers WHERE id = ${id} FOR UPDATE`;
+        const [o] = await tx`SELECT id, number, status, current_version, customer_id, branch_id FROM offers WHERE id = ${id} FOR UPDATE`;
         if (!o) return { code: 404 as const };
         if (!EDITABLE.has(o.status)) return { code: 409 as const };
         const v = o.current_version + 1;
-        const c = await insertVersion(tx, s, id, v, b.items, b.note);
+        const c = await insertVersion(tx, s, id, v, b.items, b.branch_id === undefined ? o.branch_id : b.branch_id, b.note);
         // A new version invalidates previous approvals and the public link
         await tx`
           UPDATE offers SET current_version = ${v}, status = 'draft', public_token = NULL, sent_at = NULL,
@@ -424,8 +430,8 @@ export default async function offerRoutes(app: FastifyInstance) {
     const o = await loadPublic(token);
     if (!o) return reply.code(404).send({ error: 'not_found' });
     const items = await sql`
-      SELECT i.position, i.description, i.unit, i.quantity, i.unit_price, i.discount, i.vat_rate, i.net_amount, i.vat_amount
-      FROM offer_items i JOIN offer_versions v ON v.id = i.version_id
+      SELECT i.position, sp.name AS space_name, i.description, i.unit, i.quantity, i.unit_price, i.discount, i.vat_rate, i.net_amount, i.vat_amount
+      FROM offer_items i JOIN offer_versions v ON v.id = i.version_id LEFT JOIN spaces sp ON sp.id = i.space_id
       WHERE v.tenant_id = ${o.tenant_id} AND v.offer_id = ${o.id} AND v.version = ${o.current_version} ORDER BY i.position`;
     const { id: _i, tenant_id: _t, owner_id: _o, customer_id: _c, ...pub } = o;
     const expired = !!o.valid_until && new Date(o.valid_until) < new Date(new Date().toDateString());

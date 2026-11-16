@@ -13,6 +13,8 @@ import { Avatar } from './ui';
 import { useLive } from './providers';
 import { QuickSettings } from './quick-settings';
 import { brandAsset, useBrand, useBrandHead } from '@/lib/brand';
+import { TabContent, TabsProvider, useEmbedded } from './tabs';
+import { LongPressSheet, QuickOpen, SplitPane, TabBar, TabsCountButton, TabSwitcher, useTabSwipe, useTabSync } from './tabs-ui';
 
 /** Organisation logo + name (Settings → Branding). Public pages pass signedIn={false}. */
 export function Logo({ dark = false, signedIn = true }: { dark?: boolean; signedIn?: boolean }) {
@@ -62,8 +64,21 @@ export function useMe() {
   return useQuery({ queryKey: ['me'], queryFn: () => api<Me>('/me'), staleTime: 5 * 60_000 });
 }
 
+/** The app frame. Inside the split-view frame (?embed=1) only the page itself is shown. */
 export function AppShell({ children }: { children: ReactNode }) {
+  const embedded = useEmbedded();
+  const { data: me } = useMe();
+  return (
+    <TabsProvider userId={me?.user.id}>
+      {embedded ? <main className="mx-auto w-full max-w-6xl px-4 py-4"><TabContent>{children}</TabContent></main> : <Shell>{children}</Shell>}
+    </TabsProvider>
+  );
+}
+
+function Shell({ children }: { children: ReactNode }) {
   useBrandHead(useBrand());
+  useTabSync();
+  const swipe = useTabSwipe();
   const t = useTranslations('nav');
   const tm = useTranslations('more');
   const locale = useLocale();
@@ -113,9 +128,11 @@ export function AppShell({ children }: { children: ReactNode }) {
 
       <div className="min-w-0 flex-1">
         {/* Mobile top bar */}
-        <div className="flex items-center justify-between px-4 pt-3 safe-top lg:hidden">
+        {/* (swipe left / right here to change tab) */}
+        <div className="flex items-center justify-between px-4 pt-3 safe-top lg:hidden" {...swipe}>
           <Logo />
           <div className="flex items-center gap-0.5">
+            <TabsCountButton />
             <QuickSettings />
             <Link href="/more" aria-label="Notifications" className="relative grid h-10 w-10 place-items-center rounded-full">
               <Bell size={22} />
@@ -123,7 +140,13 @@ export function AppShell({ children }: { children: ReactNode }) {
             </Link>
           </div>
         </div>
-        <main className="mx-auto w-full max-w-6xl px-4 pb-28 pt-2 lg:px-8 lg:pb-10 lg:pt-8">{children}</main>
+        <TabBar />
+        <SplitPane>
+          <main className="mx-auto w-full max-w-6xl px-4 pb-28 pt-2 md:pt-4 lg:px-8 lg:pb-10 lg:pt-6"><TabContent>{children}</TabContent></main>
+        </SplitPane>
+        <TabSwitcher />
+        <QuickOpen />
+        <LongPressSheet />
       </div>
 
       {/* Mobile bottom navigation */}
