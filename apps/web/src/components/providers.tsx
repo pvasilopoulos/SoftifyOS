@@ -15,7 +15,7 @@ function LiveBridge({ onToast, onState }: { onToast: (t: Omit<Toast, 'id'>) => v
   const qc = useQueryClient();
   useEffect(() => {
     // No live stream on the login page or the public (not signed-in) customer pages
-    if (/\/login\/?$|^\/(el|en)\/p\//.test(location.pathname)) return;
+    if (/\/login\/?$|^\/(el|en)\/(p|invite)\//.test(location.pathname)) return;
     const es = new EventSource('/api/stream');
     es.addEventListener('ready', () => onState(true));
     es.onerror = () => onState(false);

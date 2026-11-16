@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react';
 import clsx from 'clsx';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useLocale, useTranslations } from 'next-intl';
-import { Bell, BellOff, Download, Globe, LogOut, Moon, Send, Sun, Monitor } from 'lucide-react';
+import { Bell, BellOff, ChevronRight, Download, Globe, LogOut, Moon, Send, Settings, Sun, Monitor } from 'lucide-react';
 import { api } from '@/lib/api';
 import { applyTheme as setThemeGlobal, getTheme, type Theme } from '@/lib/theme';
 import { relative } from '@/lib/format';
@@ -17,6 +17,8 @@ type BeforeInstallPrompt = Event & { prompt: () => Promise<void> };
 
 export default function MorePage() {
   const t = useTranslations('more');
+  const tn = useTranslations('nav');
+  const tst = useTranslations('settings');
   const ta = useTranslations('activity');
   const locale = useLocale();
   const pathname = usePathname();
@@ -57,6 +59,11 @@ export default function MorePage() {
   return (
     <div className="space-y-5">
       <PageHeader title={t('title')} />
+      <Link href="/settings" className="card flex items-center gap-3 p-4 transition hover:border-primary/40">
+        <span className="grid h-11 w-11 place-items-center rounded-xl bg-primary text-white"><Settings size={20} /></span>
+        <span className="flex-1"><span className="block font-semibold">{tn('settings')}</span><span className="block text-sm text-muted">{tst('subtitle')}</span></span>
+        <ChevronRight size={18} className="text-muted" />
+      </Link>
 
       <section className="card flex items-center gap-3 p-4">
         <Avatar name={me?.user.full_name} size={48} />

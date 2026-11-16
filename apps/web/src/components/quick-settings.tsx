@@ -40,9 +40,9 @@ export function QuickSettings({ variant = 'light', expanded = false }: { variant
         <Globe size={18} />
         <span className="font-semibold">{locale === 'el' ? 'ΕΛ' : 'EN'}</span>
       </Link>
-      <button onClick={() => applyTheme(NEXT[theme])} className={btn} title={`${t('theme')}: ${t(theme)}`} aria-label={`${t('theme')}: ${t(theme)}`}>
+      {/* Theme: icon only (the tooltip / aria-label say which mode is on) */}
+      <button onClick={() => applyTheme(NEXT[theme])} className={clsx(btn, expanded && 'flex-none px-3')} title={`${t('theme')}: ${t(theme)}`} aria-label={`${t('theme')}: ${t(theme)}`}>
         <ThemeIcon size={18} />
-        {expanded && <span>{t(theme)}</span>}
       </button>
     </div>
   );

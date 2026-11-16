@@ -1,20 +1,20 @@
 'use client';
 import { useEffect, useRef, useState } from 'react';
 import clsx from 'clsx';
-import { useInfiniteQuery } from '@tanstack/react-query';
+import { useInfiniteQuery, useQuery } from '@tanstack/react-query';
 import { useWindowVirtualizer } from '@tanstack/react-virtual';
 import { useLocale, useTranslations } from 'next-intl';
-import { Archive, ArrowDownAZ, Clock, Euro, ListTree, Loader2, MapPin, Plus, Search, Store, UserRound, Users, X } from 'lucide-react';
+import { ListTree, Loader2, MapPin, Plus, Search, Store, Users, X } from 'lucide-react';
 import { api, type Customer, type Page } from '@/lib/api';
 import { money } from '@/lib/format';
 import { Link } from '@/i18n/navigation';
-import { EntityTile, PageHeader, Segmented, Skeleton, StatusBadge } from '@/components/ui';
-import { CustomerTreeView, ExpandToggle, StoresView, type ExpandMode } from '@/components/customer-views';
+import { EntityTile, PageHeader, Skeleton, StatusBadge } from '@/components/ui';
+import {
+  ActiveFilterChips, CustomerTreeView, ExpandToggle, FilterMenu, SortMenu, StoresView, type ExpandMode, type FilterGroup,
+} from '@/components/customer-views';
+import { useLookup } from '@/components/lookup-select';
 
 type View = 'list' | 'tree' | 'stores';
-
-type Status = 'all' | 'active' | 'prospect' | 'negotiation' | 'inactive';
-type Sort = 'name' | 'recent' | 'value';
 type Row = Customer & { trade_name: string | null; tags: string[]; address_city: string | null; archived_at: string | null };
 
 function useDebounced<T>(v: T, ms = 250) {
@@ -32,15 +32,32 @@ function usePersisted<T>(key: string, initial: T): [T, (v: T) => void] {
 
 export default function CustomersPage() {
   const t = useTranslations('customers');
+  const ts = useTranslations('status');
+  const tl = useTranslations('lookup');
   const locale = useLocale();
-  const [status, setStatus] = usePersisted<Status>('cust.status', 'all');
-  const [sort, setSort] = usePersisted<Sort>('cust.sort', 'name');
-  const [mine, setMine] = usePersisted('cust.mine', false);
-  const [archived, setArchived] = usePersisted('cust.archived', false);
   const [view, setView] = usePersisted<View>('cust.view', 'list');
-  const [expand, setExpand] = useState<ExpandMode>('none');
   const [q, setQ] = useState('');
   const dq = useDebounced(q.trim());
+  const [expand, setExpand] = useState<ExpandMode>('none');
+
+  // Customer filters (list + tree)
+  const [status, setStatus] = usePersisted('cust.status2', '');
+  const [sort, setSort] = usePersisted('cust.sort', 'name');
+  const [mine, setMine] = usePersisted('cust.mine', false);
+  const [archived, setArchived] = usePersisted('cust.archived', false);
+  // Store filters
+  const [sCity, setSCity] = usePersisted('store.city', '');
+  const [sZone, setSZone] = usePersisted('store.zone', '');
+  const [sTour, setSTour] = usePersisted('store.tour', '');
+  const [sOngoing, setSOngoing] = usePersisted('store.ongoing', '');
+  const [sStatus, setSStatus] = usePersisted('store.status', '');
+  const [sSort, setSSort] = usePersisted('store.sort', 'name');
+
+  const isStores = view === 'stores';
+  const cities = useQuery({ queryKey: ['branch-cities'], enabled: isStores, queryFn: () => api<{ city: string; stores: number }[]>('/branches/cities'), staleTime: 300_000 });
+  const zones = useLookup('geo_zone');
+  const tours = useLookup('tour');
+  const ongoing = useLookup('ongoing_status');
 
   const query = useInfiniteQuery({
     enabled: view === 'list',
@@ -48,7 +65,7 @@ export default function CustomersPage() {
     initialPageParam: null as string | null,
     queryFn: ({ pageParam, signal }) => {
       const p = new URLSearchParams({ limit: '40', sort });
-      if (status !== 'all') p.set('status', status);
+      if (status) p.set('status', status);
       if (mine) p.set('manager', 'me');
       if (archived) p.set('archived', '1');
       if (dq.length >= 2) p.set('q', dq);
@@ -68,8 +85,37 @@ export default function CustomersPage() {
     if (lastIndex >= rows.length - 10 && query.hasNextPage && !query.isFetchingNextPage) query.fetchNextPage();
   }, [lastIndex, rows.length, query]);
 
-  const chip = (active: boolean) => clsx('flex shrink-0 items-center gap-1.5 rounded-full border px-3 py-1.5 text-sm font-medium transition',
-    active ? 'border-primary bg-primary-soft text-primary' : 'border-border bg-surface text-muted');
+  // ---- Toolbar configuration per view ----
+  const statusOptions = (['active', 'prospect', 'negotiation', 'inactive'] as const).map((s) => ({ value: s, label: ts(s) }));
+  const nameOf = (list: { id: string; name: string }[] | undefined, id: string) => list?.find((x) => x.id === id)?.name ?? '';
+
+  const groups: FilterGroup[] = isStores ? [
+    { key: 'city', label: t('city'), value: sCity, onChange: setSCity, options: (cities.data ?? []).map((c) => ({ value: c.city, label: `${c.city} (${c.stores.toLocaleString(locale)})` })) },
+    { key: 'zone', label: tl('geo_zone'), value: sZone, onChange: setSZone, options: (zones.data ?? []).map((z) => ({ value: z.id, label: z.name })) },
+    { key: 'tour', label: tl('tour'), value: sTour, onChange: setSTour, options: (tours.data ?? []).map((z) => ({ value: z.id, label: z.name })) },
+    { key: 'ongoing', label: tl('ongoing_status'), value: sOngoing, onChange: setSOngoing, options: (ongoing.data ?? []).map((z) => ({ value: z.id, label: z.name })) },
+    { key: 'status', label: t('statusLabel'), value: sStatus, onChange: setSStatus, options: [{ value: 'active', label: t('activeStores') }, { value: 'inactive', label: t('inactiveStores') }] },
+  ] : [
+    { key: 'status', label: t('statusLabel'), value: status, onChange: setStatus, options: statusOptions },
+  ];
+  const toggles = [
+    { key: 'mine', label: t('mine'), value: mine, onChange: setMine },
+    ...(isStores ? [] : [{ key: 'archived', label: t('archivedList'), value: archived, onChange: setArchived }]),
+  ];
+  const resetFilters = () => {
+    setMine(false);
+    if (isStores) { setSCity(''); setSZone(''); setSTour(''); setSOngoing(''); setSStatus(''); } else { setStatus(''); setArchived(false); }
+  };
+  const chips = [
+    ...groups.filter((g) => g.value).map((g) => ({
+      key: g.key, onRemove: () => g.onChange(''),
+      label: `${g.label}: ${g.key === 'zone' ? nameOf(zones.data, g.value) : g.key === 'tour' ? nameOf(tours.data, g.value) : g.key === 'ongoing' ? nameOf(ongoing.data, g.value) : g.key === 'city' ? g.value : g.options.find((o) => o.value === g.value)?.label ?? g.value}`,
+    })),
+    ...toggles.filter((x) => x.value).map((x) => ({ key: x.key, label: x.label, onRemove: () => x.onChange(false) })),
+  ];
+  const sortOptions = isStores
+    ? [{ value: 'name', label: t('sortName') }, { value: 'city', label: t('sortCity') }, { value: 'spaces', label: t('sortSpaces') }]
+    : [{ value: 'name', label: t('sortName') }, { value: 'recent', label: t('sortRecent') }, { value: 'value', label: t('sortValue') }];
 
   return (
     <div>
@@ -94,35 +140,22 @@ export default function CustomersPage() {
         ))}
       </div>
 
-      <div className="mb-3 flex items-center gap-2 rounded-xl border border-border bg-surface px-3.5">
-        <Search size={18} className="text-muted" />
-        <input value={q} onChange={(e) => setQ(e.target.value)} placeholder={view === 'stores' ? t('searchStores') : t('search')} className="w-full bg-transparent py-3 outline-none" />
-        {q && <button onClick={() => setQ('')} aria-label="clear"><X size={18} className="text-muted" /></button>}
-        {query.isFetching && !query.isFetchingNextPage && <Loader2 size={16} className="animate-spin text-muted" />}
+      {/* Toolbar: search + filters + sort (+ expand on the tree) */}
+      <div className="mb-3 flex items-center gap-2">
+        <div className="flex h-11 min-w-0 flex-1 items-center gap-2 rounded-xl border border-border bg-surface px-3.5">
+          <Search size={18} className="shrink-0 text-muted" />
+          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder={isStores ? t('searchStores') : t('search')} className="w-full min-w-0 bg-transparent outline-none" />
+          {q && <button onClick={() => setQ('')} aria-label="clear"><X size={18} className="text-muted" /></button>}
+          {query.isFetching && !query.isFetchingNextPage && <Loader2 size={16} className="animate-spin text-muted" />}
+        </div>
+        <FilterMenu groups={groups} toggles={toggles} onReset={resetFilters} />
+        <SortMenu value={isStores ? sSort : sort} options={sortOptions} onChange={isStores ? setSSort : setSort} />
+        {view === 'tree' && <ExpandToggle mode={expand} onChange={setExpand} />}
       </div>
-
-      {view !== 'stores' && (
-        <>
-          <div className="mb-3">
-            <Segmented value={status} onChange={setStatus} options={[
-              { value: 'all', label: t('all') }, { value: 'active', label: t('active') }, { value: 'prospect', label: t('prospects') },
-              { value: 'negotiation', label: t('negotiation') }, { value: 'inactive', label: t('inactive') },
-            ]} />
-          </div>
-          <div className="no-scrollbar mb-4 flex gap-2 overflow-x-auto">
-            {view === 'tree' && <><ExpandToggle mode={expand} onChange={setExpand} /><span className="mx-1 w-px shrink-0 bg-border" /></>}
-            <button onClick={() => setSort('name')} className={chip(sort === 'name')}><ArrowDownAZ size={15} /> {t('sortName')}</button>
-            <button onClick={() => setSort('recent')} className={chip(sort === 'recent')}><Clock size={15} /> {t('sortRecent')}</button>
-            <button onClick={() => setSort('value')} className={chip(sort === 'value')}><Euro size={15} /> {t('sortValue')}</button>
-            <span className="mx-1 w-px shrink-0 bg-border" />
-            <button onClick={() => setMine(!mine)} className={chip(mine)}><UserRound size={15} /> {t('mine')}</button>
-            <button onClick={() => setArchived(!archived)} className={chip(archived)}><Archive size={15} /> {t('archivedList')}</button>
-          </div>
-        </>
-      )}
+      <ActiveFilterChips chips={chips} />
 
       {view === 'tree' ? <CustomerTreeView filters={{ status, sort, mine, archived, q: dq }} mode={expand} />
-      : view === 'stores' ? <StoresView q={dq} mine={mine} />
+      : isStores ? <StoresView filters={{ q: dq, mine, city: sCity, zone: sZone, tour: sTour, ongoing: sOngoing, status: sStatus, sort: sSort }} />
       : query.isLoading ? (
         <div className="space-y-3">{Array.from({ length: 6 }).map((_, i) => <Skeleton key={i} className="h-[84px]" />)}</div>
       ) : rows.length === 0 ? (
@@ -156,7 +189,7 @@ export default function CustomersPage() {
           })}
         </div>
       )}
-      {query.isFetchingNextPage && <div className="flex justify-center py-4"><Loader2 className="animate-spin text-muted" /></div>}
+      {view === 'list' && query.isFetchingNextPage && <div className="flex justify-center py-4"><Loader2 className="animate-spin text-muted" /></div>}
 
       <Link href="/customers/new" aria-label={t('new')}
         className="fixed bottom-24 right-5 z-30 grid h-14 w-14 place-items-center rounded-full bg-primary text-white shadow-xl shadow-primary/40 lg:hidden">

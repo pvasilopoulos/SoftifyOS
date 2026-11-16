@@ -38,11 +38,18 @@ async function currentRole(userId: string, tenantId: string): Promise<string | n
   const k = `${tenantId}:${userId}`;
   const hit = memberships.get(k);
   if (hit && Date.now() - hit.at < MEMBERSHIP_TTL) return hit.role;
-  const [m] = await sql<{ role: string }[]>`SELECT role FROM memberships WHERE tenant_id = ${tenantId} AND user_id = ${userId}`;
+  // One query per user per minute: re-check membership and record "last seen" for the Users screen
+  const [m] = await sql<{ role: string }[]>`
+    UPDATE memberships SET last_seen_at = now() WHERE tenant_id = ${tenantId} AND user_id = ${userId} RETURNING role`;
   const role = m?.role ?? null;
   if (memberships.size > 50_000) memberships.clear();
   memberships.set(k, { role, at: Date.now() });
   return role;
+}
+
+/** Role change / removal: take effect on this instance immediately (others within MEMBERSHIP_TTL). */
+export function invalidateMembership(userId: string, tenantId: string) {
+  memberships.delete(`${tenantId}:${userId}`);
 }
 
 export async function requireAuth(req: FastifyRequest, reply: FastifyReply) {

@@ -25,7 +25,10 @@ const addressSchema = z.object({
 
 const customerSchema = z.object({
   kind: z.enum(['group', 'company']),
+  // Optional on create (auto CUST-000123 when empty); editable, unique per tenant
+  code: z.string().trim().max(40).regex(/^[\p{L}\p{N}._\/-]+$/u, 'invalid_code').nullish().or(z.literal('')).transform((v) => (v ? v : null)),
   name: z.string().trim().min(2).max(200),
+  geo_zone_id: z.string().uuid().nullish().transform((v) => v ?? null),
   trade_name: opt(200),
   vat: opt(20),
   tax_office: opt(100),
@@ -94,9 +97,18 @@ async function validParent(tx: Tx, id: string | null, parentId: string | null) {
   return !cycle;
 }
 
+type LookupList = 'geo_zone' | 'fee_schedule' | 'tour' | 'ongoing_status';
+/** A referenced value must exist in the right list (RLS already limits it to this tenant). */
+async function validLookup(tx: Tx, id: string | null | undefined, list: LookupList) {
+  if (!id) return true;
+  const [r] = await tx`SELECT 1 FROM lookup_values WHERE id = ${id} AND list = ${list}`;
+  return !!r;
+}
+
 function columns(c: CustomerInput) {
-  const { billing_address, tags, ...rest } = c;
-  return { ...rest, tags, billing_address };
+  const { billing_address, tags, code, ...rest } = c;
+  // code is only written when given (create: auto-generated otherwise; update: unchanged)
+  return { ...rest, tags, billing_address, ...(code ? { code } : {}) };
 }
 
 export default async function customerRoutes(app: FastifyInstance) {
@@ -145,7 +157,12 @@ export default async function customerRoutes(app: FastifyInstance) {
                companies_count, branches_count, spaces_count, created_at, archived_at
                ${withBranches ? tx`, (
                  SELECT coalesce(json_agg(x ORDER BY x.name), '[]') FROM (
-                   SELECT b.id, b.name, b.city, b.address, b.status, b.spaces_count,
+                   SELECT b.id, b.name, b.trade_name, b.city, b.region, b.address, b.postal_code, b.phone, b.manager_name,
+                          b.status, b.spaces_count, b.geo_zone_id, b.fee_schedule_id, b.tour_id, b.ongoing_status_id, b.seasonality, b.season_months,
+                          (SELECT name FROM lookup_values WHERE id = b.ongoing_status_id) AS ongoing_status_name,
+                          (SELECT name FROM lookup_values WHERE id = b.geo_zone_id) AS geo_zone_name,
+                          (SELECT name FROM lookup_values WHERE id = b.fee_schedule_id) AS fee_schedule_name,
+                          (SELECT name FROM lookup_values WHERE id = b.tour_id) AS tour_name,
                           (SELECT count(*) FROM offers o WHERE o.branch_id = b.id
                             AND o.status IN ('draft','in_progress','pending_approval','approved','sent'))::int AS open_offers,
                           (SELECT coalesce(json_agg(json_build_object('id', sp.id, 'name', sp.name, 'kind', sp.kind, 'area_sqm', sp.area_sqm)
@@ -180,6 +197,9 @@ export default async function customerRoutes(app: FastifyInstance) {
       city: z.string().trim().max(100).optional(),
       status: z.enum(['active', 'inactive']).optional(),
       manager: z.literal('me').optional(),
+      zone: z.string().uuid().optional(),
+      tour: z.string().uuid().optional(),
+      ongoing: z.string().uuid().optional(),
       sort: z.enum(['name', 'city', 'spaces']).default('name'),
       cursor: z.string().optional(),
       limit: z.coerce.number().int().min(1).max(100).default(40),
@@ -197,13 +217,20 @@ export default async function customerRoutes(app: FastifyInstance) {
         : q.sort === 'spaces' ? tx`AND (b.spaces_count, b.id) < (${Number(cur[0])}, ${cur[1]}::uuid)`
         : tx`AND (b.name, b.id) > (${cur[0]}, ${cur[1]}::uuid)`;
       const rows = await tx`
-        SELECT b.id, b.name, b.city, b.address, b.postal_code, b.phone, b.status, b.spaces_count,
+        SELECT b.id, b.name, b.trade_name, b.city, b.region, b.address, b.postal_code, b.phone, b.status, b.spaces_count,
+               b.seasonality, b.season_months,
                b.customer_id, c.name AS customer_name, c.status AS customer_status,
+               (SELECT name FROM lookup_values WHERE id = b.geo_zone_id) AS geo_zone_name,
+               (SELECT name FROM lookup_values WHERE id = b.tour_id) AS tour_name,
+               (SELECT name FROM lookup_values WHERE id = b.ongoing_status_id) AS ongoing_status_name,
                (SELECT count(*) FROM offers o WHERE o.branch_id = b.id
                  AND o.status IN ('draft','in_progress','pending_approval','approved','sent'))::int AS open_offers
         FROM branches b JOIN customers c ON c.id = b.customer_id
         WHERE b.tenant_id = ${T} AND c.archived_at IS NULL
           ${q.status ? tx`AND b.status = ${q.status}` : tx``}
+          ${q.zone ? tx`AND b.geo_zone_id = ${q.zone}` : tx``}
+          ${q.tour ? tx`AND b.tour_id = ${q.tour}` : tx``}
+          ${q.ongoing ? tx`AND b.ongoing_status_id = ${q.ongoing}` : tx``}
           ${q.city ? tx`AND b.city_key = ${searchKey(q.city)}` : tx``}
           ${q.manager ? tx`AND c.account_manager_id = ${s.userId}` : tx``}
           ${key ? tx`AND (b.search LIKE ${key} OR b.customer_id IN (SELECT id FROM customers WHERE tenant_id = ${T} AND search LIKE ${key}))` : tx``}
@@ -255,10 +282,11 @@ export default async function customerRoutes(app: FastifyInstance) {
     const T = req.session.tenantId;
     return withTenant(T, async (tx) => {
       const [customer] = await tx`
-        SELECT c.*, u.full_name AS account_manager_name, p.name AS parent_name
+        SELECT c.*, u.full_name AS account_manager_name, p.name AS parent_name, gz.name AS geo_zone_name
         FROM customers c
         LEFT JOIN users u ON u.id = c.account_manager_id
         LEFT JOIN customers p ON p.id = c.parent_id
+        LEFT JOIN lookup_values gz ON gz.id = c.geo_zone_id
         WHERE c.id = ${id}`;
       if (!customer) return reply.code(404).send({ error: 'not_found' });
       const { search: _s, ...profile } = customer;
@@ -272,12 +300,18 @@ export default async function customerRoutes(app: FastifyInstance) {
         FROM offers WHERE tenant_id = ${T} AND customer_id = ${id}`;
       const decided = stats.won_offers + stats.lost_offers;
       const branches = await tx`
-        SELECT b.id, b.name, b.city, b.address, b.postal_code, b.phone, b.manager_name, b.status, b.spaces_count,
+        SELECT b.id, b.name, b.trade_name, b.city, b.region, b.address, b.postal_code, b.phone, b.manager_name, b.status, b.spaces_count,
+               b.geo_zone_id, b.fee_schedule_id, b.tour_id, b.ongoing_status_id, b.seasonality, b.season_months,
+               gz.name AS geo_zone_name, fs.name AS fee_schedule_name, tr.name AS tour_name, os.name AS ongoing_status_name,
                coalesce(json_agg(json_build_object('id', s.id, 'name', s.name, 'kind', s.kind, 'area_sqm', s.area_sqm, 'notes', s.notes)
                         ORDER BY s.name) FILTER (WHERE s.id IS NOT NULL), '[]') AS spaces
         FROM branches b LEFT JOIN spaces s ON s.branch_id = b.id
+        LEFT JOIN lookup_values gz ON gz.id = b.geo_zone_id
+        LEFT JOIN lookup_values fs ON fs.id = b.fee_schedule_id
+        LEFT JOIN lookup_values tr ON tr.id = b.tour_id
+        LEFT JOIN lookup_values os ON os.id = b.ongoing_status_id
         WHERE b.tenant_id = ${T} AND b.customer_id = ${id}
-        GROUP BY b.id ORDER BY b.name LIMIT 200`;
+        GROUP BY b.id, gz.name, fs.name, tr.name, os.name ORDER BY b.name LIMIT 200`;
       const contacts = await tx`
         SELECT id, full_name, role_title, email, phone, mobile, is_primary, notes
         FROM contacts WHERE tenant_id = ${T} AND customer_id = ${id}
@@ -302,7 +336,19 @@ export default async function customerRoutes(app: FastifyInstance) {
     const s = req.session;
     const res = await withTenant(s.tenantId, async (tx) => {
       if (!(await validParent(tx, null, c.parent_id))) return { error: 'invalid_parent' as const };
-      // Sequential, human-friendly code per tenant (retries if an older code is already taken)
+      if (!(await validLookup(tx, c.geo_zone_id, 'geo_zone'))) return { error: 'invalid_geo_zone' as const };
+      // User-given code
+      if (c.code) {
+        const [taken] = await tx`SELECT 1 FROM customers WHERE tenant_id = ${s.tenantId} AND code = ${c.code}`;
+        if (taken) return { error: 'code_taken' as const };
+        const [row] = await tx`
+          INSERT INTO customers ${tx({ ...columns(c), tenant_id: s.tenantId, account_manager_id: c.account_manager_id ?? s.userId })}
+          RETURNING id, name, code, parent_id`;
+        await log(tx, s, row.id, 'note', 'Δημιουργία πελάτη', row.code);
+        if (row.parent_id) await refreshCounts(tx, row.parent_id);
+        return { customer: row };
+      }
+      // Otherwise: sequential, human-friendly code per tenant (retries if an older code is already taken)
       for (let attempt = 0; attempt < 20; attempt++) {
         const [{ value }] = await tx`
           INSERT INTO tenant_counters (tenant_id, key, value) VALUES (${s.tenantId}, 'customer_seq', 1)
@@ -319,7 +365,7 @@ export default async function customerRoutes(app: FastifyInstance) {
       }
       return { error: 'code_exhausted' as const };
     });
-    if ('error' in res) return reply.code(400).send({ error: res.error });
+    if ('error' in res) return reply.code(res.error === 'code_taken' ? 409 : 400).send({ error: res.error });
     await publish({ tenantId: s.tenantId, type: 'customer.created', data: { id: res.customer.id } });
     return reply.code(201).send(res.customer);
   });
@@ -331,16 +377,25 @@ export default async function customerRoutes(app: FastifyInstance) {
     const c = customerSchema.parse(req.body);
     const s = req.session;
     const res = await withTenant(s.tenantId, async (tx) => {
-      const [old] = await tx`SELECT parent_id, status, name FROM customers WHERE id = ${id} FOR UPDATE`;
-      if (!old) return 404;
-      if (!(await validParent(tx, id, c.parent_id))) return 400;
+      const [old] = await tx`SELECT parent_id, status, name, code FROM customers WHERE id = ${id} FOR UPDATE`;
+      if (!old) return { code: 404, error: 'not_found' };
+      if (!(await validParent(tx, id, c.parent_id))) return { code: 400, error: 'invalid_parent' };
+      if (!(await validLookup(tx, c.geo_zone_id, 'geo_zone'))) return { code: 400, error: 'invalid_geo_zone' };
+      if (c.code && c.code !== old.code) {
+        const [taken] = await tx`SELECT 1 FROM customers WHERE tenant_id = ${s.tenantId} AND code = ${c.code} AND id <> ${id}`;
+        if (taken) return { code: 409, error: 'code_taken' };
+      }
       await tx`UPDATE customers SET ${tx(columns(c))}, updated_at = now() WHERE id = ${id}`;
-      const changes = [old.status !== c.status && `Κατάσταση: ${old.status} → ${c.status}`, old.name !== c.name && `Επωνυμία: ${c.name}`].filter(Boolean).join(' · ');
+      const changes = [
+        old.status !== c.status && `Κατάσταση: ${old.status} → ${c.status}`,
+        old.name !== c.name && `Επωνυμία: ${c.name}`,
+        c.code && old.code !== c.code && `Κωδικός: ${old.code} → ${c.code}`,
+      ].filter(Boolean).join(' · ');
       await log(tx, s, id, 'note', 'Ενημέρωση στοιχείων', changes || null);
       for (const p of new Set([old.parent_id, c.parent_id].filter(Boolean))) await refreshCounts(tx, p as string);
-      return 200;
+      return { code: 200, error: null };
     });
-    if (res !== 200) return reply.code(res).send({ error: res === 404 ? 'not_found' : 'invalid_parent' });
+    if (res.code !== 200) return reply.code(res.code).send({ error: res.error });
     await publish({ tenantId: s.tenantId, type: 'customer.updated', data: { id } });
     return { ok: true };
   });
@@ -404,10 +459,29 @@ export default async function customerRoutes(app: FastifyInstance) {
   });
 
   // ---- Branches ----
+  const uuidOrNull = z.string().uuid().nullish().transform((v) => v ?? null);
   const branchSchema = z.object({
-    name: z.string().trim().min(1).max(200), city: opt(100), address: opt(200), postal_code: opt(20),
+    name: z.string().trim().min(1).max(200), trade_name: opt(200),
+    city: opt(100), region: opt(100), address: opt(200), postal_code: opt(20),
     phone: opt(40), manager_name: opt(120), status: z.enum(['active', 'inactive']).default('active'),
-  });
+    geo_zone_id: uuidOrNull, fee_schedule_id: uuidOrNull, tour_id: uuidOrNull, ongoing_status_id: uuidOrNull,
+    seasonality: z.enum(['all_year', 'summer', 'winter', 'custom']).default('all_year'),
+    season_months: z.array(z.coerce.number().int().min(1).max(12)).max(12).default([]),
+  }).transform((b) => ({
+    ...b,
+    // months only matter for "custom"; keep them sorted and unique
+    season_months: b.seasonality === 'custom' ? [...new Set(b.season_months)].sort((x, y) => x - y) : [],
+  }));
+  type BranchInput = z.infer<typeof branchSchema>;
+
+  async function branchLookupsValid(tx: Tx, b: BranchInput) {
+    return (await validLookup(tx, b.geo_zone_id, 'geo_zone'))
+      && (await validLookup(tx, b.fee_schedule_id, 'fee_schedule'))
+      && (await validLookup(tx, b.tour_id, 'tour'))
+      && (await validLookup(tx, b.ongoing_status_id, 'ongoing_status'));
+  }
+  // postgres.js needs an explicit smallint[] for the months array
+  const branchRow = (tx: Tx, b: BranchInput) => ({ ...b, season_months: tx.array(b.season_months, 21 /* smallint */) as unknown as number[] });
 
   app.post('/customers/:id/branches', async (req, reply) => {
     if (!hasRole(req.session, 'sales')) return reply.code(403).send({ error: 'forbidden' });
@@ -415,23 +489,48 @@ export default async function customerRoutes(app: FastifyInstance) {
     const b = branchSchema.parse(req.body);
     const s = req.session;
     const row = await withTenant(s.tenantId, async (tx) => {
-      const [r] = await tx`INSERT INTO branches ${tx({ ...b, tenant_id: s.tenantId, customer_id: id })} RETURNING id`;
+      if (!(await branchLookupsValid(tx, b))) return null;
+      const [r] = await tx`INSERT INTO branches ${tx({ ...branchRow(tx, b), tenant_id: s.tenantId, customer_id: id })} RETURNING id`;
       await log(tx, s, id, 'note', 'Νέο κατάστημα', b.name);
       await refreshCounts(tx, id);
       return r;
     });
-    return reply.code(201).send(row);
+    return row ? reply.code(201).send(row) : reply.code(400).send({ error: 'invalid_lookup' });
   });
 
   app.put('/branches/:id', async (req, reply) => {
     if (!hasRole(req.session, 'sales')) return reply.code(403).send({ error: 'forbidden' });
     const { id } = idParam.parse(req.params);
     const b = branchSchema.parse(req.body);
-    const ok = await withTenant(req.session.tenantId, async (tx) => {
-      const [r] = await tx`UPDATE branches SET ${tx(b)} WHERE id = ${id} RETURNING id`;
-      return !!r;
+    const res = await withTenant(req.session.tenantId, async (tx) => {
+      if (!(await branchLookupsValid(tx, b))) return 400;
+      const [r] = await tx`UPDATE branches SET ${tx(branchRow(tx, b))} WHERE id = ${id} RETURNING id`;
+      return r ? 200 : 404;
     });
-    return ok ? { ok } : reply.code(404).send({ error: 'not_found' });
+    return res === 200 ? { ok: true } : reply.code(res).send({ error: res === 404 ? 'not_found' : 'invalid_lookup' });
+  });
+
+  // ---- Value lists (geographic zones, fee schedules, field tours) ----
+  const listParam = z.enum(['geo_zone', 'fee_schedule', 'tour', 'ongoing_status']);
+  app.get('/lookups', async (req) => {
+    const { list } = z.object({ list: listParam }).parse(req.query);
+    const T = req.session.tenantId;
+    return withTenant(T, (tx) => tx`
+      SELECT id, name, sort, active FROM lookup_values WHERE tenant_id = ${T} AND list = ${list} ORDER BY sort, name`);
+  });
+
+  app.post('/lookups', async (req, reply) => {
+    if (!hasRole(req.session, 'sales')) return reply.code(403).send({ error: 'forbidden' });
+    const b = z.object({ list: listParam, name: z.string().trim().min(1).max(80) }).parse(req.body);
+    const T = req.session.tenantId;
+    const row = await withTenant(T, async (tx) => {
+      const [existing] = await tx`SELECT id, name FROM lookup_values WHERE tenant_id = ${T} AND list = ${b.list} AND search_key(name) = search_key(${b.name})`;
+      if (existing) return existing; // same value typed again: reuse it
+      const [{ next }] = await tx`SELECT coalesce(max(sort), 0) + 1 AS next FROM lookup_values WHERE tenant_id = ${T} AND list = ${b.list}`;
+      const [r] = await tx`INSERT INTO lookup_values (tenant_id, list, name, sort) VALUES (${T}, ${b.list}, ${b.name}, ${next}) RETURNING id, name`;
+      return r;
+    });
+    return reply.code(201).send(row);
   });
 
   app.delete('/branches/:id', async (req, reply) => {

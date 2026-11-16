@@ -27,7 +27,7 @@ export async function seedDemoBranches(sql: postgres.Sql, tenantIds: string[], l
              '210' || lpad(((c.rn * 7919 + g) % 10000000)::text, 7, '0'),
              CASE WHEN (c.rn + g) % 11 = 0 THEN 'inactive' ELSE 'active' END
       FROM c CROSS JOIN LATERAL generate_series(1, 1 + (c.rn % 4)::int) g
-      WHERE c.rn % 3 <> 0
+      WHERE abs(hashtext(c.id::text)) % 3 <> 0  -- deterministic: re-runs skip the same customers
       RETURNING 1)
     SELECT count(*)::int AS n FROM ins`;
   log(`demo stores: ${b.n.toLocaleString()}`);
@@ -63,6 +63,52 @@ export async function seedDemoBranches(sql: postgres.Sql, tenantIds: string[], l
   log('demo store counters updated');
 }
 
+// City → [prefecture, geographic zone] for the demo cities
+const CITY_GEO: Record<string, [string, string]> = {
+  'Αθήνα': ['Αττικής', 'Αττική'], 'Πειραιάς': ['Αττικής', 'Αττική'], 'Μαρούσι': ['Αττικής', 'Αττική'], 'Γλυφάδα': ['Αττικής', 'Αττική'],
+  'Κηφισιά': ['Αττικής', 'Αττική'], 'Περιστέρι': ['Αττικής', 'Αττική'], 'Χαλάνδρι': ['Αττικής', 'Αττική'],
+  'Θεσσαλονίκη': ['Θεσσαλονίκης', 'Βόρεια Ελλάδα'], 'Σέρρες': ['Σερρών', 'Βόρεια Ελλάδα'], 'Καβάλα': ['Καβάλας', 'Βόρεια Ελλάδα'],
+  'Αλεξανδρούπολη': ['Έβρου', 'Βόρεια Ελλάδα'], 'Λάρισα': ['Λαρίσης', 'Κεντρική Ελλάδα'], 'Βόλος': ['Μαγνησίας', 'Κεντρική Ελλάδα'],
+  'Ιωάννινα': ['Ιωαννίνων', 'Δυτική Ελλάδα'], 'Πάτρα': ['Αχαΐας', 'Δυτική Ελλάδα'], 'Καλαμάτα': ['Μεσσηνίας', 'Πελοπόννησος'],
+  'Ηράκλειο': ['Ηρακλείου', 'Κρήτη'], 'Χανιά': ['Χανίων', 'Κρήτη'], 'Ρόδος': ['Δωδεκανήσου', 'Νησιά Αιγαίου'], 'Κέρκυρα': ['Κερκύρας', 'Ιόνια Νησιά'],
+};
+const TOURS: Record<string, string> = {
+  'Αττική': 'Εξόρμηση Αττικής', 'Βόρεια Ελλάδα': 'Εξόρμηση Βορείου Ελλάδος', 'Κεντρική Ελλάδα': 'Εξόρμηση Κεντρικής Ελλάδος',
+  'Κρήτη': 'Εξόρμηση Κρήτης', 'Νησιά Αιγαίου': 'Εξόρμηση Νησιών', 'Ιόνια Νησιά': 'Εξόρμηση Νησιών',
+};
+
+/** Fill prefecture / zone / fee schedule / tour / seasonality on demo stores that don't have them yet. */
+export async function seedDemoBranchAttributes(sql: postgres.Sql, tenantIds: string[], log: (m: string) => void = console.log) {
+  for (const T of tenantIds) {
+    await sql`SELECT provision_lookups(${T})`;
+    for (const name of ['Βασικό αμοιβολόγιο', 'Premium αμοιβολόγιο', 'Αμοιβολόγιο νησιών']) {
+      await sql`INSERT INTO lookup_values (tenant_id, list, name) VALUES (${T}, 'fee_schedule', ${name}) ON CONFLICT DO NOTHING`;
+    }
+    for (const name of new Set(Object.values(TOURS))) {
+      await sql`INSERT INTO lookup_values (tenant_id, list, name) VALUES (${T}, 'tour', ${name}) ON CONFLICT DO NOTHING`;
+    }
+    const map = Object.entries(CITY_GEO).map(([city, [region, zone]]) => ({ city, region, zone, tour: TOURS[zone] ?? null }));
+    const [r] = await sql`
+      WITH m AS (SELECT * FROM jsonb_to_recordset(${sql.json(map)}::jsonb) AS x(city text, region text, zone text, tour text)),
+      upd AS (
+        UPDATE branches b SET
+          region = m.region,
+          geo_zone_id = (SELECT id FROM lookup_values WHERE tenant_id = b.tenant_id AND list = 'geo_zone' AND name = m.zone),
+          -- every 3rd store is on a field tour of its zone
+          tour_id = CASE WHEN abs(hashtext(b.id::text)) % 3 = 0
+                         THEN (SELECT id FROM lookup_values WHERE tenant_id = b.tenant_id AND list = 'tour' AND name = m.tour) END,
+          fee_schedule_id = (SELECT id FROM lookup_values WHERE tenant_id = b.tenant_id AND list = 'fee_schedule'
+                             AND name = CASE WHEN m.zone IN ('Νησιά Αιγαίου','Ιόνια Νησιά','Κρήτη') THEN 'Αμοιβολόγιο νησιών'
+                                             WHEN abs(hashtext(b.id::text)) % 4 = 0 THEN 'Premium αμοιβολόγιο' ELSE 'Βασικό αμοιβολόγιο' END),
+          seasonality = CASE WHEN m.zone IN ('Νησιά Αιγαίου','Ιόνια Νησιά') THEN 'summer' ELSE 'all_year' END
+        FROM m
+        WHERE b.tenant_id = ${T} AND b.city = m.city AND b.region IS NULL
+        RETURNING 1)
+      SELECT count(*)::int AS n FROM upd`;
+    log(`demo store attributes: ${r.n.toLocaleString()} stores`);
+  }
+}
+
 // CLI: npm run db:seed:branches
 if (import.meta.url === `file:///${process.argv[1]?.replace(/\\/g, '/')}` || process.argv[1]?.endsWith('demo-branches.ts')) {
   const url = process.env.DATABASE_URL;
@@ -75,6 +121,7 @@ if (import.meta.url === `file:///${process.argv[1]?.replace(/\\/g, '/')}` || pro
   const tenants = await sql<{ id: string }[]>`SELECT id FROM tenants WHERE slug = 'acme-demo' OR slug LIKE 'tenant-%'`;
   const t0 = Date.now();
   await seedDemoBranches(sql, tenants.map((t) => t.id));
+  await seedDemoBranchAttributes(sql, tenants.map((t) => t.id));
   await sql`ANALYZE branches`;
   await sql`ANALYZE spaces`;
   console.log(`✓ done in ${((Date.now() - t0) / 1000).toFixed(1)}s`);

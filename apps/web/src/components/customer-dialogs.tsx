@@ -7,6 +7,8 @@ import clsx from 'clsx';
 import { api, ApiError } from '@/lib/api';
 import type { Branch, Contact, Space } from '@/lib/customers';
 import { IconButton } from './ui';
+import { LookupSelect, PrefecturesDatalist } from './lookup-select';
+import { PREFECTURES_LIST_ID } from '@/lib/greece';
 
 const input = 'w-full min-w-0 rounded-xl border border-border bg-surface-2 px-3 py-2.5 outline-none focus:border-primary';
 
@@ -66,14 +68,30 @@ function useSave(customerId: string, onDone: () => void) {
   return { run: m.mutate, busy: m.isPending, error };
 }
 
-export function BranchDialog({ customerId, branch, onClose }: { customerId: string; branch?: Branch; onClose: () => void }) {
+type BranchForm = {
+  name: string; trade_name: string; address: string; city: string; postal_code: string; region: string;
+  geo_zone_id: string | null; fee_schedule_id: string | null; tour_id: string | null; ongoing_status_id: string | null;
+  seasonality: Branch['seasonality']; season_months: number[];
+  phone: string; manager_name: string; status: 'active' | 'inactive';
+};
+
+/** Store record used by the dialog: the customer card and the tree send what they have. */
+export type BranchLike = Partial<Branch> & { id: string; name: string };
+
+export function BranchDialog({ customerId, branch, onClose }: { customerId: string; branch?: BranchLike; onClose: () => void }) {
   const t = useTranslations('customer');
-  const [v, setV] = useState({
-    name: branch?.name ?? '', city: branch?.city ?? '', address: branch?.address ?? '', postal_code: branch?.postal_code ?? '',
+  const months = useTranslations('customer').raw('months') as string[];
+  const [v, setV] = useState<BranchForm>({
+    name: branch?.name ?? '', trade_name: branch?.trade_name ?? '', address: branch?.address ?? '', city: branch?.city ?? '',
+    postal_code: branch?.postal_code ?? '', region: branch?.region ?? '',
+    geo_zone_id: branch?.geo_zone_id ?? null, fee_schedule_id: branch?.fee_schedule_id ?? null, tour_id: branch?.tour_id ?? null, ongoing_status_id: branch?.ongoing_status_id ?? null,
+    seasonality: branch?.seasonality ?? 'all_year', season_months: branch?.season_months ?? [],
     phone: branch?.phone ?? '', manager_name: branch?.manager_name ?? '', status: (branch?.status ?? 'active') as 'active' | 'inactive',
   });
   const { run, busy, error } = useSave(customerId, onClose);
-  const set = (k: keyof typeof v) => (e: React.ChangeEvent<HTMLInputElement>) => setV((x) => ({ ...x, [k]: e.target.value }));
+  const set = (k: keyof BranchForm) => (e: React.ChangeEvent<HTMLInputElement>) => setV((x) => ({ ...x, [k]: e.target.value }));
+  const toggleMonth = (m: number) => setV((x) => ({ ...x, season_months: x.season_months.includes(m) ? x.season_months.filter((y) => y !== m) : [...x.season_months, m] }));
+  const Head = ({ children }: { children: ReactNode }) => <div className="mt-2 border-t border-border pt-3 text-xs font-semibold uppercase tracking-wide text-muted sm:col-span-2">{children}</div>;
   return (
     <Dialog title={branch ? t('editBranch') : t('addBranch')} onClose={onClose}>
       <form className="grid grid-cols-1 gap-3 sm:grid-cols-2" onSubmit={(e) => {
@@ -81,13 +99,41 @@ export function BranchDialog({ customerId, branch, onClose }: { customerId: stri
         run(() => branch ? api(`/branches/${branch.id}`, { method: 'PUT', json: v }) : api(`/customers/${customerId}/branches`, { method: 'POST', json: v }));
       }}>
         <F label={`${t('branchName')} *`} wide><input required autoFocus className={input} value={v.name} onChange={set('name')} /></F>
+        <F label={t('branchTradeName')} wide><input className={input} value={v.trade_name} onChange={set('trade_name')} /></F>
+
+        <Head>{t('sLocation')}</Head>
         <F label={t('street')} wide><input className={input} value={v.address} onChange={set('address')} /></F>
         <F label={t('city')}><input className={input} value={v.city} onChange={set('city')} /></F>
-        <F label={t('postal')}><input className={input} value={v.postal_code} onChange={set('postal_code')} /></F>
+        <F label={t('postal')}><input className={input} inputMode="numeric" value={v.postal_code} onChange={set('postal_code')} /></F>
+        <F label={t('prefecture')}><input className={input} list={PREFECTURES_LIST_ID} value={v.region} onChange={set('region')} /></F>
+        <F label={t('geoZone')}><LookupSelect list="geo_zone" className={input} value={v.geo_zone_id} onChange={(id) => setV((x) => ({ ...x, geo_zone_id: id }))} /></F>
+
+        <Head>{t('sCommercial')}</Head>
+        <F label={t('ongoingStatus')} wide><LookupSelect list="ongoing_status" className={input} value={v.ongoing_status_id} onChange={(id) => setV((x) => ({ ...x, ongoing_status_id: id }))} /></F>
+        <F label={t('feeSchedule')}><LookupSelect list="fee_schedule" className={input} value={v.fee_schedule_id} onChange={(id) => setV((x) => ({ ...x, fee_schedule_id: id }))} /></F>
+        <F label={t('tour')}><LookupSelect list="tour" className={input} value={v.tour_id} onChange={(id) => setV((x) => ({ ...x, tour_id: id }))} /></F>
+        <F label={t('seasonality')} wide>
+          <select className={input} value={v.seasonality} onChange={(e) => setV((x) => ({ ...x, seasonality: e.target.value as BranchForm['seasonality'] }))}>
+            {(['all_year', 'summer', 'winter', 'custom'] as const).map((s) => <option key={s} value={s}>{t(`seasons.${s}`)}</option>)}
+          </select>
+        </F>
+        {v.seasonality === 'custom' && (
+          <div className="grid grid-cols-6 gap-1.5 sm:col-span-2">
+            {months.map((m, i) => (
+              <button key={m} type="button" onClick={() => toggleMonth(i + 1)} aria-pressed={v.season_months.includes(i + 1)}
+                className={clsx('rounded-lg border py-2 text-xs font-medium', v.season_months.includes(i + 1) ? 'border-primary bg-primary-soft text-primary' : 'border-border')}>
+                {m}
+              </button>
+            ))}
+          </div>
+        )}
+
+        <Head>{t('sContact')}</Head>
         <F label={t('phone')}><input type="tel" className={input} value={v.phone} onChange={set('phone')} /></F>
         <F label={t('branchManager')}><input className={input} value={v.manager_name} onChange={set('manager_name')} /></F>
+        <PrefecturesDatalist />
         <Actions busy={busy} error={error} onCancel={onClose}
-          onDelete={branch ? () => { if (confirm(t('confirmDelete'))) run(() => api(`/branches/${branch.id}`, { method: 'DELETE' })); } : undefined} />
+          onDelete={branch ? () => { if (confirm(t('confirmDeleteBranch', { name: branch.name }))) run(() => api(`/branches/${branch.id}`, { method: 'DELETE' })); } : undefined} />
       </form>
     </Dialog>
   );

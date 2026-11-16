@@ -9,7 +9,7 @@ const tone: Record<string, string> = {
   prospect: 'bg-info-soft text-info', sent: 'bg-info-soft text-info',
   negotiation: 'bg-warning-soft text-warning', pending_approval: 'bg-warning-soft text-warning', pending: 'bg-warning-soft text-warning',
   in_progress: 'bg-primary-soft text-primary', draft: 'bg-surface-2 text-muted',
-  inactive: 'bg-surface-2 text-muted', rejected: 'bg-danger-soft text-danger',
+  inactive: 'bg-danger-soft text-danger', rejected: 'bg-danger-soft text-danger',
 };
 
 export function StatusBadge({ status }: { status: string }) {

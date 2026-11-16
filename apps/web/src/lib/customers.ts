@@ -2,7 +2,11 @@ import { emptyCustomer, type CustomerFormValues } from '@/components/customer-fo
 
 export type Space = { id: string; name: string; kind: string; area_sqm: string | null; notes: string | null };
 export type Branch = {
-  id: string; name: string; city: string | null; address: string | null; postal_code: string | null; phone: string | null;
+  id: string; name: string; trade_name: string | null; region: string | null;
+  geo_zone_id: string | null; fee_schedule_id: string | null; tour_id: string | null; ongoing_status_id: string | null;
+  geo_zone_name: string | null; fee_schedule_name: string | null; tour_name: string | null; ongoing_status_name: string | null;
+  seasonality: 'all_year' | 'summer' | 'winter' | 'custom'; season_months: number[];
+  city: string | null; address: string | null; postal_code: string | null; phone: string | null;
   manager_name: string | null; status: string; spaces_count: number; spaces: Space[];
 };
 export type Contact = {
@@ -10,7 +14,7 @@ export type Contact = {
   is_primary: boolean; notes: string | null;
 };
 export type CustomerProfile = {
-  id: string; code: string; kind: 'group' | 'company'; name: string; trade_name: string | null; vat: string | null;
+  id: string; code: string; kind: 'group' | 'company'; name: string; geo_zone_id: string | null; geo_zone_name: string | null; trade_name: string | null; vat: string | null;
   tax_office: string | null; gemi: string | null; activity: string | null; status: CustomerFormValues['status'];
   category: string | null; tags: string[]; source: string | null; parent_id: string | null; parent_name: string | null;
   account_manager_id: string | null; account_manager_name: string | null;
@@ -37,7 +41,7 @@ export function toFormValues(c: CustomerProfile): CustomerFormValues {
   const b = c.billing_address;
   return {
     ...emptyCustomer(),
-    kind: c.kind, name: c.name, trade_name: s(c.trade_name), vat: s(c.vat), tax_office: s(c.tax_office), gemi: s(c.gemi),
+    kind: c.kind, code: c.code, geo_zone_id: c.geo_zone_id, name: c.name, trade_name: s(c.trade_name), vat: s(c.vat), tax_office: s(c.tax_office), gemi: s(c.gemi),
     activity: s(c.activity), status: c.status, category: s(c.category), tags: c.tags ?? [], source: s(c.source),
     parent_id: c.parent_id, parent_name: c.parent_name, account_manager_id: c.account_manager_id,
     email: s(c.email), phone: s(c.phone), mobile: s(c.mobile), website: s(c.website),

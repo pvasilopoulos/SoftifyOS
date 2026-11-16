@@ -7,9 +7,11 @@ import { AlertTriangle, ArrowLeft, Building, Check, CircleCheck, Loader2, X } fr
 import { api, ApiError } from '@/lib/api';
 import { Link, useRouter } from '@/i18n/navigation';
 import { IconButton, Segmented } from './ui';
+import { LookupSelect, PrefecturesDatalist } from './lookup-select';
+import { PREFECTURES_LIST_ID } from '@/lib/greece';
 
 export type CustomerFormValues = {
-  kind: 'group' | 'company'; name: string; trade_name: string; vat: string; tax_office: string; gemi: string; activity: string;
+  kind: 'group' | 'company'; code: string; geo_zone_id: string | null; name: string; trade_name: string; vat: string; tax_office: string; gemi: string; activity: string;
   status: 'active' | 'prospect' | 'negotiation' | 'inactive'; category: string; tags: string[]; source: string;
   parent_id: string | null; parent_name?: string | null; account_manager_id: string | null;
   email: string; phone: string; mobile: string; website: string;
@@ -19,7 +21,7 @@ export type CustomerFormValues = {
 };
 
 export const emptyCustomer = (): CustomerFormValues => ({
-  kind: 'company', name: '', trade_name: '', vat: '', tax_office: '', gemi: '', activity: '',
+  kind: 'company', code: '', geo_zone_id: null, name: '', trade_name: '', vat: '', tax_office: '', gemi: '', activity: '',
   status: 'prospect', category: '', tags: [], source: '', parent_id: null, account_manager_id: null,
   email: '', phone: '', mobile: '', website: '',
   address_street: '', address_city: '', address_postal: '', address_region: '', address_country: 'GR',
@@ -90,7 +92,7 @@ export function CustomerForm({ customerId, initial }: { customerId?: string; ini
   const save = useMutation({
     mutationFn: async () => {
       const body = {
-        kind: v.kind, name: v.name, trade_name: v.trade_name, vat: v.vat.trim(), tax_office: v.tax_office, gemi: v.gemi, activity: v.activity,
+        kind: v.kind, code: v.code.trim(), geo_zone_id: v.geo_zone_id, name: v.name, trade_name: v.trade_name, vat: v.vat.trim(), tax_office: v.tax_office, gemi: v.gemi, activity: v.activity,
         status: v.status, category: v.category, tags: v.tags, source: v.source, parent_id: v.kind === 'company' ? v.parent_id : null,
         account_manager_id: v.account_manager_id, email: v.email, phone: v.phone, mobile: v.mobile, website: v.website,
         address_street: v.address_street, address_city: v.address_city, address_postal: v.address_postal,
@@ -109,6 +111,7 @@ export function CustomerForm({ customerId, initial }: { customerId?: string; ini
     },
     onError: (e) => {
       if (e instanceof ApiError && e.code === 'invalid_parent') setErrors({ parent_id: 'invalid' });
+      else if (e instanceof ApiError && e.code === 'code_taken') { setErrors({ code: t('codeTaken') }); document.getElementById('cust-code')?.scrollIntoView({ block: 'center', behavior: 'smooth' }); }
       else setErrors({ _form: e instanceof ApiError ? e.code : 'error' });
     },
   });
@@ -117,6 +120,7 @@ export function CustomerForm({ customerId, initial }: { customerId?: string; ini
     e.preventDefault();
     const errs: Record<string, string> = {};
     if (v.name.trim().length < 2) errs.name = t('required');
+    if (v.code.trim() && !/^[\p{L}\p{N}._/-]+$/u.test(v.code.trim())) errs.code = t('codeInvalid');
     if (!afmOk) errs.vat = t('afmInvalid');
     if (v.email && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(v.email)) errs.email = t('invalidEmail');
     setErrors(errs);
@@ -143,6 +147,11 @@ export function CustomerForm({ customerId, initial }: { customerId?: string; ini
             { value: 'company', label: t('company') }, { value: 'group', label: t('group') },
           ]} />
         </div>
+        <Field label={t('code')} error={errors.code}>
+          <input id="cust-code" className={`${input} tabular`} placeholder={customerId ? '' : t('codeAuto')} maxLength={40} value={v.code}
+            aria-invalid={!!errors.code} onChange={(e) => set('code', e.target.value.replace(/\s/g, ''))} />
+        </Field>
+        <div className="hidden sm:block" />
         <Field label={`${t('name')} *`} error={errors.name} wide>
           <input className={input} value={v.name} aria-invalid={!!errors.name} onChange={(e) => set('name', e.target.value)} autoFocus={!customerId} />
         </Field>
@@ -178,7 +187,8 @@ export function CustomerForm({ customerId, initial }: { customerId?: string; ini
         <Field label={t('street')} wide><input className={input} value={v.address_street} onChange={(e) => set('address_street', e.target.value)} /></Field>
         <Field label={t('city')}><input className={input} value={v.address_city} onChange={(e) => set('address_city', e.target.value)} /></Field>
         <Field label={t('postal')}><input className={`${input} tabular`} inputMode="numeric" value={v.address_postal} onChange={(e) => set('address_postal', e.target.value)} /></Field>
-        <Field label={t('region')}><input className={input} value={v.address_region} onChange={(e) => set('address_region', e.target.value)} /></Field>
+        <Field label={t('prefecture')}><input className={input} list={PREFECTURES_LIST_ID} value={v.address_region} onChange={(e) => set('address_region', e.target.value)} /></Field>
+        <Field label={t('geoZone')}><LookupSelect list="geo_zone" className={input} value={v.geo_zone_id} onChange={(id) => set('geo_zone_id', id)} /></Field>
         <Field label={t('country')}>
           <select className={input} value={v.address_country} onChange={(e) => set('address_country', e.target.value)}>
             {['GR', 'CY', 'BG', 'RO', 'IT', 'DE', 'FR', 'GB', 'US'].map((c) => <option key={c} value={c}>{c}</option>)}
@@ -247,6 +257,7 @@ export function CustomerForm({ customerId, initial }: { customerId?: string; ini
         </Field>
       </Section>
 
+      <PrefecturesDatalist />
       <Section title={t('sNotes')}>
         <Field label={t('notes')} wide><textarea rows={4} className={input} value={v.notes} onChange={(e) => set('notes', e.target.value)} /></Field>
       </Section>

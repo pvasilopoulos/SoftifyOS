@@ -6,7 +6,7 @@ import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tansta
 import { useLocale, useTranslations } from 'next-intl';
 import {
   Archive, ArchiveRestore, ArrowLeft, CalendarDays, CheckCircle2, ChevronDown, ChevronRight, FileText, Globe, Mail,
-  MapPin, NotebookPen, Pencil, Phone, Plus, Smartphone, Star, StickyNote, Store, Users,
+  MapPin, NotebookPen, Pencil, Phone, Plus, Smartphone, Star, StickyNote, Store, Trash2,
 } from 'lucide-react';
 import { api, type Activity, type Offer, type Page } from '@/lib/api';
 import { date, money, relative } from '@/lib/format';
@@ -14,6 +14,7 @@ import type { Branch, Contact, CustomerDetail, Space } from '@/lib/customers';
 import { Link, useRouter } from '@/i18n/navigation';
 import { Avatar, EntityTile, IconButton, Skeleton, StatusBadge, Tabs } from '@/components/ui';
 import { ActivityDialog, BranchDialog, ContactDialog, SpaceDialog } from '@/components/customer-dialogs';
+import { BranchDetails } from '@/components/branch-details';
 
 type Tab = 'overview' | 'subsidiaries' | 'branches' | 'contacts' | 'offers' | 'activity';
 type DialogState =
@@ -137,12 +138,15 @@ export default function CustomerPage({ params }: { params: Promise<{ id: string 
       {tab === 'overview' && (
         <div className="grid gap-4 lg:grid-cols-2 [&>*]:min-w-0">
           <InfoCard title={t('basics')}>
+            <Row k={t('code')} v={c.code} />
             <Row k={t('vat')} v={c.vat} />
             <Row k={t('taxOffice')} v={c.tax_office} />
             <Row k={t('gemi')} v={c.gemi} />
             <Row k={t('activityField')} v={c.activity} />
             <Row k={t('manager')} v={c.account_manager_name && <span className="flex items-center gap-2"><Avatar name={c.account_manager_name} size={22} />{c.account_manager_name}</span>} />
             <Row k={t('source')} v={sourceLabel(c.source)} />
+            <Row k={t('prefecture')} v={c.address_region} />
+            <Row k={t('geoZone')} v={c.geo_zone_name} />
           </InfoCard>
           <InfoCard title={t('contactInfo')}>
             <Row k={t('email')} v={c.email && <a href={`mailto:${c.email}`} className="text-primary hover:underline">{c.email}</a>} icon={Mail} />
@@ -290,32 +294,42 @@ function BranchCard({ branch: b, canEdit, onEdit, onAddSpace, onEditSpace, focus
   branch: Branch; canEdit: boolean; onEdit: () => void; onAddSpace: () => void; onEditSpace: (s: Space) => void; focus?: boolean;
 }) {
   const t = useTranslations('customer');
+  const qc = useQueryClient();
   const [open, setOpen] = useState(!!focus);
   // Deep link from the "Stores" view: open this store and bring it into view
   const ref = useCallback((el: HTMLDivElement | null) => { if (el && focus) el.scrollIntoView({ block: 'center', behavior: 'smooth' }); }, [focus]);
+  const del = useMutation({
+    mutationFn: () => api(`/branches/${b.id}`, { method: 'DELETE' }),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['customer'] }); qc.invalidateQueries({ queryKey: ['customers'] }); },
+  });
   return (
     <div ref={ref} className={clsx('card overflow-hidden transition', open && 'border-primary/40', focus && 'ring-2 ring-primary/40')}>
-      <button onClick={() => setOpen(!open)} aria-expanded={open} className="flex w-full items-center gap-3 p-3.5 text-left">
-        <EntityTile name={b.name} size={52} />
-        <div className="min-w-0 flex-1">
-          <div className="truncate font-semibold">{b.name}</div>
-          {(b.city || b.address) && <div className="flex items-center gap-1 truncate text-sm text-muted"><MapPin size={14} className="shrink-0" />{[b.address, b.city].filter(Boolean).join(', ')}</div>}
-          <div className="mt-1 flex gap-2">
-            <span className="rounded-full bg-surface-2 px-2.5 py-0.5 text-xs">{t('spaces', { count: b.spaces.length })}</span>
-            <StatusBadge status={b.status} />
+      <div className="flex items-center gap-1 pr-2">
+        <button onClick={() => setOpen(!open)} aria-expanded={open} className="flex min-w-0 flex-1 items-center gap-3 p-3.5 text-left">
+          <EntityTile name={b.name} size={52} />
+          <div className="min-w-0 flex-1">
+            <div className="truncate font-semibold">{b.name}</div>
+            {b.trade_name && <div className="truncate text-xs font-medium text-primary">{b.trade_name}</div>}
+            {(b.city || b.address) && <div className="flex items-center gap-1 truncate text-sm text-muted"><MapPin size={14} className="shrink-0" />{[b.address, b.city].filter(Boolean).join(', ')}</div>}
+            <div className="mt-1 flex flex-wrap gap-1.5">
+              <span className="rounded-full bg-surface-2 px-2.5 py-0.5 text-xs">{t('spaces', { count: b.spaces.length })}</span>
+              {b.tour_name && <span className="rounded-full bg-info-soft px-2.5 py-0.5 text-xs text-info">{b.tour_name}</span>}
+              <StatusBadge status={b.status} />
+            </div>
           </div>
-        </div>
-        <ChevronDown size={20} className={clsx('shrink-0 text-muted transition-transform', open && 'rotate-180 text-primary')} />
-      </button>
+          <ChevronDown size={20} className={clsx('shrink-0 text-muted transition-transform', open && 'rotate-180 text-primary')} />
+        </button>
+        {canEdit && (
+          <>
+            <IconButton label={t('editBranch')} onClick={onEdit} className="text-muted hover:text-primary"><Pencil size={17} /></IconButton>
+            <IconButton label={t('deleteBranch')} className="text-muted hover:bg-danger-soft hover:text-danger"
+              onClick={() => { if (confirm(t('confirmDeleteBranch', { name: b.name }))) del.mutate(); }}><Trash2 size={17} /></IconButton>
+          </>
+        )}
+      </div>
       {open && (
         <div className="border-t border-border bg-surface-2/50 px-3.5 pb-3.5 pt-3">
-          {(b.phone || b.manager_name || b.postal_code) && (
-            <div className="mb-3 flex flex-wrap gap-x-4 gap-y-1 text-sm text-muted">
-              {b.manager_name && <span className="flex items-center gap-1"><Users size={14} />{b.manager_name}</span>}
-              {b.phone && <a href={`tel:${b.phone}`} className="flex items-center gap-1 text-primary"><Phone size={14} />{b.phone}</a>}
-              {b.postal_code && <span>{t('postal')} {b.postal_code}</span>}
-            </div>
-          )}
+          <div className="mb-3"><BranchDetails b={b} /></div>
           {b.spaces.length === 0 ? <p className="py-2 text-sm text-muted">{t('noSpaces')}</p> : (
             <ul className="divide-y divide-border rounded-xl border border-border bg-surface">
               {b.spaces.map((sp) => (
@@ -336,6 +350,8 @@ function BranchCard({ branch: b, canEdit, onEdit, onAddSpace, onEditSpace, focus
             <div className="mt-3 flex gap-2">
               <button onClick={onAddSpace} className="flex flex-1 items-center justify-center gap-1.5 rounded-xl bg-primary-soft py-2.5 text-sm font-semibold text-primary"><Plus size={16} /> {t('addSpace')}</button>
               <button onClick={onEdit} className="flex items-center gap-1.5 rounded-xl border border-border bg-surface px-4 py-2.5 text-sm font-medium"><Pencil size={15} /> {t('edit')}</button>
+              <button onClick={() => { if (confirm(t('confirmDeleteBranch', { name: b.name }))) del.mutate(); }}
+                className="flex items-center gap-1.5 rounded-xl border border-border bg-surface px-4 py-2.5 text-sm font-medium text-danger"><Trash2 size={15} /> <span className="hidden sm:inline">{t('delete')}</span></button>
             </div>
           )}
         </div>

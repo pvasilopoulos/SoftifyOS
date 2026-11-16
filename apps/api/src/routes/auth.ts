@@ -44,8 +44,10 @@ export default async function authRoutes(app: FastifyInstance) {
   app.get('/me', { preHandler: requireAuth }, async (req) => {
     const { userId, tenantId } = req.session;
     const [user] = await sql`SELECT id, email, full_name, avatar_url, locale FROM users WHERE id = ${userId}`;
+    // (tenant defaults are used to pre-fill new offers)
     const tenants = await sql`
-      SELECT t.id, t.slug, t.name, m.role, m.title FROM memberships m JOIN tenants t ON t.id = m.tenant_id
+      SELECT t.id, t.slug, t.name, m.role, m.title, t.currency, t.default_vat_rate, t.offer_validity_days, t.offer_terms
+      FROM memberships m JOIN tenants t ON t.id = m.tenant_id
       WHERE m.user_id = ${userId} ORDER BY t.name`;
     return { user, tenant: tenants.find((t) => t.id === tenantId), tenants };
   });

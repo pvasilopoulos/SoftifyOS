@@ -7,6 +7,7 @@ import { hasRole, requireAuth, ROLE_RANK, type Session } from '../auth.js';
 import { publish } from '../realtime.js';
 import { enqueue } from '../jobs.js';
 import { env } from '../env.js';
+import { audit } from './settings.js';
 
 const STATUSES = ['draft', 'in_progress', 'pending_approval', 'approved', 'sent', 'accepted', 'rejected'] as const;
 const EDITABLE = new Set(['draft', 'in_progress', 'approved', 'sent', 'rejected']);
@@ -54,11 +55,12 @@ async function insertVersion(tx: Tx, s: Session, offerId: string, version: numbe
 /** Atomic per-tenant, per-year sequence: OFF-2026-0049 */
 async function nextNumber(tx: Tx, tenantId: string) {
   const year = new Date().getFullYear();
+  const [t] = await tx`SELECT offer_prefix FROM tenants WHERE id = ${tenantId}`;
   const [r] = await tx`
     INSERT INTO tenant_counters (tenant_id, key, value) VALUES (${tenantId}, ${'offer_seq:' + year}, 1)
     ON CONFLICT (tenant_id, key) DO UPDATE SET value = tenant_counters.value + 1
     RETURNING value`;
-  return `OFF-${year}-${String(r.value).padStart(4, '0')}`;
+  return `${t?.offer_prefix ?? 'OFF'}-${year}-${String(r.value).padStart(4, '0')}`;
 }
 
 async function usersWithRole(tx: Tx, tenantId: string, minRole: string) {
@@ -111,6 +113,7 @@ export default async function offerRoutes(app: FastifyInstance) {
       await withTenant(T, async (tx) => {
         await tx`DELETE FROM approval_flow_steps WHERE tenant_id = ${T}`;
         if (steps.length) await tx`INSERT INTO approval_flow_steps ${tx(steps.map((s, i) => ({ tenant_id: T, step: i + 1, ...s })))}`;
+        await audit(tx, req.session, 'approvals.update', null, steps);
       });
       return { ok: true };
     });

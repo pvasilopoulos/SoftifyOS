@@ -40,7 +40,7 @@ const secondary = [
   { href: '/more', key: 'groups', icon: Building2 },
   { href: '/more', key: 'branches', icon: MapPin },
   { href: '/more', key: 'products', icon: Package },
-  { href: '/more', key: 'admin', icon: Settings },
+  { href: '/settings', key: 'admin', icon: Settings },
 ] as const;
 
 function isActive(pathname: string, href: string) {
