@@ -12,6 +12,7 @@ import { decodeCursor, encodeCursor, sql, withTenant, type Tx } from '../db.js';
 import { isValidAfm } from './customers.js';
 import { openApiSpec } from './integration-openapi.js';
 import { emitEntityEvents, emitEvents, type EventSource } from '../webhooks.js';
+import { customInput } from '../forms.js';
 import { ALL_LISTS, canonicalName, isNameList, nameInUse, renameInRecords, type NameList } from '../lookups.js';
 
 /** Name-list fields: unknown values are added to the list (like zones), and the list's spelling is stored. */
@@ -182,6 +183,7 @@ const customerIn = z.object({
   discount: z.number().min(0).max(100).optional(),
   annual_value: z.number().min(0).max(1e13).optional(),
   notes: str(10000),
+  custom: z.record(z.string().max(40), z.unknown()).optional(),
 }).strict();
 
 const branchIn = z.object({
@@ -194,6 +196,7 @@ const branchIn = z.object({
   geo_zone: str(80), fee_schedule: str(80), tour: str(80), ongoing_status: str(80),
   seasonality: z.enum(['all_year', 'summer', 'winter', 'custom']).optional(),
   season_months: z.array(z.number().int().min(1).max(12)).max(12).optional(),
+  custom: z.record(z.string().max(40), z.unknown()).optional(),
 }).strict();
 
 const spaceIn = z.object({
@@ -203,6 +206,7 @@ const spaceIn = z.object({
   kind: str(80),
   area_sqm: z.number().min(0).max(1e7).nullable().optional(),
   notes: str(2000),
+  custom: z.record(z.string().max(40), z.unknown()).optional(),
 }).strict();
 
 type ItemResult = { external_id: string; status: 'created' | 'updated' | 'error'; id?: string; error?: string; detail?: unknown };
@@ -231,6 +235,20 @@ async function lookupId(tx: Tx, tenantId: string, list: LookupList, name: string
   cache.set(k, id!);
   return id!;
 }
+
+/** Custom field values (Settings → Module Forms) of an API row: merged into the stored ones, null clears a key. */
+async function customCols(sp: Tx, T: string, form: 'customer' | 'branch' | 'space', incoming: Record<string, unknown> | undefined, cols: Record<string, unknown>) {
+  const c = await customInput(sp, T, form, incoming);
+  if (!c) return;
+  if (Object.keys(c.errors).length) throw new RowError('invalid_custom_fields', c.errors);
+  cols.custom = sp`(coalesce(custom, '{}'::jsonb) || ${sp.json(c.set as never)}::jsonb) - ${c.remove}::text[]`;
+}
+/** For INSERT: the expression above needs an existing row; new rows get the object itself. */
+const insertCustom = (sp: Tx, cols: Record<string, unknown>, incoming: Record<string, unknown> | undefined) => {
+  if (cols.custom === undefined) return cols;
+  const clean = Object.fromEntries(Object.entries(incoming ?? {}).filter(([, v]) => v !== null && v !== ''));
+  return { ...cols, custom: sp.json(clean as never) };
+};
 
 const zodDetail = (e: ZodError) => e.issues.map((i) => ({ path: i.path.join('.'), message: i.message }));
 
@@ -346,6 +364,7 @@ async function upsertCustomers(tx: Tx, key: ApiKeyCtx, items: unknown[]) {
       const [taken] = await sp`SELECT 1 FROM customers WHERE tenant_id = ${T} AND code = ${c.code} AND external_id IS DISTINCT FROM ${c.external_id}`;
       if (taken) throw new RowError('code_taken', c.code);
     }
+    await customCols(sp, T, 'customer', c.custom, cols);
 
     const existing = known.get(c.external_id);
     if (existing) {
@@ -356,7 +375,7 @@ async function upsertCustomers(tx: Tx, key: ApiKeyCtx, items: unknown[]) {
     }
     if (!c.name) throw new RowError('name_required', 'name is required when creating a customer');
     const [row] = await sp`
-      INSERT INTO customers ${sp({ ...cols, tenant_id: T, external_id: c.external_id, code: c.code ?? (await nextCode()) })}
+      INSERT INTO customers ${sp({ ...insertCustom(sp, cols, c.custom), tenant_id: T, external_id: c.external_id, code: c.code ?? (await nextCode()) })}
       RETURNING id`;
     known.set(c.external_id, { id: row.id, parent_id: (cols.parent_id as string | null) ?? null }); // same id again in this batch = update
     createdIds.push(row.id);
@@ -390,6 +409,7 @@ async function upsertBranches(tx: Tx, key: ApiKeyCtx, items: unknown[]) {
       cols.customer_id = c.id;
       customers.add(c.id);
     }
+    await customCols(sp, T, 'branch', b.custom, cols);
     const [existing] = await sp`SELECT id, customer_id FROM branches WHERE tenant_id = ${T} AND external_id = ${b.external_id}`;
     if (existing) {
       customers.add(existing.customer_id);
@@ -398,7 +418,7 @@ async function upsertBranches(tx: Tx, key: ApiKeyCtx, items: unknown[]) {
     }
     if (!cols.customer_id) throw new RowError('customer_external_id_required');
     if (!b.name) throw new RowError('name_required', 'name is required when creating a store');
-    const [row] = await sp`INSERT INTO branches ${sp({ ...cols, tenant_id: T, external_id: b.external_id })} RETURNING id`;
+    const [row] = await sp`INSERT INTO branches ${sp({ ...insertCustom(sp, cols, b.custom), tenant_id: T, external_id: b.external_id })} RETURNING id`;
     return { status: 'created', id: row.id };
   });
   await refreshCounters(tx, new Set(), customers, new Set());
@@ -418,6 +438,7 @@ async function upsertSpaces(tx: Tx, key: ApiKeyCtx, items: unknown[]) {
       cols.branch_id = b.id;
       branchIds.add(b.id);
     }
+    await customCols(sp, T, 'space', s.custom, cols);
     const [existing] = await sp`SELECT id, branch_id FROM spaces WHERE tenant_id = ${T} AND external_id = ${s.external_id}`;
     if (existing) {
       branchIds.add(existing.branch_id);
@@ -426,7 +447,7 @@ async function upsertSpaces(tx: Tx, key: ApiKeyCtx, items: unknown[]) {
     }
     if (!cols.branch_id) throw new RowError('branch_external_id_required');
     if (!s.name) throw new RowError('name_required', 'name is required when creating a space');
-    const [row] = await sp`INSERT INTO spaces ${sp({ ...cols, tenant_id: T, external_id: s.external_id })} RETURNING id`;
+    const [row] = await sp`INSERT INTO spaces ${sp({ ...insertCustom(sp, cols, s.custom), tenant_id: T, external_id: s.external_id })} RETURNING id`;
     return { status: 'created', id: row.id };
   });
   const customers = branchIds.size
@@ -442,7 +463,7 @@ const customerOut = (tx: Tx, T: string) => tx`
          p.external_id AS parent_external_id, u.email AS account_manager_email, c.email, c.phone, c.mobile, c.website,
          json_build_object('street', c.address_street, 'city', c.address_city, 'postal', c.address_postal, 'region', c.address_region, 'country', c.address_country) AS address,
          gz.name AS geo_zone, c.payment_terms, c.credit_limit::float8 AS credit_limit, c.discount::float8 AS discount, c.annual_value::float8 AS annual_value,
-         c.notes, c.branches_count, c.spaces_count, c.archived_at, c.created_at, c.updated_at
+         c.notes, c.custom, c.branches_count, c.spaces_count, c.archived_at, c.created_at, c.updated_at
   FROM customers c
   LEFT JOIN customers p ON p.id = c.parent_id
   LEFT JOIN users u ON u.id = c.account_manager_id
@@ -452,14 +473,14 @@ const customerOut = (tx: Tx, T: string) => tx`
 const branchOut = (tx: Tx, T: string) => tx`
   SELECT b.external_id, b.id, c.external_id AS customer_external_id, b.name, b.trade_name, b.address, b.city, b.postal_code, b.region, b.phone, b.manager_name,
          b.status, gz.name AS geo_zone, fs.name AS fee_schedule, tr.name AS tour, os.name AS ongoing_status, b.seasonality, b.season_months,
-         b.spaces_count, b.created_at, b.updated_at
+         b.custom, b.spaces_count, b.created_at, b.updated_at
   FROM branches b JOIN customers c ON c.id = b.customer_id
   LEFT JOIN lookup_values gz ON gz.id = b.geo_zone_id LEFT JOIN lookup_values fs ON fs.id = b.fee_schedule_id
   LEFT JOIN lookup_values tr ON tr.id = b.tour_id LEFT JOIN lookup_values os ON os.id = b.ongoing_status_id
   WHERE b.tenant_id = ${T}`;
 
 const spaceOut = (tx: Tx, T: string) => tx`
-  SELECT s.external_id, s.id, b.external_id AS branch_external_id, s.name, s.kind, s.area_sqm::float8 AS area_sqm, s.notes, s.created_at, s.updated_at
+  SELECT s.external_id, s.id, b.external_id AS branch_external_id, s.name, s.kind, s.area_sqm::float8 AS area_sqm, s.notes, s.custom, s.created_at, s.updated_at
   FROM spaces s JOIN branches b ON b.id = s.branch_id
   WHERE s.tenant_id = ${T}`;
 

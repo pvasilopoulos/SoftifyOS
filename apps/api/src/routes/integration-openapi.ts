@@ -19,6 +19,7 @@ const Customer = {
     geo_zone: nstr(80, 'Value name; created if missing'),
     payment_terms: nstr(40), credit_limit: { type: ['number', 'null'], minimum: 0 }, discount: { type: 'number', minimum: 0, maximum: 100 },
     annual_value: { type: 'number', minimum: 0 }, notes: nstr(10000),
+    custom: { type: 'object', additionalProperties: true, description: 'Custom fields (Settings → Module Forms) by key. Sent keys are merged; null clears a key; unknown keys are rejected.' },
   },
 };
 const Branch = {
@@ -32,6 +33,7 @@ const Branch = {
     tour: nstr(80, 'Εξόρμηση (value name)'), ongoing_status: nstr(80, 'Status on going (value name)'),
     seasonality: { enum: ['all_year', 'summer', 'winter', 'custom'] },
     season_months: { type: 'array', items: { type: 'integer', minimum: 1, maximum: 12 }, description: 'Used when seasonality = custom' },
+    custom: { type: 'object', additionalProperties: true, description: 'Custom fields (Settings → Module Forms) by key. Sent keys are merged; null clears a key; unknown keys are rejected.' },
   },
 };
 const Space = {
@@ -40,6 +42,7 @@ const Space = {
     external_id: ext, branch_external_id: { ...ext, description: 'Required on create' },
     name: { type: 'string', maxLength: 200, description: 'Required on create' }, kind: { type: 'string', maxLength: 80, description: 'Space kind by name from the value list (added if missing), e.g. Αποθήκη' },
     area_sqm: { type: ['number', 'null'], minimum: 0 }, notes: nstr(2000),
+    custom: { type: 'object', additionalProperties: true, description: 'Custom fields (Settings → Module Forms) by key. Sent keys are merged; null clears a key; unknown keys are rejected.' },
   },
 };
 const ItemResult = {

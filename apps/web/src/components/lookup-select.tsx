@@ -33,8 +33,10 @@ function useAddValue(list: LookupList) {
 }
 
 /** Select from a tenant value list (zones, fee schedules, tours) with "+ New value…" inline. */
-export function LookupSelect({ list, value, onChange, className, id }: {
+export function LookupSelect({ list, value, onChange, className, id, allowed }: {
   list: IdList; value: string | null; onChange: (id: string | null) => void; className?: string; id?: string;
+  /** Module Forms: only these values (ids) can be picked; the current one stays visible. */
+  allowed?: string[] | null;
 }) {
   const t = useTranslations('lookup');
   const { data = [] } = useLookup(list);
@@ -43,15 +45,17 @@ export function LookupSelect({ list, value, onChange, className, id }: {
     <select id={id} className={className} value={value ?? ''}
       onChange={async (e) => { if (e.target.value === ADD) { const c = await add(); if (c) onChange(c.id); } else onChange(e.target.value || null); }}>
       <option value="">{t('none')}</option>
-      {data.filter((v) => v.active || v.id === value).map((v) => <option key={v.id} value={v.id}>{v.name}</option>)}
-      <option value={ADD}>{t('addNew')}</option>
+      {data.filter((v) => v.id === value || (v.active && (!allowed || allowed.includes(v.id)))).map((v) => <option key={v.id} value={v.id}>{v.name}</option>)}
+      {!allowed && <option value={ADD}>{t('addNew')}</option>}
     </select>
   );
 }
 
 /** Same, for lists stored by name. A current value that is no longer in the list is still shown. */
-export function NameSelect({ list, value, onChange, className, id, allowEmpty = true }: {
+export function NameSelect({ list, value, onChange, className, id, allowEmpty = true, allowed }: {
   list: NameList; value: string | null | undefined; onChange: (name: string) => void; className?: string; id?: string; allowEmpty?: boolean;
+  /** Module Forms: only these values (names) can be picked; the current one stays visible. */
+  allowed?: string[] | null;
 }) {
   const t = useTranslations('lookup');
   const { data = [] } = useLookup(list);
@@ -63,8 +67,8 @@ export function NameSelect({ list, value, onChange, className, id, allowEmpty = 
       onChange={async (e) => { if (e.target.value === ADD) { const c = await add(); if (c) onChange(c.name); } else onChange(e.target.value); }}>
       {allowEmpty && <option value="">{t('none')}</option>}
       {current && !known && <option value={current}>{current}</option>}
-      {data.filter((v) => v.active || v.name === current).map((v) => <option key={v.id} value={v.name}>{v.name}</option>)}
-      <option value={ADD}>{t('addNew')}</option>
+      {data.filter((v) => v.name === current || (v.active && (!allowed || allowed.includes(v.name)))).map((v) => <option key={v.id} value={v.name}>{v.name}</option>)}
+      {!allowed && <option value={ADD}>{t('addNew')}</option>}
     </select>
   );
 }

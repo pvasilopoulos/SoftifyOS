@@ -2,7 +2,7 @@
 // default view (user → role → organisation), live counts and audit of shared changes.
 import type { FastifyInstance, FastifyReply } from 'fastify';
 import { z } from 'zod';
-import { searchKey, withTenant, type Tx } from '../db.js';
+import { likeAny, searchKey, searchPatterns, withTenant, type Tx } from '../db.js';
 import { can, requireAuth, type Session } from '../auth.js';
 import { asQuery, filterSql, FILTER_KEYS, parseFilters } from '../filters.js';
 import { audit } from './settings.js';
@@ -40,14 +40,14 @@ const canEdit = (s: Session, v: { scope: string; owner_id: string | null }) =>
 /** Number of records a view shows (capped at 10.001 so huge lists stay fast). */
 async function countView(tx: Tx, s: Session, c: ViewConfig) {
   const T = s.tenantId;
-  const key = c.q && c.q.length >= 2 ? `%${searchKey(c.q)}%` : null;
+  const key = c.q && c.q.length >= 2 ? searchPatterns(c.q) : null;
   if (c.view === 'stores') {
     const f = parseFilters(asQuery(c.filters), 'stores');
     const [{ n }] = await tx`
       SELECT count(*)::int AS n FROM (
         SELECT 1 FROM branches b JOIN customers c ON c.id = b.customer_id
         WHERE b.tenant_id = ${T} AND c.archived_at IS NULL ${filterSql(tx, f, s, 'stores', { c: 'c', b: 'b' })}
-          ${key ? tx`AND (b.search LIKE ${key} OR b.customer_id IN (SELECT id FROM customers WHERE tenant_id = ${T} AND search LIKE ${key}))` : tx``}
+          ${key ? tx`AND ((${likeAny(tx, 'b.search', key)}) OR b.customer_id IN (SELECT id FROM customers WHERE tenant_id = ${T} AND (${likeAny(tx, 'search', key)})))` : tx``}
         LIMIT 10001) x`;
     return n as number;
   }
@@ -58,8 +58,8 @@ async function countView(tx: Tx, s: Session, c: ViewConfig) {
         ${f.c_archived ? tx`AND archived_at IS NOT NULL` : tx`AND archived_at IS NULL`}
         ${filterSql(tx, f, s, 'customers', { c: 'customers' })}
         ${key ? (c.view === 'tree'
-          ? tx`AND (search LIKE ${key} OR id IN (SELECT customer_id FROM branches WHERE tenant_id = ${T} AND search LIKE ${key}))`
-          : tx`AND search LIKE ${key}`) : tx``}
+          ? tx`AND ((${likeAny(tx, 'search', key)}) OR id IN (SELECT customer_id FROM branches WHERE tenant_id = ${T} AND (${likeAny(tx, 'search', key)})))`
+          : tx`AND (${likeAny(tx, 'search', key)})`) : tx``}
       LIMIT 10001) x`;
   return n as number;
 }

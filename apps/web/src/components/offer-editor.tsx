@@ -9,6 +9,9 @@ import { api, ApiError, type Customer, type Page } from '@/lib/api';
 import { money } from '@/lib/format';
 import { useRouter } from '@/i18n/navigation';
 import { EntityTile, IconButton } from './ui';
+import { fieldState, flatValues, l10n, resolveDefault, useFormConfig, validateForm, type Effective } from '@/lib/forms';
+import { FormFields, scrollToError, useFormDefaults, type RendererEntry } from './form-engine';
+import { useMe } from './app-shell';
 
 export type EditorItem = {
   key: string; product_id: string | null; space_id?: string | null; description: string; unit: string;
@@ -24,6 +27,7 @@ export type EditorInitial = {
   branch_id?: string | null; space_id?: string | null; company_id?: string | null;
   valid_until?: string | null; notes?: string | null;
   items?: EditorItem[];
+  custom?: Record<string, unknown>;
 };
 
 const r2 = (n: number) => Math.round(n * 100) / 100;
@@ -58,22 +62,27 @@ export function OfferEditor({ initial }: { initial: EditorInitial }) {
   const [validUntil, setValidUntil] = useState(initial.valid_until?.slice(0, 10) ?? inDays(30));
   const [notes, setNotes] = useState(initial.notes ?? '');
   const [versionNote, setVersionNote] = useState('');
+  const [custom, setCustom] = useState<Record<string, unknown>>(initial.custom ?? {});
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
+  const head = useFormConfig('offer');
+  const line = useFormConfig('offer_item');
+  const { data: me } = useMe();
   const initialItems = useMemo(() => (initial.items ?? []).map((i) => ({ ...i, space_id: i.space_id ?? initial.space_id ?? null })),
   // eslint-disable-next-line react-hooks/exhaustive-deps
   []);
   const [items, setItems] = useState<EditorItem[]>(initialItems);
   const [picker, setPicker] = useState(false);
   // Draft of the whole editor, kept with the tab
-  type Draft = { customer: typeof customer; branchId: string; validUntil: string; notes: string; versionNote: string; items: EditorItem[] };
-  const draft: Draft = { customer, branchId, validUntil, notes, versionNote, items };
+  type Draft = { customer: typeof customer; branchId: string; validUntil: string; notes: string; versionNote: string; items: EditorItem[]; custom?: Record<string, unknown> };
+  const draft: Draft = { customer, branchId, validUntil, notes, versionNote, items, custom };
   const initialDraft = useMemo<Draft>(() => ({
     customer: initial.customer ?? null, branchId: initial.branch_id ?? '',
-    validUntil: initial.valid_until?.slice(0, 10) ?? inDays(30), notes: initial.notes ?? '', versionNote: '', items: initialItems,
+    validUntil: initial.valid_until?.slice(0, 10) ?? inDays(30), notes: initial.notes ?? '', versionNote: '', items: initialItems, custom: initial.custom ?? {},
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }), []);
   const applyDraft = (d: Draft) => {
     setCustomer(d.customer); setBranchId(d.branchId); setValidUntil(d.validUntil);
-    setNotes(d.notes); setVersionNote(d.versionNote); setItems(d.items);
+    setNotes(d.notes); setVersionNote(d.versionNote); setItems(d.items); setCustom(d.custom ?? {});
   };
   const clearDraft = useTabDraft(`offer.${initial.offerId ?? 'new'}`, draft, applyDraft, initialDraft);
   const [error, setError] = useState<string | null>(null);
@@ -85,6 +94,32 @@ export function OfferEditor({ initial }: { initial: EditorInitial }) {
     queryFn: () => api<Branch[]>(`/customers/${customer!.id}/branches`),
   });
   const spaces = branches.data?.find((b) => b.id === branchId)?.spaces ?? [];
+  const headValues = useMemo(() => flatValues({ branch_id: branchId || null, company_id: companyId || null, valid_until: validUntil || null, notes }, custom),
+    [branchId, companyId, validUntil, notes, custom]);
+  useFormDefaults(head.data, !isEdit, { ...headValues, company_id: null, valid_until: null }, (patch) => {
+    for (const [k, v] of Object.entries(patch)) {
+      if (k === 'branch_id') setBranchId(String(v ?? ''));
+      else if (k === 'company_id') setCompanyId(String(v ?? ''));
+      else if (k === 'valid_until') setValidUntil(String(v ?? '').slice(0, 10));
+      else if (k === 'notes') setNotes(String(v ?? ''));
+      else if (k.startsWith('cf_')) setCustom((x) => ({ ...x, [k.slice(3)]: v }));
+    }
+  }, { userId: me?.user.id });
+  // Line fields: configured defaults for new lines
+  const lineDefaults = (base: EditorItem): EditorItem => {
+    if (!line.data) return base;
+    const out = { ...base };
+    for (const f of line.data.fields) {
+      if (!f.default || f.core) continue;
+      const v = resolveDefault(f.default, { userId: me?.user.id });
+      if (v === undefined || v === null || v === '') continue;
+      if (f.key === 'unit' && !base.product_id) out.unit = String(v);
+      if (f.key === 'discount') out.discount = Number(v) || 0;
+      if (f.key === 'vat_rate' && !base.product_id) out.vat_rate = Number(v) || 0;
+      if (f.key === 'space_id' && spaces.some((sp) => sp.id === v)) out.space_id = String(v);
+    }
+    return out;
+  };
   // Store changed: spaces of the previous store no longer apply
   const changeBranch = (id: string) => { setBranchId(id); setItems((xs) => xs.map((x) => (x.space_id ? { ...x, space_id: null } : x))); };
 
@@ -95,9 +130,9 @@ export function OfferEditor({ initial }: { initial: EditorInitial }) {
   }, [items]);
 
   const update = (key: string, patch: Partial<EditorItem>) => setItems((xs) => xs.map((x) => (x.key === key ? { ...x, ...patch } : x)));
-  const addFree = () => setItems((xs) => [...xs, { key: uid(), product_id: null, description: '', unit: 'τεμ.', quantity: 1, unit_price: 0, discount: 0, vat_rate: 24 }]);
+  const addFree = () => setItems((xs) => [...xs, lineDefaults({ key: uid(), product_id: null, description: '', unit: 'τεμ.', quantity: 1, unit_price: 0, discount: 0, vat_rate: 24 })]);
   const addProduct = (p: Product) => {
-    setItems((xs) => [...xs, { key: uid(), product_id: p.id, description: p.name, unit: p.unit, quantity: 1, unit_price: Number(p.unit_price), discount: 0, vat_rate: Number(p.vat_rate) }]);
+    setItems((xs) => [...xs, lineDefaults({ key: uid(), product_id: p.id, description: p.name, unit: p.unit, quantity: 1, unit_price: Number(p.unit_price), discount: 0, vat_rate: Number(p.vat_rate) })]);
     setPicker(false);
   };
 
@@ -105,7 +140,7 @@ export function OfferEditor({ initial }: { initial: EditorInitial }) {
     mutationFn: async () => {
       const payload = {
         branch_id: branchId || null, space_id: null, company_id: companyId || null,
-        valid_until: validUntil || null, notes: notes || null,
+        valid_until: validUntil || null, notes: notes || null, custom,
         items: items.map(({ key: _k, ...i }) => ({ ...i, space_id: spaces.some((s) => s.id === i.space_id) ? i.space_id : null, description: i.description.trim() })),
       };
       if (isEdit) {
@@ -122,15 +157,44 @@ export function OfferEditor({ initial }: { initial: EditorInitial }) {
       qc.invalidateQueries({ queryKey: ['dashboard'] });
       router.replace(`/offers/${id}`);
     },
-    onError: (e) => setError(e instanceof ApiError ? e.code : 'error'),
+    onError: (e) => {
+      const fields = e instanceof ApiError ? (e.body as { fields?: Record<string, string> })?.fields : undefined;
+      if (fields) { setFieldErrors(fields); setError(t('fixErrors')); scrollToError(); return; }
+      setError(e instanceof ApiError ? e.code : 'error');
+    },
   });
 
   function submit() {
     setError(null);
     if (!customer) return setError(t('needCustomer'));
     if (!items.length || items.some((i) => !i.description.trim())) return setError(t('needItems'));
+    const errs: Record<string, string> = head.data ? validateForm(head.data, headValues) : {};
+    if (line.data) items.forEach((it, i) => { for (const [k, v] of Object.entries(validateForm(line.data!, it as unknown as Record<string, unknown>))) errs[`items.${i}.${k}`] = v; });
+    setFieldErrors(errs);
+    if (Object.keys(errs).length) { setError(t('fixErrors')); scrollToError(); return; }
     save.mutate();
   }
+
+  const headRenderers: Record<string, RendererEntry> = {
+    branch_id: (c) => (
+      <select id={c.id} className={c.className} value={branchId} disabled={!customer} aria-invalid={c.invalid} onChange={(e) => changeBranch(e.target.value)}>
+        <option value="">{t('none')}</option>
+        {branches.data?.map((b) => <option key={b.id} value={b.id}>{b.name}{b.city ? ` · ${b.city}` : ''}</option>)}
+      </select>
+    ),
+    company_id: (c) => (
+      <select id={c.id} className={c.className} value={companyId} aria-invalid={c.invalid} onChange={(e) => setCompanyId(e.target.value)}>
+        {companies.data?.filter((x) => !c.allowed || c.allowed.includes(x.id) || x.id === companyId).map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}
+      </select>
+    ),
+    valid_until: (c) => <input id={c.id} type="date" className={c.className} aria-invalid={c.invalid} value={validUntil} onChange={(e) => setValidUntil(e.target.value)} />,
+    notes: (c) => <textarea id={c.id} rows={3} className={c.className} placeholder={c.placeholder} aria-invalid={c.invalid} value={notes} onChange={(e) => setNotes(e.target.value)} />,
+  };
+  const onHead = (k: string, v: unknown) => { if (k.startsWith('cf_')) setCustom((x) => ({ ...x, [k.slice(3)]: v })); };
+  // Sections up to "notes" go above the items, "notes" and later ones below
+  const notesOrder = head.data?.sections.find((x) => x.key === 'notes')?.order ?? Infinity;
+  const headTop = head.data && { ...head.data, sections: head.data.sections.filter((x) => x.order < notesOrder) };
+  const headBottom = head.data && { ...head.data, sections: head.data.sections.filter((x) => x.order >= notesOrder) };
 
   return (
     <div className="space-y-4 pb-24">
@@ -151,26 +215,8 @@ export function OfferEditor({ initial }: { initial: EditorInitial }) {
             </div>
           ) : <CustomerSearch onPick={(c) => setCustomer({ id: c.id, name: c.name })} />}
         </div>
-        <div className="grid gap-3 sm:grid-cols-2">
-          <div>
-            <label className={label} htmlFor="branch">{t('branch')}</label>
-            <select id="branch" className={input} value={branchId} disabled={!customer} onChange={(e) => changeBranch(e.target.value)}>
-              <option value="">{t('none')}</option>
-              {branches.data?.map((b) => <option key={b.id} value={b.id}>{b.name}{b.city ? ` · ${b.city}` : ''}</option>)}
-            </select>
-          </div>
-          <div>
-            <label className={label} htmlFor="company">{t('company')}</label>
-            <select id="company" className={input} value={companyId} onChange={(e) => setCompanyId(e.target.value)}>
-              {companies.data?.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-            </select>
-          </div>
-          <div>
-            <label className={label} htmlFor="valid">{t('validUntil')}</label>
-            <input id="valid" type="date" className={input} value={validUntil} onChange={(e) => setValidUntil(e.target.value)} />
-          </div>
-        </div>
       </section>
+      {headTop && <FormFields eff={headTop} values={headValues} errors={fieldErrors} renderers={headRenderers} onChange={onHead} idPrefix="offer" />}
 
       {/* Items */}
       <section className="card p-4">
@@ -179,36 +225,42 @@ export function OfferEditor({ initial }: { initial: EditorInitial }) {
           <span className="text-sm text-muted">{items.length}</span>
         </div>
         <ul className="space-y-3">
-          {items.map((it, idx) => (
+          {items.map((it, idx) => {
+            const L = lineCfg(line.data, it, locale);
+            const err = (k: string) => !!fieldErrors[`items.${idx}.${k}`];
+            return (
             <li key={it.key} className="rounded-2xl border border-border p-3">
               <div className="space-y-2">
                 <div className="flex items-center gap-2">
                   <span className="w-5 shrink-0 text-center text-xs font-semibold text-muted">{idx + 1}</span>
-                  <input aria-label={t('description')} placeholder={t('description')} className={input} value={it.description}
-                    onChange={(e) => update(it.key, { description: e.target.value })} />
+                  <input aria-label={L.label('description', t('description'))} placeholder={L.placeholder('description') || L.label('description', t('description'))} className={input} value={it.description}
+                    aria-invalid={err('description')} onChange={(e) => update(it.key, { description: e.target.value })} />
                   <IconButton label={t('remove')} onClick={() => setItems((xs) => xs.filter((x) => x.key !== it.key))} className="shrink-0 text-danger"><Trash2 size={18} /></IconButton>
                 </div>
-                {spaces.length > 0 && (
+                {spaces.length > 0 && !L.hidden('space_id') && (
                   <div className="flex items-center gap-2 pl-7">
                     <MapPin size={16} className="shrink-0 text-muted" />
-                    <select aria-label={t('space')} className={`${cell} ${it.space_id ? 'border-primary/40 text-primary' : 'text-muted'}`}
+                    <select aria-label={L.label('space_id', t('space'))} disabled={L.readonly('space_id')} aria-invalid={err('space_id')}
+                      className={`${cell} ${it.space_id ? 'border-primary/40 text-primary' : 'text-muted'} disabled:opacity-70`}
                       value={it.space_id ?? ''} onChange={(e) => update(it.key, { space_id: e.target.value || null })}>
-                      <option value="">{t('space')}: {t('none')}</option>
-                      {spaces.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+                      <option value="">{L.label('space_id', t('space'))}{L.required('space_id') ? ' *' : ''}: {t('none')}</option>
+                      {spaces.filter((sp) => !L.allowed('space_id') || L.allowed('space_id')!.includes(sp.id) || sp.id === it.space_id).map((sp) => <option key={sp.id} value={sp.id}>{sp.name}</option>)}
                     </select>
                   </div>
                 )}
                 <div className="min-w-0">
                   {/* All fields share one row height: single-line labels, inputs aligned to the bottom */}
                   <div className="grid grid-cols-3 items-end gap-2 sm:grid-cols-6">
-                    <Num label={t('qty')} value={it.quantity} onChange={(v) => update(it.key, { quantity: v })} step="any" />
-                    <div className="min-w-0">
-                      <span className={label}>{t('unit')}</span>
-                      <input className={cell} value={it.unit} onChange={(e) => update(it.key, { unit: e.target.value })} />
-                    </div>
-                    <Num label={t('price')} value={it.unit_price} onChange={(v) => update(it.key, { unit_price: v })} step="0.01" />
-                    <Num label={t('discount')} value={it.discount} onChange={(v) => update(it.key, { discount: Math.min(100, v) })} step="0.5" />
-                    <Num label={t('vat')} value={it.vat_rate} onChange={(v) => update(it.key, { vat_rate: v })} step="1" />
+                    <Num label={L.label('quantity', t('qty'))} value={it.quantity} invalid={err('quantity')} onChange={(v) => update(it.key, { quantity: v })} step="any" />
+                    {!L.hidden('unit') && (
+                      <div className="min-w-0">
+                        <span className={label}>{L.label('unit', t('unit'))}{L.required('unit') && <span className="text-danger">*</span>}</span>
+                        <input className={`${cell} disabled:opacity-70`} disabled={L.readonly('unit')} aria-invalid={err('unit')} value={it.unit} onChange={(e) => update(it.key, { unit: e.target.value })} />
+                      </div>
+                    )}
+                    <Num label={L.label('unit_price', t('price'))} value={it.unit_price} invalid={err('unit_price')} onChange={(v) => update(it.key, { unit_price: v })} step="0.01" />
+                    {!L.hidden('discount') && <Num label={L.label('discount', t('discount'))} required={L.required('discount')} disabled={L.readonly('discount')} invalid={err('discount')} value={it.discount} onChange={(v) => update(it.key, { discount: Math.min(100, v) })} step="0.5" />}
+                    {!L.hidden('vat_rate') && <Num label={L.label('vat_rate', t('vat'))} required={L.required('vat_rate')} disabled={L.readonly('vat_rate')} invalid={err('vat_rate')} value={it.vat_rate} onChange={(v) => update(it.key, { vat_rate: v })} step="1" />}
                     {/* Phone: full-width row so large amounts never get cut; desktop: 6th column */}
                     <div className="col-span-3 min-w-0 sm:col-span-1">
                       <span className={`${label} hidden sm:block`}>{t('amount')}</span>
@@ -221,7 +273,8 @@ export function OfferEditor({ initial }: { initial: EditorInitial }) {
                 </div>
               </div>
             </li>
-          ))}
+            );
+          })}
         </ul>
         <div className="mt-3 flex flex-wrap gap-2">
           <button onClick={() => setPicker(true)} className="flex items-center gap-2 rounded-xl bg-primary-soft px-4 py-2.5 text-sm font-semibold text-primary"><Package size={17} /> {t('addProduct')}</button>
@@ -229,18 +282,13 @@ export function OfferEditor({ initial }: { initial: EditorInitial }) {
         </div>
       </section>
 
-      <section className="card space-y-3 p-4">
-        <div>
-          <label className={label} htmlFor="notes">{t('notes')}</label>
-          <textarea id="notes" rows={3} className={input} value={notes} onChange={(e) => setNotes(e.target.value)} />
-        </div>
-        {isEdit && (
-          <div>
-            <label className={label} htmlFor="vnote">{t('versionNote')}</label>
-            <input id="vnote" className={input} value={versionNote} onChange={(e) => setVersionNote(e.target.value)} />
-          </div>
-        )}
-      </section>
+      {headBottom && <FormFields eff={headBottom} values={headValues} errors={fieldErrors} renderers={headRenderers} onChange={onHead} idPrefix="offer-b" />}
+      {isEdit && (
+        <section className="card p-4">
+          <label className={label} htmlFor="vnote">{t('versionNote')}</label>
+          <input id="vnote" className={input} value={versionNote} onChange={(e) => setVersionNote(e.target.value)} />
+        </section>
+      )}
 
       {/* Sticky totals + save */}
       <div className="card sticky bottom-24 z-20 flex items-center gap-4 p-4 lg:bottom-4">
@@ -261,11 +309,25 @@ export function OfferEditor({ initial }: { initial: EditorInitial }) {
   );
 }
 
-function Num({ label: l, value, onChange, step }: { label: string; value: number; onChange: (v: number) => void; step: string }) {
+/** Per-line view of the offer_item configuration (labels, hidden / read-only / required, allowed values). */
+function lineCfg(eff: Effective | undefined, it: EditorItem, locale: string) {
+  const values = it as unknown as Record<string, unknown>;
+  const get = (k: string) => eff?.fields.find((f) => f.key === k);
+  const st = (k: string) => { const f = get(k); return f ? fieldState(f, values) : { hidden: false, readonly: false, required: false }; };
+  return {
+    label: (k: string, fallback: string) => { const f = get(k); return (f && l10n(f.label, locale)) || fallback; },
+    placeholder: (k: string) => { const f = get(k); return f ? l10n(f.placeholder, locale) : ''; },
+    hidden: (k: string) => st(k).hidden, readonly: (k: string) => st(k).readonly, required: (k: string) => st(k).required,
+    allowed: (k: string) => { const f = get(k); return f?.options?.length ? f.options : null; },
+  };
+}
+
+function Num({ label: l, value, onChange, step, invalid, disabled, required }: { label: string; value: number; onChange: (v: number) => void; step: string; invalid?: boolean; disabled?: boolean; required?: boolean }) {
   return (
     <div className="min-w-0">
-      <span className={label}>{l}</span>
-      <input type="number" inputMode="decimal" min={0} step={step} className={`${cell} tabular`} value={Number.isFinite(value) ? value : ''}
+      <span className={label}>{l}{required && <span className="text-danger">*</span>}</span>
+      <input type="number" inputMode="decimal" min={0} step={step} disabled={disabled} aria-invalid={invalid}
+        className={`${cell} tabular disabled:opacity-70 aria-[invalid=true]:border-danger`} value={Number.isFinite(value) ? value : ''}
         onChange={(e) => onChange(e.target.value === '' ? 0 : Number(e.target.value))} />
     </div>
   );

@@ -1,17 +1,17 @@
 import { emptyCustomer, type CustomerFormValues } from '@/components/customer-form';
 
-export type Space = { id: string; name: string; kind: string; area_sqm: string | null; notes: string | null };
+export type Space = { id: string; name: string; kind: string; area_sqm: string | null; notes: string | null; custom?: Record<string, unknown> };
 export type Branch = {
   id: string; name: string; trade_name: string | null; region: string | null;
   geo_zone_id: string | null; fee_schedule_id: string | null; tour_id: string | null; ongoing_status_id: string | null;
   geo_zone_name: string | null; fee_schedule_name: string | null; tour_name: string | null; ongoing_status_name: string | null;
   seasonality: 'all_year' | 'summer' | 'winter' | 'custom'; season_months: number[];
   city: string | null; address: string | null; postal_code: string | null; phone: string | null;
-  manager_name: string | null; status: string; spaces_count: number; spaces: Space[];
+  manager_name: string | null; status: string; spaces_count: number; spaces: Space[]; custom?: Record<string, unknown>;
 };
 export type Contact = {
   id: string; full_name: string; role_title: string | null; email: string | null; phone: string | null; mobile: string | null;
-  is_primary: boolean; notes: string | null;
+  is_primary: boolean; notes: string | null; custom?: Record<string, unknown>;
 };
 export type CustomerProfile = {
   id: string; code: string; kind: 'group' | 'company'; name: string; geo_zone_id: string | null; geo_zone_name: string | null; trade_name: string | null; vat: string | null;
@@ -23,6 +23,7 @@ export type CustomerProfile = {
   billing_address: { street?: string | null; city?: string | null; postal?: string | null; region?: string | null; country?: string | null } | null;
   payment_terms: string | null; credit_limit: string | null; discount: string; annual_value: string; notes: string | null;
   companies_count: number; branches_count: number; spaces_count: number; archived_at: string | null; created_at: string;
+  custom?: Record<string, unknown>;
 };
 export type CustomerDetail = {
   customer: CustomerProfile;
@@ -49,6 +50,6 @@ export function toFormValues(c: CustomerProfile): CustomerFormValues {
     address_region: s(c.address_region), address_country: c.address_country || 'GR',
     billing_same: !b, billing: { street: s(b?.street), city: s(b?.city), postal: s(b?.postal), region: s(b?.region), country: b?.country || 'GR' },
     payment_terms: s(c.payment_terms), credit_limit: c.credit_limit ?? '', discount: String(Number(c.discount)),
-    annual_value: String(Number(c.annual_value)), notes: s(c.notes),
+    annual_value: String(Number(c.annual_value)), notes: s(c.notes), custom: c.custom ?? {},
   };
 }

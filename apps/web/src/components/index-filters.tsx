@@ -18,7 +18,26 @@ type Kind =
   | { t: 'enum'; values: readonly string[]; label: (v: string) => string }
   | { t: 'name' | 'id'; list: string }
   | { t: 'city'; source: 'customers' | 'branches' }
-  | { t: 'manager' } | { t: 'bool' } | { t: 'range' };
+  | { t: 'manager' } | { t: 'bool' } | { t: 'range' }
+  | { t: 'text' };
+type CustomFilter = { key: string; type: string; label: { el?: string; en?: string }; options: string[] };
+
+/** Custom fields available as filters (Module Forms), from /me. */
+function useCustomFilters() {
+  const { data: me } = useMe();
+  return ((me?.tenant as { custom_filters?: CustomFilter[] } | undefined)?.custom_filters ?? []);
+}
+/** Label of any filter key (built-in from the messages, custom from its field). */
+function useFilterLabel() {
+  const tf = useTranslations('filters');
+  const locale = useLocale();
+  const custom = useCustomFilters();
+  return (k: string) => {
+    const c = custom.find((x) => x.key === k);
+    if (c) return (locale === 'en' ? c.label.en || c.label.el : c.label.el || c.label.en) || k;
+    return tf.has(k) ? tf(k as never) : k;
+  };
+}
 
 export const FILTER_GROUPS = ['c', 'b', 's'] as const;
 export const DEFAULT_FILTERS: Record<IndexKey, string[]> = {
@@ -30,7 +49,12 @@ export const DEFAULT_FILTERS: Record<IndexKey, string[]> = {
 function useDefs() {
   const ts = useTranslations('status');
   const tf = useTranslations('filters');
+  const custom = useCustomFilters();
   return useMemo<Record<string, Kind>>(() => ({
+    ...Object.fromEntries(custom.map((c) => [c.key, (
+      c.type === 'select' || c.type === 'multiselect' ? { t: 'enum', values: c.options, label: (v: string) => v }
+        : c.type === 'bool' ? { t: 'enum', values: ['true', 'false'], label: (v: string) => tf(v === 'true' ? 'yes' : 'no') }
+          : c.type === 'number' ? { t: 'range' } : { t: 'text' }) as Kind])),
     c_status: { t: 'enum', values: ['active', 'prospect', 'negotiation', 'inactive'], label: (v) => ts(v as never) },
     c_kind: { t: 'enum', values: ['group', 'company'], label: (v) => tf(`kind_${v}` as never) },
     c_category: { t: 'name', list: 'customer_category' },
@@ -55,7 +79,7 @@ function useDefs() {
     b_seasonality: { t: 'enum', values: ['all_year', 'summer', 'winter', 'custom'], label: (v) => tf(`season_${v}` as never) },
     s_kind: { t: 'name', list: 'space_kind' },
     s_area: { t: 'range' },
-  }), [ts, tf]);
+  }), [ts, tf, custom]);
 }
 
 /** Filter state for one index page; `query` is ready to append to the list request. */
@@ -122,7 +146,8 @@ export function IndexFilterMenu({ state }: { state: IndexFilterState }) {
   const tf = useTranslations('filters');
   const [open, setOpen] = useState(false);
   const { defs, optionsOf } = useOptionsFor(state);
-  const groups = FILTER_GROUPS.map((g) => ({ g, keys: state.visible.filter((k) => k.startsWith(`${g}_`) && defs[k]) })).filter((x) => x.keys.length);
+  const groups = FILTER_GROUPS.map((g) => ({ g, keys: state.visible.filter((k) => (k.startsWith(`${g}_`) || k.startsWith(`cf_${g}_`)) && defs[k]) })).filter((x) => x.keys.length);
+  const labelOf = useFilterLabel();
   const showGroupTitles = groups.length > 1;
 
   return (
@@ -156,7 +181,7 @@ export function IndexFilterMenu({ state }: { state: IndexFilterState }) {
                     <div className="space-y-0.5">
                       {toggles.map((k) => (
                         <label key={k} className="flex cursor-pointer items-center justify-between rounded-xl px-1 py-1.5 text-sm">
-                          {tf(k)}
+                          {labelOf(k)}
                           <input type="checkbox" className="h-5 w-5 accent-[var(--primary)]" checked={state.values[k] === '1'} onChange={(e) => state.set(k, e.target.checked ? '1' : '')} />
                         </label>
                       ))}
@@ -176,7 +201,16 @@ export function IndexFilterMenu({ state }: { state: IndexFilterState }) {
 function FilterControl({ k, kind, state, options }: { k: string; kind: Kind; state: IndexFilterState; options: { value: string; label: string; hint?: string }[] }) {
   const t = useTranslations('customers');
   const tf = useTranslations('filters');
-  const label = <div className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-muted">{tf(k)}</div>;
+  const name = useFilterLabel()(k);
+  const label = <div className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-muted">{name}</div>;
+  if (kind.t === 'text') {
+    return (
+      <div>
+        {label}
+        <TextFilter value={state.values[k] ?? ''} onChange={(v) => state.set(k, v)} placeholder={tf('contains')} />
+      </div>
+    );
+  }
   if (kind.t === 'range') {
     const box = 'w-full min-w-0 rounded-xl border border-border bg-surface-2 px-3 py-2 text-sm outline-none focus:border-primary';
     return (
@@ -206,15 +240,25 @@ function FilterControl({ k, kind, state, options }: { k: string; kind: Kind; sta
   return (
     <div>
       {label}
-      <SearchSelect value={value} onChange={(v) => state.set(k, v)} allLabel={t('all')} placeholder={tf('searchIn', { name: tf(k) })} ariaLabel={tf(k)}
+      <SearchSelect value={value} onChange={(v) => state.set(k, v)} allLabel={t('all')} placeholder={tf('searchIn', { name })} ariaLabel={name}
         options={value && !options.some((o) => o.value === value) ? [{ value, label: value }, ...options] : options} />
     </div>
   );
 }
 
+/** Free-text filter (custom text fields), applied after a short pause. */
+function TextFilter({ value, onChange, placeholder }: { value: string; onChange: (v: string) => void; placeholder: string }) {
+  const [v, setV] = useState(value);
+  useEffect(() => setV(value), [value]);
+  useEffect(() => { if (v === value) return; const id = setTimeout(() => onChange(v.trim()), 400); return () => clearTimeout(id); // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [v]);
+  return <input className="w-full min-w-0 rounded-xl border border-border bg-surface-2 px-3 py-2 text-sm outline-none focus:border-primary" placeholder={placeholder} value={v} onChange={(e) => setV(e.target.value)} />;
+}
+
 /** Removable chips for the active filters. */
 export function useFilterChips(state: IndexFilterState) {
-  const tf = useTranslations('filters');
+  const tf0 = useFilterLabel();
+  const tf = (k: string) => tf0(k);
   const { defs, optionsOf } = useOptionsFor(state);
   const keys = [...new Set(Object.keys(state.values).map((k) => k.replace(/_(min|max)$/, '')))].filter((k) => defs[k]);
   return keys.map((k) => {

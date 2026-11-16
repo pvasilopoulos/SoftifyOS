@@ -7,10 +7,11 @@ import { usePathname } from 'next/navigation';
 import { api, type Me } from './api';
 
 export type BrandKind = 'logo' | 'icon' | 'icon192' | 'favicon';
-export type Brand = { tenant_id: string; name: string; tagline: string | null; custom_name: boolean; assets: Partial<Record<BrandKind, number>> };
+export type BrandBadge = { text?: string | null; from?: string; to?: string; fg?: string; shape?: 'rounded' | 'circle' | 'square' };
+export type Brand = { tenant_id: string; name: string; tagline: string | null; custom_name: boolean; assets: Partial<Record<BrandKind, number>>; badge?: BrandBadge };
 
 const CACHE = 'sos.brand';
-export const DEFAULT_BRAND: Brand = { tenant_id: '', name: 'SoftifyOS', tagline: 'Enterprise Business OS', custom_name: false, assets: {} };
+export const DEFAULT_BRAND: Brand = { tenant_id: '', name: 'SoftifyOS', tagline: 'Enterprise Business OS', custom_name: false, assets: {}, badge: {} };
 
 export const brandAsset = (b: Brand, kind: BrandKind) => (b.assets[kind] ? `/api/brand/${b.tenant_id}/${kind}?v=${b.assets[kind]}` : null);
 

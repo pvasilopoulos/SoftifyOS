@@ -74,7 +74,10 @@ export function effectiveFilters(index: IndexKey, indexDefaults: Record<string, 
 }
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-export type FilterValues = Partial<Record<FilterKey, string | boolean | { min?: number; max?: number }>>;
+type FilterValue = string | boolean | { min?: number; max?: number };
+/** Built-in filters, plus custom fields (Module Forms) as cf_<c|b|s>_<key>. */
+export type FilterValues = Partial<Record<FilterKey, FilterValue>> & { [custom: `cf_${string}`]: FilterValue };
+const CUSTOM_KEY = /^cf_([cbs])_([a-z][a-z0-9_]{1,39})$/;
 
 /** Reads f_<key> (and f_<key>_min / f_<key>_max for ranges) from the query string; invalid values are ignored. */
 export function parseFilters(query: Record<string, unknown>, index: IndexKey): FilterValues {
@@ -99,6 +102,19 @@ export function parseFilters(query: Record<string, unknown>, index: IndexKey): F
     if (def.type === 'manager' && v !== 'me' && !UUID.test(v)) continue;
     out[key] = v;
   }
+  // Custom fields: f_cf_c_<key>=value (equals / contains / list member) or _min/_max (numbers)
+  for (const raw of Object.keys(query)) {
+    const m = /^f_(cf_[cbs]_[a-z][a-z0-9_]{1,39}?)(_min|_max)?$/.exec(raw);
+    if (!m || !CUSTOM_KEY.test(m[1])) continue;
+    const k = m[1] as `cf_${string}`;
+    if (m[2]) {
+      const n = Number(str(raw));
+      if (!str(raw) || !Number.isFinite(n)) continue;
+      const r = (typeof out[k] === 'object' ? out[k] : {}) as { min?: number; max?: number };
+      r[m[2] === '_min' ? 'min' : 'max'] = n;
+      out[k] = r;
+    } else if (str(raw)) out[k] = str(raw);
+  }
   return out;
 }
 
@@ -111,7 +127,22 @@ const and = (tx: Tx, parts: Frag[]) => parts.reduce((acc, p, i) => (i === 0 ? p 
 export function filterSql(tx: Tx, f: FilterValues, s: Session, target: 'customers' | 'stores', alias: { c: string; b?: string }) {
   const parts: Record<Entity, Frag[]> = { c: [], b: [], s: [] };
   const al: Record<Entity, string> = { c: alias.c, b: target === 'stores' ? alias.b! : 'fb', s: 'fs' };
-  for (const [key, value] of Object.entries(f) as [FilterKey, FilterValues[FilterKey]][]) {
+  for (const [key, value] of Object.entries(f) as [FilterKey, FilterValue][]) {
+    const cm = CUSTOM_KEY.exec(key);
+    if (cm) {
+      const e = cm[1] as Entity, a = tx(al[e]), ck = cm[2];
+      if (typeof value === 'object') {
+        const r = value as { min?: number; max?: number };
+        const num = tx`(CASE WHEN jsonb_typeof(${a}.custom -> ${ck}) = 'number' THEN (${a}.custom ->> ${ck})::numeric END)`;
+        if (r.min !== undefined) parts[e].push(tx`${num} >= ${r.min}`);
+        if (r.max !== undefined) parts[e].push(tx`${num} <= ${r.max}`);
+      } else {
+        const v = String(value);
+        // list member (multiselect), exact value (select / yes-no / number), or contains (text)
+        parts[e].push(tx`(${a}.custom -> ${ck} ? ${v} OR ${a}.custom ->> ${ck} = ${v} OR lower(${a}.custom ->> ${ck}) LIKE ${'%' + v.toLowerCase().replace(/[%_\\]/g, (c) => '\\' + c) + '%'})`);
+      }
+      continue;
+    }
     const def = FILTERS[key] as Def;
     if (key === 'c_archived') continue; // handled by the caller (separate archive list)
     const a = tx(al[def.entity]);

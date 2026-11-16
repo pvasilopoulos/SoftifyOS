@@ -12,13 +12,15 @@ import {
   Archive, ArchiveRestore, ArrowLeft, CalendarDays, CheckCircle2, ChevronDown, ChevronRight, FileText, Globe, Mail,
   MapPin, NotebookPen, Pencil, Phone, Plus, Smartphone, Star, StickyNote, Store, Trash2,
 } from 'lucide-react';
-import { api, type Activity, type Offer, type Page } from '@/lib/api';
+import { api, ApiError, type Activity, type Offer, type Page } from '@/lib/api';
+import { useToast } from '@/components/providers';
 import { date, money, relative } from '@/lib/format';
 import type { Branch, Contact, CustomerDetail, Space } from '@/lib/customers';
 import { Link, useRouter } from '@/i18n/navigation';
 import { Avatar, EntityTile, IconButton, Skeleton, StatusBadge, Tabs } from '@/components/ui';
 import { ActivityDialog, BranchDialog, ContactDialog, SpaceDialog } from '@/components/customer-dialogs';
 import { BranchDetails } from '@/components/branch-details';
+import { useCustomRows } from '@/components/custom-values';
 
 type Tab = 'overview' | 'subsidiaries' | 'branches' | 'contacts' | 'offers' | 'activity';
 type DialogState =
@@ -41,6 +43,7 @@ export default function CustomerPage({ params }: { params: Promise<{ id: string 
   const locale = useLocale();
   const router = useRouter();
   const qc = useQueryClient();
+  const toast = useToast();
   const sp = useSearchParams();
   const focusBranch = sp.get('branch');
   const [tab, setTab] = useState<Tab>(() => (['overview','subsidiaries','branches','contacts','offers','activity'].includes(sp.get('tab') ?? '') ? sp.get('tab') as Tab : 'overview'));
@@ -82,6 +85,23 @@ export default function CustomerPage({ params }: { params: Promise<{ id: string 
           <IconButton label={c.archived_at ? t('restore') : t('archive')}
             onClick={async () => { if (c.archived_at || await appConfirm(t('confirmArchive'))) archive.mutate(!c.archived_at); }}>
             {c.archived_at ? <ArchiveRestore size={20} /> : <Archive size={20} />}
+          </IconButton>
+        )}
+        {data.can.archive && (
+          <IconButton label={t('deleteCustomer')} className="text-danger hover:bg-danger-soft" onClick={async () => {
+            if (!(await appConfirm(t('confirmDeleteCustomer', { name: c.name }), { danger: true, confirmLabel: t('delete') }))) return;
+            try {
+              await api(`/customers/${id}`, { method: 'DELETE' });
+              qc.invalidateQueries({ queryKey: ['customers'] });
+              toast({ title: t('customerDeleted') });
+              router.push('/customers');
+            } catch (e) {
+              const b = e instanceof ApiError ? (e.body as { offers?: number; subsidiaries?: number }) : {};
+              toast({ title: t('cannotDelete'), body: e instanceof ApiError && e.code === 'has_offers' ? t('deleteHasOffers', { n: b.offers ?? 0 })
+                : e instanceof ApiError && e.code === 'has_subsidiaries' ? t('deleteHasSubsidiaries', { n: b.subsidiaries ?? 0 }) : undefined });
+            }
+          }}>
+            <Trash2 size={19} />
           </IconButton>
         )}
         {data.can.edit && <RegistryRefreshButton customerId={id} hasVat={!!c.vat} />}
@@ -175,6 +195,7 @@ export default function CustomerPage({ params }: { params: Promise<{ id: string 
             <Row k={t('creditLimit')} v={c.credit_limit ? money(c.credit_limit, locale, 0) : null} />
             <Row k={t('discount')} v={Number(c.discount) ? `${Number(c.discount)}%` : null} />
           </InfoCard>
+          <CustomCard custom={c.custom} />
           {c.notes && <InfoCard title={t('notes')} wide><p className="whitespace-pre-line text-sm">{c.notes}</p></InfoCard>}
         </div>
       )}
@@ -274,6 +295,18 @@ function Kpi({ label, value, sub, tone }: { label: string; value: string; sub?: 
       <div className={clsx('tabular mt-1 truncate text-xl font-bold', tone)}>{value}</div>
       {sub && <div className="mt-0.5 truncate text-xs text-muted">{sub}</div>}
     </div>
+  );
+}
+
+/** Custom fields of the customer (Module Forms); nothing when there are none. */
+function CustomCard({ custom }: { custom?: Record<string, unknown> }) {
+  const tf = useTranslations('forms');
+  const rows = useCustomRows('customer', custom);
+  if (!rows.length) return null;
+  return (
+    <InfoCard title={tf('customValues')}>
+      {rows.map((r) => <Row key={r.key} k={r.label} v={r.type === 'url' && r.value ? <a href={r.value} target="_blank" rel="noreferrer" className="text-primary underline">{r.value}</a> : r.value} />)}
+    </InfoCard>
   );
 }
 

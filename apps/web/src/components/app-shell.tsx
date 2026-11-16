@@ -1,4 +1,5 @@
 'use client';
+import { BrandBadge } from './brand-badge';
 import clsx from 'clsx';
 import { useQuery } from '@tanstack/react-query';
 import { useLocale, useTranslations } from 'next-intl';
@@ -26,9 +27,7 @@ export function Logo({ dark = false, signedIn = true }: { dark?: boolean; signed
         // eslint-disable-next-line @next/next/no-img-element
         <img src={logo} alt="" className={clsx('h-9 max-w-[120px] shrink-0 object-contain', dark && 'rounded-lg bg-white p-1')} />
       ) : (
-        <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-gradient-to-br from-[#7c63ff] to-[#4a2ee0] text-lg font-black text-white shadow-md">
-          {(brand.name.trim()[0] ?? 'S').toUpperCase()}
-        </span>
+        <BrandBadge brand={brand} />
       )}
       <div className="min-w-0 leading-tight">
         <div className={clsx('truncate text-lg font-extrabold tracking-tight', dark ? 'text-white' : 'text-text')}>{brand.name}</div>

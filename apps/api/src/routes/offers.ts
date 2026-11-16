@@ -9,6 +9,7 @@ import { enqueue } from '../jobs.js';
 import { env } from '../env.js';
 import { audit } from './settings.js';
 import { emitEvents, type EventSource, type WebhookEvent } from '../webhooks.js';
+import { applyForm } from '../forms.js';
 
 /** Webhook event with the offer's current headline data. */
 async function offerEvent(tx: Tx, tenantId: string, id: string, event: WebhookEvent, source: EventSource) {
@@ -22,6 +23,19 @@ const by = (s: Session): EventSource => ({ type: 'user', user_id: s.userId });
 
 const STATUSES = ['draft', 'in_progress', 'pending_approval', 'approved', 'sent', 'accepted', 'rejected'] as const;
 const EDITABLE = new Set(['draft', 'in_progress', 'approved', 'sent', 'rejected']);
+
+const customSchema = z.record(z.string().max(40), z.any()).optional();
+type Row = Record<string, unknown>;
+/** Form rules for the lines (offer_item): the same line of the previous version (same product / description) counts as "stored". */
+async function applyItems(tx: Tx, s: Session, items: Item[], prev: Row[]) {
+  const errs: Record<string, string> = {};
+  for (const [i, it] of items.entries()) {
+    const was = prev.find((p) => (it.product_id && p.product_id === it.product_id) || p.description === it.description) ?? null;
+    const e = await applyForm(tx, s, 'offer_item', it as Row, was);
+    for (const [k, v] of Object.entries(e)) errs[`items.${i}.${k}`] = v;
+  }
+  return errs;
+}
 
 const itemSchema = z.object({
   product_id: z.string().uuid().nullish(),
@@ -178,14 +192,18 @@ export default async function offerRoutes(app: FastifyInstance) {
         valid_until: z.coerce.date().nullish(),
         notes: z.string().max(5000).nullish(),
         items: z.array(itemSchema).min(1).max(500),
+        custom: customSchema,
       }).parse(req.body);
       const s = req.session;
       const offer = await withTenant(s.tenantId, async (tx) => {
+        const [parent] = await tx`SELECT * FROM customers WHERE id = ${b.customer_id}`;
+        const fields = { ...(await applyForm(tx, s, 'offer', b as Row, null, parent)), ...(await applyItems(tx, s, b.items, [])) };
+        if (Object.keys(fields).length) return { fields };
         const number = await nextNumber(tx, s.tenantId);
         const [o] = await tx`
-          INSERT INTO offers (tenant_id, number, customer_id, branch_id, space_id, company_id, owner_id, status, current_version, valid_until, notes)
+          INSERT INTO offers (tenant_id, number, customer_id, branch_id, space_id, company_id, owner_id, status, current_version, valid_until, notes, custom)
           VALUES (${s.tenantId}, ${number}, ${b.customer_id}, ${b.branch_id ?? null}, ${b.space_id ?? null},
-                  ${b.company_id ?? null}, ${s.userId}, 'draft', 1, ${b.valid_until ?? null}, ${b.notes ?? null})
+                  ${b.company_id ?? null}, ${s.userId}, 'draft', 1, ${(b.valid_until as Date | string | null) ?? null}, ${b.notes ?? null}, ${tx.json((b.custom ?? {}) as never)})
           RETURNING id, number, customer_id`;
         await offerEvent(tx, s.tenantId, o.id, 'offer.created', by(s));
         const c = await insertVersion(tx, s, o.id, 1, b.items, b.branch_id ?? null);
@@ -257,13 +275,19 @@ export default async function offerRoutes(app: FastifyInstance) {
         space_id: z.string().uuid().nullish(),
         company_id: z.string().uuid().nullish(),
         notes: z.string().max(5000).nullish(),
+        custom: customSchema,
       }).parse(req.body);
       const s = req.session;
       if (!can(s, 'offers.edit')) return reply.code(403).send({ error: 'forbidden' });
       const res = await withTenant(s.tenantId, async (tx) => {
-        const [o] = await tx`SELECT id, number, status, current_version, customer_id, branch_id FROM offers WHERE id = ${id} FOR UPDATE`;
+        const [o] = await tx`SELECT * FROM offers WHERE id = ${id} FOR UPDATE`;
         if (!o) return { code: 404 as const };
         if (!EDITABLE.has(o.status)) return { code: 409 as const };
+        const prev = await tx`
+          SELECT i.* FROM offer_items i JOIN offer_versions v ON v.id = i.version_id
+          WHERE v.offer_id = ${id} AND v.version = ${o.current_version} ORDER BY i.position`;
+        const fields = { ...(await applyForm(tx, s, 'offer', b as Row, o)), ...(await applyItems(tx, s, b.items, prev)) };
+        if (Object.keys(fields).length) return { code: 400 as const, fields };
         const v = o.current_version + 1;
         const c = await insertVersion(tx, s, id, v, b.items, b.branch_id === undefined ? o.branch_id : b.branch_id, b.note);
         // A new version invalidates previous approvals and the public link
@@ -274,7 +298,8 @@ export default async function offerRoutes(app: FastifyInstance) {
                  branch_id = ${b.branch_id === undefined ? tx`branch_id` : b.branch_id},
                  space_id = ${b.space_id === undefined ? tx`space_id` : b.space_id},
                  company_id = ${b.company_id === undefined ? tx`company_id` : b.company_id},
-                 notes = ${b.notes === undefined ? tx`notes` : b.notes}
+                 notes = ${b.notes === undefined ? tx`notes` : b.notes},
+                 custom = ${b.custom === undefined ? tx`custom` : tx.json(b.custom as never)}
           WHERE id = ${id}`;
         await logActivity(tx, s, o, 'offer_updated', 'Νέα έκδοση προσφοράς', `${o.number} · v.${String(v).padStart(2, '0')}`);
         return { code: 200 as const, version: v };

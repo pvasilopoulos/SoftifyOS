@@ -15,18 +15,24 @@ const MIMES = ['image/png', 'image/jpeg', 'image/webp'] as const;
 const MAX_BYTES = 1024 * 1024;
 const key = new TextEncoder().encode(env.jwtSecret);
 
-export type Brand = { tenant_id: string; name: string; tagline: string | null; custom_name: boolean; assets: Partial<Record<Kind, number>> };
+export type Badge = { text?: string | null; from?: string; to?: string; fg?: string; shape?: 'rounded' | 'circle' | 'square' };
+export type Brand = { tenant_id: string; name: string; tagline: string | null; custom_name: boolean; assets: Partial<Record<Kind, number>>; badge: Badge };
+const hex = z.string().regex(/^#[0-9a-fA-F]{6}$/);
+const badgeSchema = z.object({
+  text: z.string().trim().max(3).nullish().transform((v) => v || null),
+  from: hex.optional(), to: hex.optional(), fg: hex.optional(), shape: z.enum(['rounded', 'circle', 'square']).optional(),
+});
 
 /** Effective branding of a tenant (asset values are version numbers for cache busting). */
 export async function loadBrand(tenantId: string): Promise<Brand | null> {
   const [t] = await sql`
-    SELECT t.id, t.name, t.brand_name, t.brand_tagline,
+    SELECT t.id, t.name, t.brand_name, t.brand_tagline, t.brand_badge,
            coalesce((SELECT jsonb_object_agg(kind, (extract(epoch FROM updated_at) * 1000)::bigint) FROM tenant_assets a WHERE a.tenant_id = t.id), '{}') AS assets
     FROM tenants t WHERE t.id = ${tenantId}`;
   if (!t) return null;
   return {
     tenant_id: t.id, name: t.brand_name ?? 'SoftifyOS', tagline: t.brand_name ? t.brand_tagline : (t.brand_tagline ?? 'Enterprise Business OS'),
-    custom_name: !!t.brand_name, assets: Object.fromEntries(Object.entries(t.assets as Record<string, string>).map(([k, v]) => [k, Number(v)])),
+    custom_name: !!t.brand_name, badge: t.brand_badge ?? {}, assets: Object.fromEntries(Object.entries(t.assets as Record<string, string>).map(([k, v]) => [k, Number(v)])),
   };
 }
 
@@ -122,6 +128,19 @@ export default async function brandingRoutes(app: FastifyInstance) {
       await withTenant(s.tenantId, async (tx) => {
         await tx`UPDATE tenants SET brand_name = ${b.brand_name}, brand_tagline = ${b.brand_tagline}, updated_at = now() WHERE id = ${s.tenantId}`;
         await audit(tx, s, 'branding.update', b.brand_name, b);
+      });
+      return loadBrand(s.tenantId);
+    });
+
+    // Badge (shown instead of a logo): text, gradient colours, text colour, shape. {} = default.
+    r.put('/settings/branding/badge', async (req, reply) => {
+      if (!can(req.session, 'settings.manage')) return reply.code(403).send({ error: 'forbidden' });
+      const b = badgeSchema.parse(req.body ?? {});
+      const s = req.session;
+      const clean = Object.fromEntries(Object.entries(b).filter(([, v]) => v !== undefined && v !== null));
+      await withTenant(s.tenantId, async (tx) => {
+        await tx`UPDATE tenants SET brand_badge = ${tx.json(clean as never)}, updated_at = now() WHERE id = ${s.tenantId}`;
+        await audit(tx, s, 'branding.badge', null, clean);
       });
       return loadBrand(s.tenantId);
     });

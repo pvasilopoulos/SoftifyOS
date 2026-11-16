@@ -12,7 +12,7 @@ import { env } from './env.js';
 import { sql, type Tx } from './db.js';
 
 export const WEBHOOK_EVENTS = [
-  'customer.created', 'customer.updated', 'customer.archived',
+  'customer.created', 'customer.updated', 'customer.archived', 'customer.deleted',
   'branch.created', 'branch.updated', 'branch.deleted',
   'space.created', 'space.updated', 'space.deleted',
   'offer.created', 'offer.submitted', 'offer.approved', 'offer.sent', 'offer.accepted', 'offer.rejected',

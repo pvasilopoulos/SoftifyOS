@@ -53,6 +53,7 @@ export function Segmented<T extends string>({ value, onChange, options }: {
       {options.map((o) => (
         <button
           key={o.value}
+          type="button"
           onClick={() => onChange(o.value)}
           className={clsx(
             'shrink-0 rounded-full px-4 py-1.5 text-sm font-medium transition',
@@ -74,6 +75,7 @@ export function Tabs<T extends string>({ value, onChange, options }: {
       {options.map((o) => (
         <button
           key={o.value}
+          type="button"
           onClick={() => onChange(o.value)}
           className={clsx('-mb-px shrink-0 border-b-2 pb-2.5 text-sm font-medium transition',
             value === o.value ? 'border-primary text-primary' : 'border-transparent text-muted')}
@@ -110,7 +112,7 @@ export function PageHeader({ title, actions, back }: { title: ReactNode; actions
 
 export function IconButton({ children, onClick, label, className }: { children: ReactNode; onClick?: () => void; label: string; className?: string }) {
   return (
-    <button aria-label={label} onClick={onClick} className={clsx('grid h-10 w-10 place-items-center rounded-full text-text transition hover:bg-surface-2', className)}>
+    <button type="button" aria-label={label} onClick={onClick} className={clsx('grid h-10 w-10 place-items-center rounded-full text-text transition hover:bg-surface-2', className)}>
       {children}
     </button>
   );

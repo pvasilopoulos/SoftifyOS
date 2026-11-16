@@ -2,12 +2,16 @@
 // branches & spaces, contacts, activity log, VAT validation and duplicate check.
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import { decodeCursor, encodeCursor, searchKey, withTenant, type Tx } from '../db.js';
+import { decodeCursor, encodeCursor, likeAny, searchKey, searchPatterns, withTenant, type Tx } from '../db.js';
 import { can, requireAuth, type Session } from '../auth.js';
 import { publish } from '../realtime.js';
 import { emitEntityEvents, emitEvents } from '../webhooks.js';
 import { ALL_LISTS, canonicalName, canonicalizeFields } from '../lookups.js';
 import { filterSql, parseFilters } from '../filters.js';
+import { applyForm, loadCustom } from '../forms.js';
+
+const customSchema = z.record(z.string().max(40), z.any()).optional();
+type Row = Record<string, unknown>;
 
 // Fields whose value must come from a value list (stored as the value's name)
 const CUSTOMER_LIST_FIELDS = [['category', 'customer_category'], ['source', 'customer_source'], ['payment_terms', 'payment_terms'], ['address_region', 'prefecture']] as const;
@@ -60,6 +64,7 @@ const customerSchema = z.object({
   discount: z.coerce.number().min(0).max(100).default(0),
   annual_value: z.coerce.number().min(0).max(1e13).default(0),
   notes: opt(10000),
+  custom: customSchema,
 }).superRefine((c, ctx) => {
   if (c.vat && c.address_country === 'GR' && !isValidAfm(c.vat)) {
     ctx.addIssue({ code: 'custom', path: ['vat'], message: 'invalid_afm' });
@@ -146,7 +151,7 @@ export default async function customerRoutes(app: FastifyInstance) {
     const s = req.session;
     const T = s.tenantId;
     const cur = decodeCursor<[string, string]>(q.cursor);
-    const key = q.q && q.q.length >= 2 ? `%${searchKey(q.q)}%` : null;
+    const key = q.q && q.q.length >= 2 ? searchPatterns(q.q) : null;
     const manager = q.manager === 'me' ? s.userId : q.manager;
     const withBranches = q.include === 'branches';
     // f_* = filters from Settings → Indexes (customer, store and space fields)
@@ -166,7 +171,7 @@ export default async function customerRoutes(app: FastifyInstance) {
                ${withBranches ? tx`, (
                  SELECT coalesce(json_agg(x ORDER BY x.name), '[]') FROM (
                    SELECT b.id, b.name, b.trade_name, b.city, b.region, b.address, b.postal_code, b.phone, b.manager_name,
-                          b.status, b.spaces_count, b.geo_zone_id, b.fee_schedule_id, b.tour_id, b.ongoing_status_id, b.seasonality, b.season_months,
+                          b.status, b.spaces_count, b.geo_zone_id, b.fee_schedule_id, b.tour_id, b.ongoing_status_id, b.seasonality, b.season_months, b.custom,
                           (SELECT name FROM lookup_values WHERE id = b.ongoing_status_id) AS ongoing_status_name,
                           (SELECT name FROM lookup_values WHERE id = b.geo_zone_id) AS geo_zone_name,
                           (SELECT name FROM lookup_values WHERE id = b.fee_schedule_id) AS fee_schedule_name,
@@ -177,7 +182,7 @@ export default async function customerRoutes(app: FastifyInstance) {
                                   ORDER BY sp.name), '[]') FROM spaces sp WHERE sp.branch_id = b.id) AS spaces
                    FROM branches b WHERE b.customer_id = customers.id ORDER BY b.name LIMIT 50) x
                ) AS branches` : tx``}
-               ${withBranches && key ? tx`, ARRAY(SELECT b.id FROM branches b WHERE b.customer_id = customers.id AND b.search LIKE ${key}) AS matched_branches` : tx``}
+               ${withBranches && key ? tx`, ARRAY(SELECT b.id FROM branches b WHERE b.customer_id = customers.id AND (${likeAny(tx, 'b.search', key)})) AS matched_branches` : tx``}
         FROM customers
         WHERE tenant_id = ${T}
           ${archived ? tx`AND archived_at IS NOT NULL` : tx`AND archived_at IS NULL`}
@@ -186,8 +191,8 @@ export default async function customerRoutes(app: FastifyInstance) {
           ${q.kind ? tx`AND kind = ${q.kind}` : tx``}
           ${manager ? tx`AND account_manager_id = ${manager}` : tx``}
           ${q.tag ? tx`AND tags @> ARRAY[${q.tag}]::text[]` : tx``}
-          ${key && withBranches ? tx`AND (search LIKE ${key} OR id IN (SELECT customer_id FROM branches WHERE tenant_id = ${T} AND search LIKE ${key}))`
-            : key ? tx`AND search LIKE ${key}` : tx``}
+          ${key && withBranches ? tx`AND ((${likeAny(tx, 'search', key)}) OR id IN (SELECT customer_id FROM branches WHERE tenant_id = ${T} AND (${likeAny(tx, 'search', key)})))`
+            : key ? tx`AND (${likeAny(tx, 'search', key)})` : tx``}
           ${after}
         ORDER BY ${order}
         LIMIT ${q.limit + 1}`;
@@ -216,7 +221,7 @@ export default async function customerRoutes(app: FastifyInstance) {
     const s = req.session;
     const T = s.tenantId;
     const cur = decodeCursor<string[]>(q.cursor);
-    const key = q.q && q.q.length >= 2 ? `%${searchKey(q.q)}%` : null;
+    const key = q.q && q.q.length >= 2 ? searchPatterns(q.q) : null;
     const f = parseFilters(req.query as Record<string, unknown>, 'stores');
 
     return withTenant(T, async (tx) => {
@@ -244,7 +249,7 @@ export default async function customerRoutes(app: FastifyInstance) {
           ${q.city ? tx`AND b.city_key = ${searchKey(q.city)}` : tx``}
           ${q.manager ? tx`AND c.account_manager_id = ${s.userId}` : tx``}
           ${filterSql(tx, f, s, 'stores', { c: 'c', b: 'b' })}
-          ${key ? tx`AND (b.search LIKE ${key} OR b.customer_id IN (SELECT id FROM customers WHERE tenant_id = ${T} AND search LIKE ${key}))` : tx``}
+          ${key ? tx`AND ((${likeAny(tx, 'b.search', key)}) OR b.customer_id IN (SELECT id FROM customers WHERE tenant_id = ${T} AND (${likeAny(tx, 'search', key)})))` : tx``}
           ${after}
         ORDER BY ${order}
         LIMIT ${q.limit + 1}`;
@@ -281,26 +286,28 @@ export default async function customerRoutes(app: FastifyInstance) {
     const s = req.session;
     const T = s.tenantId;
     const f = parseFilters(req.query as Record<string, unknown>, q.tree === '1' ? 'tree' : 'customers');
-    const key = q.q && q.q.length >= 2 ? `%${searchKey(q.q)}%` : null;
+    const key = q.q && q.q.length >= 2 ? searchPatterns(q.q) : null;
     const rows = await withTenant(T, (tx) => tx`
       SELECT c.code, c.name, c.trade_name, c.kind, c.status, c.vat, c.tax_office, c.category, c.source, c.payment_terms,
              c.email, c.phone, c.address_street, c.address_city, c.address_postal, c.address_region,
              (SELECT name FROM lookup_values WHERE id = c.geo_zone_id) AS geo_zone, u.full_name AS manager,
-             c.annual_value, c.branches_count, c.spaces_count, c.tags, c.created_at
+             c.annual_value, c.branches_count, c.spaces_count, c.tags, c.created_at, c.custom
       FROM customers c LEFT JOIN users u ON u.id = c.account_manager_id
       WHERE c.tenant_id = ${T} ${f.c_archived ? tx`AND c.archived_at IS NOT NULL` : tx`AND c.archived_at IS NULL`}
         ${filterSql(tx, f, s, 'customers', { c: 'c' })}
         ${key ? (q.tree === '1'
-          ? tx`AND (c.search LIKE ${key} OR c.id IN (SELECT customer_id FROM branches WHERE tenant_id = ${T} AND search LIKE ${key}))`
-          : tx`AND c.search LIKE ${key}`) : tx``}
+          ? tx`AND ((${likeAny(tx, 'c.search', key)}) OR c.id IN (SELECT customer_id FROM branches WHERE tenant_id = ${T} AND (${likeAny(tx, 'search', key)})))`
+          : tx`AND (${likeAny(tx, 'c.search', key)})`) : tx``}
       ORDER BY c.name LIMIT 50000`);
     await withTenant(T, (tx) => tx`INSERT INTO audit_log (tenant_id, actor_id, action, entity, details)
       VALUES (${T}, ${s.userId}, 'customers.export', null, ${tx.json({ rows: rows.length })})`);
+    const cf = await withTenant(T, (tx) => loadCustom(tx, T, 'customer'));
     return sendCsv(reply, 'customers',
       ['code', 'name', 'trade_name', 'kind', 'status', 'vat', 'tax_office', 'category', 'source', 'payment_terms', 'email', 'phone',
-        'street', 'city', 'postal', 'prefecture', 'geo_zone', 'account_manager', 'annual_value', 'stores', 'spaces', 'tags', 'created_at'],
+        'street', 'city', 'postal', 'prefecture', 'geo_zone', 'account_manager', 'annual_value', 'stores', 'spaces', 'tags', 'created_at', ...cf.map((f) => `cf_${f.key}`)],
       rows.map((r) => [r.code, r.name, r.trade_name, r.kind, r.status, r.vat, r.tax_office, r.category, r.source, r.payment_terms, r.email, r.phone,
-        r.address_street, r.address_city, r.address_postal, r.address_region, r.geo_zone, r.manager, r.annual_value, r.branches_count, r.spaces_count, r.tags, r.created_at]));
+        r.address_street, r.address_city, r.address_postal, r.address_region, r.geo_zone, r.manager, r.annual_value, r.branches_count, r.spaces_count, r.tags, r.created_at,
+        ...cf.map((f) => r.custom?.[f.key] ?? null)]));
   });
 
   app.get('/branches/export.csv', async (req, reply) => {
@@ -308,23 +315,24 @@ export default async function customerRoutes(app: FastifyInstance) {
     const s = req.session;
     const T = s.tenantId;
     const f = parseFilters(req.query as Record<string, unknown>, 'stores');
-    const key = q.q && q.q.length >= 2 ? `%${searchKey(q.q)}%` : null;
+    const key = q.q && q.q.length >= 2 ? searchPatterns(q.q) : null;
     const rows = await withTenant(T, (tx) => tx`
       SELECT c.code AS customer_code, c.name AS customer, b.name, b.trade_name, b.status, b.address, b.city, b.postal_code, b.region,
              b.phone, b.manager_name, (SELECT name FROM lookup_values WHERE id = b.geo_zone_id) AS geo_zone,
              (SELECT name FROM lookup_values WHERE id = b.fee_schedule_id) AS fee_schedule, (SELECT name FROM lookup_values WHERE id = b.tour_id) AS tour,
-             (SELECT name FROM lookup_values WHERE id = b.ongoing_status_id) AS ongoing_status, b.seasonality, b.season_months, b.spaces_count
+             (SELECT name FROM lookup_values WHERE id = b.ongoing_status_id) AS ongoing_status, b.seasonality, b.season_months, b.spaces_count, b.custom
       FROM branches b JOIN customers c ON c.id = b.customer_id
       WHERE b.tenant_id = ${T} AND c.archived_at IS NULL ${filterSql(tx, f, s, 'stores', { c: 'c', b: 'b' })}
-        ${key ? tx`AND (b.search LIKE ${key} OR b.customer_id IN (SELECT id FROM customers WHERE tenant_id = ${T} AND search LIKE ${key}))` : tx``}
+        ${key ? tx`AND ((${likeAny(tx, 'b.search', key)}) OR b.customer_id IN (SELECT id FROM customers WHERE tenant_id = ${T} AND (${likeAny(tx, 'search', key)})))` : tx``}
       ORDER BY c.name, b.name LIMIT 50000`);
     await withTenant(T, (tx) => tx`INSERT INTO audit_log (tenant_id, actor_id, action, entity, details)
       VALUES (${T}, ${s.userId}, 'branches.export', null, ${tx.json({ rows: rows.length })})`);
+    const cf = await withTenant(T, (tx) => loadCustom(tx, T, 'branch'));
     return sendCsv(reply, 'stores',
       ['customer_code', 'customer', 'store', 'trade_name', 'status', 'address', 'city', 'postal', 'prefecture', 'phone', 'manager',
-        'geo_zone', 'fee_schedule', 'tour', 'ongoing_status', 'seasonality', 'season_months', 'spaces'],
+        'geo_zone', 'fee_schedule', 'tour', 'ongoing_status', 'seasonality', 'season_months', 'spaces', ...cf.map((f) => `cf_${f.key}`)],
       rows.map((r) => [r.customer_code, r.customer, r.name, r.trade_name, r.status, r.address, r.city, r.postal_code, r.region, r.phone, r.manager_name,
-        r.geo_zone, r.fee_schedule, r.tour, r.ongoing_status, r.seasonality, r.season_months, r.spaces_count]));
+        r.geo_zone, r.fee_schedule, r.tour, r.ongoing_status, r.seasonality, r.season_months, r.spaces_count, ...cf.map((f) => r.custom?.[f.key] ?? null)]));
   });
 
   // Customer cities (city filter on the customer lists), most customers first
@@ -340,10 +348,10 @@ export default async function customerRoutes(app: FastifyInstance) {
   app.get('/customers/groups', async (req) => {
     const { q } = z.object({ q: z.string().trim().max(100).optional() }).parse(req.query);
     const T = req.session.tenantId;
-    const key = q && q.length >= 2 ? `%${searchKey(q)}%` : null;
+    const key = q && q.length >= 2 ? searchPatterns(q) : null;
     return withTenant(T, (tx) => tx`
       SELECT id, name, code FROM customers
-      WHERE tenant_id = ${T} AND kind = 'group' AND archived_at IS NULL ${key ? tx`AND search LIKE ${key}` : tx``}
+      WHERE tenant_id = ${T} AND kind = 'group' AND archived_at IS NULL ${key ? tx`AND (${likeAny(tx, 'search', key)})` : tx``}
       ORDER BY name LIMIT 20`);
   });
 
@@ -385,7 +393,7 @@ export default async function customerRoutes(app: FastifyInstance) {
         SELECT b.id, b.name, b.trade_name, b.city, b.region, b.address, b.postal_code, b.phone, b.manager_name, b.status, b.spaces_count,
                b.geo_zone_id, b.fee_schedule_id, b.tour_id, b.ongoing_status_id, b.seasonality, b.season_months,
                gz.name AS geo_zone_name, fs.name AS fee_schedule_name, tr.name AS tour_name, os.name AS ongoing_status_name,
-               coalesce(json_agg(json_build_object('id', s.id, 'name', s.name, 'kind', s.kind, 'area_sqm', s.area_sqm, 'notes', s.notes)
+               coalesce(json_agg(json_build_object('id', s.id, 'name', s.name, 'kind', s.kind, 'area_sqm', s.area_sqm, 'notes', s.notes, 'custom', s.custom)
                         ORDER BY s.name) FILTER (WHERE s.id IS NOT NULL), '[]') AS spaces
         FROM branches b LEFT JOIN spaces s ON s.branch_id = b.id
         LEFT JOIN lookup_values gz ON gz.id = b.geo_zone_id
@@ -395,7 +403,7 @@ export default async function customerRoutes(app: FastifyInstance) {
         WHERE b.tenant_id = ${T} AND b.customer_id = ${id}
         GROUP BY b.id, gz.name, fs.name, tr.name, os.name ORDER BY b.name LIMIT 200`;
       const contacts = await tx`
-        SELECT id, full_name, role_title, email, phone, mobile, is_primary, notes
+        SELECT id, full_name, role_title, email, phone, mobile, is_primary, notes, custom
         FROM contacts WHERE tenant_id = ${T} AND customer_id = ${id}
         ORDER BY is_primary DESC, full_name LIMIT 200`;
       const subsidiaries = await tx`
@@ -417,6 +425,8 @@ export default async function customerRoutes(app: FastifyInstance) {
     const c = customerSchema.parse(req.body);
     const s = req.session;
     const res = await withTenant(s.tenantId, async (tx) => {
+      const fields = await applyForm(tx, s, 'customer', c as Row, null);
+      if (Object.keys(fields).length) return { error: 'validation' as const, fields };
       if (!(await validParent(tx, null, c.parent_id))) return { error: 'invalid_parent' as const };
       if (!(await validLookup(tx, c.geo_zone_id, 'geo_zone'))) return { error: 'invalid_geo_zone' as const };
       if (await canonicalizeFields(tx, s.tenantId, c, CUSTOMER_LIST_FIELDS)) return { error: 'invalid_value' as const };
@@ -450,7 +460,7 @@ export default async function customerRoutes(app: FastifyInstance) {
       }
       return { error: 'code_exhausted' as const };
     });
-    if ('error' in res) return reply.code(res.error === 'code_taken' ? 409 : 400).send({ error: res.error });
+    if ('error' in res) return reply.code(res.error === 'code_taken' ? 409 : 400).send({ error: res.error, fields: 'fields' in res ? res.fields : undefined });
     await publish({ tenantId: s.tenantId, type: 'customer.created', data: { id: res.customer.id } });
     return reply.code(201).send(res.customer);
   });
@@ -462,8 +472,10 @@ export default async function customerRoutes(app: FastifyInstance) {
     const c = customerSchema.parse(req.body);
     const s = req.session;
     const res = await withTenant(s.tenantId, async (tx) => {
-      const [old] = await tx`SELECT parent_id, status, name, code FROM customers WHERE id = ${id} FOR UPDATE`;
+      const [old] = await tx`SELECT * FROM customers WHERE id = ${id} FOR UPDATE`;
       if (!old) return { code: 404, error: 'not_found' };
+      const fields = await applyForm(tx, s, 'customer', c as Row, old);
+      if (Object.keys(fields).length) return { code: 400, error: 'validation', fields };
       if (!(await validParent(tx, id, c.parent_id))) return { code: 400, error: 'invalid_parent' };
       if (!(await validLookup(tx, c.geo_zone_id, 'geo_zone'))) return { code: 400, error: 'invalid_geo_zone' };
       if (await canonicalizeFields(tx, s.tenantId, c, CUSTOMER_LIST_FIELDS)) return { code: 400, error: 'invalid_value' };
@@ -482,7 +494,7 @@ export default async function customerRoutes(app: FastifyInstance) {
       for (const p of new Set([old.parent_id, c.parent_id].filter(Boolean))) await refreshCounts(tx, p as string);
       return { code: 200, error: null };
     });
-    if (res.code !== 200) return reply.code(res.code).send({ error: res.error });
+    if (res.code !== 200) return reply.code(res.code).send({ error: res.error, fields: 'fields' in res ? res.fields : undefined });
     await publish({ tenantId: s.tenantId, type: 'customer.updated', data: { id } });
     return { ok: true };
   });
@@ -504,6 +516,31 @@ export default async function customerRoutes(app: FastifyInstance) {
     return { ok: true };
   });
 
+  // ---- Permanent delete ----
+  // Only for customers without offers or subsidiaries (offers are business records: archive instead).
+  // Stores, spaces and contacts go with the customer; its activity history is removed too.
+  app.delete('/customers/:id', async (req, reply) => {
+    if (!can(req.session, 'customers.delete')) return reply.code(403).send({ error: 'forbidden' });
+    const { id } = idParam.parse(req.params);
+    const s = req.session;
+    const res = await withTenant(s.tenantId, async (tx) => {
+      const [c] = await tx`SELECT id, name, code, external_id, parent_id FROM customers WHERE id = ${id} FOR UPDATE`;
+      if (!c) return { code: 404, body: { error: 'not_found' } };
+      const [{ offers }] = await tx`SELECT count(*)::int AS offers FROM offers WHERE tenant_id = ${s.tenantId} AND customer_id = ${id}`;
+      const [{ subs }] = await tx`SELECT count(*)::int AS subs FROM customers WHERE tenant_id = ${s.tenantId} AND parent_id = ${id}`;
+      if (offers || subs) return { code: 409, body: { error: offers ? 'has_offers' : 'has_subsidiaries', offers, subsidiaries: subs } };
+      await tx`DELETE FROM activities WHERE tenant_id = ${s.tenantId} AND customer_id = ${id}`;
+      await tx`DELETE FROM customers WHERE id = ${id}`;
+      await emitEvents(tx, s.tenantId, [{ event: 'customer.deleted', data: { id, external_id: c.external_id, code: c.code, name: c.name } }], { type: 'user', user_id: s.userId });
+      await tx`INSERT INTO audit_log (tenant_id, actor_id, action, entity, details)
+               VALUES (${s.tenantId}, ${s.userId}, 'customers.delete', ${c.name}, ${tx.json({ id, code: c.code })})`;
+      if (c.parent_id) await refreshCounts(tx, c.parent_id);
+      return { code: 200, body: { ok: true } };
+    });
+    if (res.code === 200) await publish({ tenantId: s.tenantId, type: 'customer.updated', data: { id } });
+    return reply.code(res.code).send(res.body);
+  });
+
   // ---- Activity log ----
   app.get('/customers/:id/activities', async (req) => {
     const { id } = idParam.parse(req.params);
@@ -512,7 +549,7 @@ export default async function customerRoutes(app: FastifyInstance) {
     const T = req.session.tenantId;
     return withTenant(T, async (tx) => {
       const rows = await tx`
-        SELECT a.id, a.kind, a.title, a.body, a.occurred_at, u.full_name AS actor_name
+        SELECT a.id, a.kind, a.title, a.body, a.custom, a.occurred_at, u.full_name AS actor_name
         FROM activities a LEFT JOIN users u ON u.id = a.actor_id
         WHERE a.tenant_id = ${T} AND a.customer_id = ${id}
           ${cur ? tx`AND (a.occurred_at, a.id) < (${cur[0]}::timestamptz, ${cur[1]}::uuid)` : tx``}
@@ -527,9 +564,17 @@ export default async function customerRoutes(app: FastifyInstance) {
   app.post('/customers/:id/activities', async (req, reply) => {
     if (!can(req.session, 'customers.edit')) return reply.code(403).send({ error: 'forbidden' });
     const { id } = idParam.parse(req.params);
-    const b = z.object({ kind: z.enum(ACTIVITY_KINDS), title: z.string().trim().min(1).max(200), body: opt(5000) }).parse(req.body);
+    const b = z.object({ kind: z.enum(ACTIVITY_KINDS).default('note'), title: z.string().trim().min(1).max(200), body: opt(5000), custom: customSchema }).parse(req.body);
     const s = req.session;
-    await withTenant(s.tenantId, (tx) => log(tx, s, id, b.kind, b.title, b.body));
+    const fields = await withTenant(s.tenantId, async (tx) => {
+      const [parent] = await tx`SELECT * FROM customers WHERE id = ${id}`;
+      const errs = await applyForm(tx, s, 'activity', b as Row, null, parent);
+      if (Object.keys(errs).length) return errs;
+      await tx`INSERT INTO activities (tenant_id, customer_id, actor_id, kind, title, body, custom)
+               VALUES (${s.tenantId}, ${id}, ${s.userId}, ${b.kind}, ${b.title}, ${b.body ?? null}, ${tx.json((b.custom ?? {}) as never)})`;
+      return null;
+    });
+    if (fields) return reply.code(400).send({ error: 'validation', fields });
     return reply.code(201).send({ ok: true });
   });
 
@@ -555,6 +600,7 @@ export default async function customerRoutes(app: FastifyInstance) {
     geo_zone_id: uuidOrNull, fee_schedule_id: uuidOrNull, tour_id: uuidOrNull, ongoing_status_id: uuidOrNull,
     seasonality: z.enum(['all_year', 'summer', 'winter', 'custom']).default('all_year'),
     season_months: z.array(z.coerce.number().int().min(1).max(12)).max(12).default([]),
+    custom: customSchema,
   }).transform((b) => ({
     ...b,
     // months only matter for "custom"; keep them sorted and unique
@@ -578,6 +624,10 @@ export default async function customerRoutes(app: FastifyInstance) {
     const b = branchSchema.parse(req.body);
     const s = req.session;
     const row = await withTenant(s.tenantId, async (tx) => {
+      const [parent] = await tx`SELECT * FROM customers WHERE id = ${id}`;
+      if (!parent) return 'missing' as const;
+      const fields = await applyForm(tx, s, 'branch', b as Row, null, parent);
+      if (Object.keys(fields).length) return { fields };
       if (!(await branchLookupsValid(tx, b, s.tenantId))) return null;
       const [r] = await tx`INSERT INTO branches ${tx({ ...branchRow(tx, b), tenant_id: s.tenantId, customer_id: id })} RETURNING id`;
       await log(tx, s, id, 'note', 'Νέο κατάστημα', b.name);
@@ -585,6 +635,8 @@ export default async function customerRoutes(app: FastifyInstance) {
       await refreshCounts(tx, id);
       return r;
     });
+    if (row === 'missing') return reply.code(404).send({ error: 'not_found' });
+    if (row && 'fields' in row) return reply.code(400).send({ error: 'validation', fields: row.fields });
     return row ? reply.code(201).send(row) : reply.code(400).send({ error: 'invalid_lookup' });
   });
 
@@ -594,11 +646,16 @@ export default async function customerRoutes(app: FastifyInstance) {
     const b = branchSchema.parse(req.body);
     const s = req.session;
     const res = await withTenant(s.tenantId, async (tx) => {
+      const [old] = await tx`SELECT * FROM branches WHERE id = ${id} FOR UPDATE`;
+      if (!old) return 404;
+      const fields = await applyForm(tx, s, 'branch', b as Row, old);
+      if (Object.keys(fields).length) return { fields };
       if (!(await branchLookupsValid(tx, b, s.tenantId))) return 400;
       const [r] = await tx`UPDATE branches SET ${tx(branchRow(tx, b))}, updated_at = now() WHERE id = ${id} RETURNING id`;
       if (r) await emitEntityEvents(tx, s.tenantId, 'branch', 'updated', [id], { type: 'user', user_id: s.userId });
       return r ? 200 : 404;
     });
+    if (typeof res === 'object') return reply.code(400).send({ error: 'validation', fields: res.fields });
     return res === 200 ? { ok: true } : reply.code(res).send({ error: res === 404 ? 'not_found' : 'invalid_lookup' });
   });
 
@@ -644,6 +701,7 @@ export default async function customerRoutes(app: FastifyInstance) {
   const spaceSchema = z.object({
     name: z.string().trim().min(1).max(200), kind: opt(80),
     area_sqm: z.coerce.number().min(0).max(1e7).nullish().transform((v) => v ?? null), notes: opt(2000),
+    custom: customSchema,
   });
 
   app.post('/branches/:id/spaces', async (req, reply) => {
@@ -652,8 +710,10 @@ export default async function customerRoutes(app: FastifyInstance) {
     const b = spaceSchema.parse(req.body);
     const s = req.session;
     const row = await withTenant(s.tenantId, async (tx) => {
-      const [br] = await tx`SELECT customer_id FROM branches WHERE id = ${id}`;
+      const [br] = await tx`SELECT * FROM branches WHERE id = ${id}`;
       if (!br) return null;
+      const fields = await applyForm(tx, s, 'space', b as Row, null, br);
+      if (Object.keys(fields).length) return { fields };
       const kind = await canonicalName(tx, s.tenantId, 'space_kind', b.kind);
       if (kind === false) return 'invalid' as const;
       b.kind = kind ?? null;
@@ -663,6 +723,7 @@ export default async function customerRoutes(app: FastifyInstance) {
       return r;
     });
     if (row === 'invalid') return reply.code(400).send({ error: 'invalid_value' });
+    if (row && 'fields' in row) return reply.code(400).send({ error: 'validation', fields: row.fields });
     return row ? reply.code(201).send(row) : reply.code(404).send({ error: 'not_found' });
   });
 
@@ -672,6 +733,10 @@ export default async function customerRoutes(app: FastifyInstance) {
     const b = spaceSchema.parse(req.body);
     const s = req.session;
     const ok = await withTenant(s.tenantId, async (tx) => {
+      const [old] = await tx`SELECT * FROM spaces WHERE id = ${id} FOR UPDATE`;
+      if (!old) return false;
+      const fields = await applyForm(tx, s, 'space', b as Row, old);
+      if (Object.keys(fields).length) return { fields };
       const kind = await canonicalName(tx, s.tenantId, 'space_kind', b.kind);
       if (kind === false) return 'invalid' as const;
       b.kind = kind ?? null;
@@ -680,6 +745,7 @@ export default async function customerRoutes(app: FastifyInstance) {
       return !!r;
     });
     if (ok === 'invalid') return reply.code(400).send({ error: 'invalid_value' });
+    if (typeof ok === 'object') return reply.code(400).send({ error: 'validation', fields: ok.fields });
     return ok ? { ok } : reply.code(404).send({ error: 'not_found' });
   });
 
@@ -702,6 +768,7 @@ export default async function customerRoutes(app: FastifyInstance) {
     full_name: z.string().trim().min(2).max(120), role_title: opt(120),
     email: z.string().trim().email().max(200).nullish().or(z.literal('')).transform((v) => (v ? v : null)),
     phone: opt(40), mobile: opt(40), is_primary: z.boolean().default(false), notes: opt(2000),
+    custom: customSchema,
   });
 
   app.post('/customers/:id/contacts', async (req, reply) => {
@@ -710,11 +777,17 @@ export default async function customerRoutes(app: FastifyInstance) {
     const b = contactSchema.parse(req.body);
     const s = req.session;
     const row = await withTenant(s.tenantId, async (tx) => {
+      const [parent] = await tx`SELECT * FROM customers WHERE id = ${id}`;
+      if (!parent) return null;
+      const fields = await applyForm(tx, s, 'contact', b as Row, null, parent);
+      if (Object.keys(fields).length) return { fields };
       if (b.is_primary) await tx`UPDATE contacts SET is_primary = false WHERE customer_id = ${id} AND is_primary`;
       const [r] = await tx`INSERT INTO contacts ${tx({ ...b, tenant_id: s.tenantId, customer_id: id })} RETURNING id`;
       await log(tx, s, id, 'note', 'Νέα επαφή', b.full_name);
       return r;
     });
+    if (!row) return reply.code(404).send({ error: 'not_found' });
+    if ('fields' in row) return reply.code(400).send({ error: 'validation', fields: row.fields });
     return reply.code(201).send(row);
   });
 
@@ -723,12 +796,15 @@ export default async function customerRoutes(app: FastifyInstance) {
     const { id } = idParam.parse(req.params);
     const b = contactSchema.parse(req.body);
     const ok = await withTenant(req.session.tenantId, async (tx) => {
-      const [c] = await tx`SELECT customer_id FROM contacts WHERE id = ${id}`;
+      const [c] = await tx`SELECT * FROM contacts WHERE id = ${id} FOR UPDATE`;
       if (!c) return false;
+      const fields = await applyForm(tx, req.session, 'contact', b as Row, c);
+      if (Object.keys(fields).length) return { fields };
       if (b.is_primary) await tx`UPDATE contacts SET is_primary = false WHERE customer_id = ${c.customer_id} AND is_primary AND id <> ${id}`;
       await tx`UPDATE contacts SET ${tx(b)} WHERE id = ${id}`;
       return true;
     });
+    if (typeof ok === 'object') return reply.code(400).send({ error: 'validation', fields: ok.fields });
     return ok ? { ok } : reply.code(404).send({ error: 'not_found' });
   });
 

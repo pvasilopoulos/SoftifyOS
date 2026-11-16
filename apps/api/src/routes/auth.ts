@@ -57,14 +57,21 @@ export default async function authRoutes(app: FastifyInstance) {
       LEFT JOIN roles r ON r.tenant_id = m.tenant_id AND r.key = m.role
       WHERE m.user_id = ${userId} ORDER BY t.name`;
     const cur = tenants.find((t) => t.id === tenantId);
+    // Custom fields marked "available in filters" (Module Forms) join every index's filters
+    const customFilters = (await sql`
+      SELECT form, key, type, label, options FROM custom_fields
+      WHERE tenant_id = ${tenantId} AND active AND filterable AND form IN ('customer', 'branch', 'space') ORDER BY form, sort`)
+      .map((c) => ({ key: `cf_${({ customer: 'c', branch: 'b', space: 's' } as Record<string, string>)[c.form]}_${c.key}`, type: c.type, label: c.label, options: c.options }));
+    const withCustom = (keys: string[]) => [...keys, ...customFilters.map((c) => c.key)];
     // Which filters this user sees on each index page (Settings → Indexes)
     const tenant = cur && (({ index_defaults, prefs, ...t }) => ({
       ...t,
       index_filters: {
-        customers: effectiveFilters('customers', index_defaults, prefs, t.role).keys,
-        tree: effectiveFilters('tree', index_defaults, prefs, t.role).keys,
-        stores: effectiveFilters('stores', index_defaults, prefs, t.role).keys,
+        customers: withCustom(effectiveFilters('customers', index_defaults, prefs, t.role).keys),
+        tree: withCustom(effectiveFilters('tree', index_defaults, prefs, t.role).keys),
+        stores: withCustom(effectiveFilters('stores', index_defaults, prefs, t.role).keys),
       },
+      custom_filters: customFilters,
     }))(cur);
     return { user, tenant, tenants: tenants.map(({ index_defaults: _d, prefs: _p, ...t }) => t), brand: await loadBrand(tenantId) };
   });
