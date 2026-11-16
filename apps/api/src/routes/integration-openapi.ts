@@ -75,6 +75,11 @@ function resource(name: string, tag: string, schema: object, extraListParams: ob
         requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', required: ['items'], properties: { items: { type: 'array', maxItems: 1000, items: schema } } } } } },
         responses: { 200: { description: 'Per-item results', content: { 'application/json': { schema: BatchResult } } }, 403: { description: 'Read-only key' } } },
     },
+    [`/api/v1/${name}/by-id/{id}`]: {
+      parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string', format: 'uuid' }, description: 'SoftifyOS id (e.g. data.id of a webhook)' }],
+      get: { tags: [tag], summary: 'Get one by SoftifyOS id', description: 'For records without external_id (created in the app). The response also contains id.',
+        responses: { 200: { description: 'Record', content: { 'application/json': { schema } } }, 404: { description: 'Not found' } } },
+    },
     [`/api/v1/${name}/{external_id}`]: {
       parameters: [{ name: 'external_id', in: 'path', required: true, schema: { type: 'string' } }],
       get: { tags: [tag], summary: 'Get one', responses: { 200: { description: 'Record', content: { 'application/json': { schema } } }, 404: { description: 'Not found' } } },
@@ -125,7 +130,12 @@ export const openApiSpec = {
   info: {
     title: 'SoftifyOS Integration API', version: '1.0.0',
     description: 'Sync customers, stores, spaces and value lists from your ERP. Records are identified by your own ids (external_id); '
-      + 'sending a record again updates it. Create an API key in Settings → Integrations. Rate limit: 1200 requests/minute per key.',
+      + 'sending a record again updates it. Create an API key in Settings → Integrations. Rate limit: 1200 requests/minute per key.\n\n'
+      + 'Read responses also include parent_id / customer_id / branch_id (SoftifyOS ids) next to the external ids.\n\n'
+      + 'Webhooks: POST to your URL with headers X-Softify-Event, X-Softify-Delivery and X-Softify-Signature (t=<unix>,v1=<HMAC-SHA256(secret, "<t>.<body>")>). '
+      + 'Body: { id, event, occurred_at, source, data, changed_fields? }. For customer/branch/space created, updated and archived events, data is the full record '
+      + '(the same shape as GET by-id, custom fields included); *.updated events add changed_fields (e.g. ["status", "address.city", "custom.size"]). '
+      + 'Deleted events carry id, external_id and name.',
   },
   servers: [{ url: '/' }],
   security: [{ apiKey: [] }],

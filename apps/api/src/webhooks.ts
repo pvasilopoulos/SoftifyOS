@@ -10,6 +10,7 @@ import { lookup } from 'node:dns/promises';
 import { BlockList, isIP } from 'node:net';
 import { env } from './env.js';
 import { sql, type Tx } from './db.js';
+import { changedFields, READ_MODEL } from './readmodels.js';
 
 export const WEBHOOK_EVENTS = [
   'customer.created', 'customer.updated', 'customer.archived', 'customer.deleted',
@@ -20,14 +21,14 @@ export const WEBHOOK_EVENTS = [
 export type WebhookEvent = (typeof WEBHOOK_EVENTS)[number];
 
 export type EventSource = { type: 'user'; user_id: string } | { type: 'api'; key: string } | { type: 'customer' } | { type: 'system' };
-export type OutEvent = { event: WebhookEvent; data: Record<string, unknown> };
+export type OutEvent = { event: WebhookEvent; data: Record<string, unknown>; changed_fields?: string[] };
 
 export const newWebhookSecret = () => `whsec_${randomBytes(24).toString('base64url')}`;
 
 // Most tenants have no webhooks: remember that briefly so writes don't pay for the lookup.
 const active = new Map<string, { has: boolean; at: number }>();
 export function forgetWebhooks(tenantId: string) { active.delete(tenantId); }
-async function hasWebhooks(tx: Tx, tenantId: string) {
+export async function hasWebhooks(tx: Tx, tenantId: string) {
   const c = active.get(tenantId);
   if (c && Date.now() - c.at < 15_000) return c.has;
   const [r] = await tx`SELECT EXISTS (SELECT 1 FROM webhooks WHERE tenant_id = ${tenantId} AND active) AS has`;
@@ -40,11 +41,12 @@ export async function emitEvents(tx: Tx, tenantId: string, events: OutEvent[], s
   if (!events.length || !(await hasWebhooks(tx, tenantId))) return;
   await tx`
     WITH ev AS (
-      SELECT e->>'event' AS event, e->'data' AS data FROM jsonb_array_elements(${tx.json(events as never)}::jsonb) e),
+      SELECT e->>'event' AS event, e->'data' AS data, e->'changed_fields' AS changed_fields FROM jsonb_array_elements(${tx.json(events as never)}::jsonb) e),
     d AS (
       INSERT INTO webhook_deliveries (tenant_id, webhook_id, event, payload)
       SELECT ${tenantId}, w.id, ev.event,
              jsonb_build_object('event', ev.event, 'occurred_at', now(), 'source', ${tx.json(source as never)}::jsonb, 'data', ev.data)
+               || CASE WHEN ev.changed_fields IS NULL THEN '{}'::jsonb ELSE jsonb_build_object('changed_fields', ev.changed_fields) END
       FROM ev JOIN webhooks w ON w.tenant_id = ${tenantId} AND w.active
        AND (ev.event = ANY (w.events) OR '*' = ANY (w.events) OR split_part(ev.event, '.', 1) || '.*' = ANY (w.events))
       RETURNING id)
@@ -52,17 +54,21 @@ export async function emitEvents(tx: Tx, tenantId: string, events: OutEvent[], s
 }
 
 type Entity = 'customer' | 'branch' | 'space';
-/** Builds the event payload from the current row (id, your external_id, name, parent refs). */
-export async function emitEntityEvents(tx: Tx, tenantId: string, entity: Entity, action: 'created' | 'updated' | 'archived', ids: string[], source: EventSource) {
+/**
+ * Builds the event payload from the current record: the full record, in the same shape as the Integration API v1
+ * (plus id). With `before` (the raw rows before an update, by id) the payload also lists changed_fields.
+ */
+export async function emitEntityEvents(tx: Tx, tenantId: string, entity: Entity, action: 'created' | 'updated' | 'archived', ids: string[], source: EventSource,
+  before?: Map<string, Record<string, unknown>> | Record<string, unknown>) {
   if (!ids.length || !(await hasWebhooks(tx, tenantId))) return;
-  const rows = entity === 'customer'
-    ? await tx`SELECT id, external_id, code, name, status, archived_at FROM customers WHERE id = ANY(${ids}::uuid[])`
-    : entity === 'branch'
-      ? await tx`SELECT b.id, b.external_id, b.name, b.status, b.customer_id, c.external_id AS customer_external_id
-                 FROM branches b JOIN customers c ON c.id = b.customer_id WHERE b.id = ANY(${ids}::uuid[])`
-      : await tx`SELECT s.id, s.external_id, s.name, s.kind, s.branch_id, b.external_id AS branch_external_id
-                 FROM spaces s JOIN branches b ON b.id = s.branch_id WHERE s.id = ANY(${ids}::uuid[])`;
-  await emitEvents(tx, tenantId, rows.map((r) => ({ event: `${entity}.${action}` as WebhookEvent, data: { ...r } })), source);
+  const m = READ_MODEL[entity];
+  const rows = await tx`${m.out(tx, tenantId)} AND ${tx(m.alias)}.id = ANY(${ids}::uuid[])`;
+  const prev = before instanceof Map ? before : before ? new Map([[ids[0], before]]) : null;
+  const raw = prev ? new Map((await tx`SELECT * FROM ${tx(m.table)} WHERE id = ANY(${ids}::uuid[])`).map((r) => [r.id as string, r])) : null;
+  await emitEvents(tx, tenantId, rows.map((r) => {
+    const b = prev?.get(r.id as string), a = raw?.get(r.id as string);
+    return { event: `${entity}.${action}` as WebhookEvent, data: { ...r }, ...(b && a ? { changed_fields: changedFields(b, a) } : {}) };
+  }), source);
 }
 
 // ---------------------------------------------------------------- delivery

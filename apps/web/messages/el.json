@@ -1187,7 +1187,10 @@
     "whRule4": "Το ίδιο γεγονός μπορεί να έρθει δύο φορές: χρησιμοποιήστε το id (X-Softify-Delivery) για να αγνοείτε τα διπλά.",
     "res_lists": "Λίστες τιμών",
     "docLists": "Λίστες τιμών (νομοί, κατηγορίες, όροι πληρωμής, ζώνες…)",
-    "rule8": "Λίστες τιμών: GET /api/v1/lists για όλες τις λίστες, GET/PUT /api/v1/lists/{list} για τιμές· η μετονομασία (rename_from) ενημερώνει και τις εγγραφές."
+    "rule8": "Λίστες τιμών: GET /api/v1/lists για όλες τις λίστες, GET/PUT /api/v1/lists/{list} για τιμές· η μετονομασία (rename_from) ενημερώνει και τις εγγραφές.",
+    "docWh3": "Ανάκτηση εγγραφής με το id της",
+    "whRule5": "Τα events created/updated/archived στέλνουν ολόκληρη την εγγραφή (ίδια μορφή με το API v1, μαζί με τα custom πεδία)· στα *.updated το changed_fields λέει ποια πεδία άλλαξαν.",
+    "whRule6": "Εγγραφές που δημιουργήθηκαν στην εφαρμογή δεν έχουν external_id: διαβάστε τες με GET /api/v1/{customers|branches|spaces}/by-id/{id}."
   },
   "filters": {
     "g_c": "Πελάτης",

@@ -1187,7 +1187,10 @@
     "whRule4": "The same event may arrive twice: use the id (X-Softify-Delivery) to ignore duplicates.",
     "res_lists": "Value lists",
     "docLists": "Value lists (prefectures, categories, payment terms, zones…)",
-    "rule8": "Value lists: GET /api/v1/lists for all lists, GET/PUT /api/v1/lists/{list} for values; a rename (rename_from) also updates the records."
+    "rule8": "Value lists: GET /api/v1/lists for all lists, GET/PUT /api/v1/lists/{list} for values; a rename (rename_from) also updates the records.",
+    "docWh3": "Fetch a record by its id",
+    "whRule5": "created/updated/archived events carry the whole record (same shape as API v1, custom fields included); *.updated also lists changed_fields.",
+    "whRule6": "Records created in the app have no external_id: read them with GET /api/v1/{customers|branches|spaces}/by-id/{id}."
   },
   "filters": {
     "g_c": "Customer",

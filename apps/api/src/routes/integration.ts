@@ -11,8 +11,9 @@ import { z, ZodError } from 'zod';
 import { decodeCursor, encodeCursor, sql, withTenant, type Tx } from '../db.js';
 import { isValidAfm } from './customers.js';
 import { openApiSpec } from './integration-openapi.js';
-import { emitEntityEvents, emitEvents, type EventSource } from '../webhooks.js';
+import { emitEntityEvents, hasWebhooks, emitEvents, type EventSource } from '../webhooks.js';
 import { customInput } from '../forms.js';
+import { branchOut, customerOut, spaceOut } from '../readmodels.js';
 import { ALL_LISTS, canonicalName, isNameList, nameInUse, renameInRecords, type NameList } from '../lookups.js';
 
 /** Name-list fields: unknown values are added to the list (like zones), and the list's spelling is stored. */
@@ -457,32 +458,7 @@ async function upsertSpaces(tx: Tx, key: ApiKeyCtx, items: unknown[]) {
   return results;
 }
 
-// ---------------------------------------------------------------- read models (external ids, value names)
-const customerOut = (tx: Tx, T: string) => tx`
-  SELECT c.external_id, c.id, c.code, c.kind, c.name, c.trade_name, c.vat, c.tax_office, c.gemi, c.activity, c.status, c.category, c.tags, c.source,
-         p.external_id AS parent_external_id, u.email AS account_manager_email, c.email, c.phone, c.mobile, c.website,
-         json_build_object('street', c.address_street, 'city', c.address_city, 'postal', c.address_postal, 'region', c.address_region, 'country', c.address_country) AS address,
-         gz.name AS geo_zone, c.payment_terms, c.credit_limit::float8 AS credit_limit, c.discount::float8 AS discount, c.annual_value::float8 AS annual_value,
-         c.notes, c.custom, c.branches_count, c.spaces_count, c.archived_at, c.created_at, c.updated_at
-  FROM customers c
-  LEFT JOIN customers p ON p.id = c.parent_id
-  LEFT JOIN users u ON u.id = c.account_manager_id
-  LEFT JOIN lookup_values gz ON gz.id = c.geo_zone_id
-  WHERE c.tenant_id = ${T}`;
-
-const branchOut = (tx: Tx, T: string) => tx`
-  SELECT b.external_id, b.id, c.external_id AS customer_external_id, b.name, b.trade_name, b.address, b.city, b.postal_code, b.region, b.phone, b.manager_name,
-         b.status, gz.name AS geo_zone, fs.name AS fee_schedule, tr.name AS tour, os.name AS ongoing_status, b.seasonality, b.season_months,
-         b.custom, b.spaces_count, b.created_at, b.updated_at
-  FROM branches b JOIN customers c ON c.id = b.customer_id
-  LEFT JOIN lookup_values gz ON gz.id = b.geo_zone_id LEFT JOIN lookup_values fs ON fs.id = b.fee_schedule_id
-  LEFT JOIN lookup_values tr ON tr.id = b.tour_id LEFT JOIN lookup_values os ON os.id = b.ongoing_status_id
-  WHERE b.tenant_id = ${T}`;
-
-const spaceOut = (tx: Tx, T: string) => tx`
-  SELECT s.external_id, s.id, b.external_id AS branch_external_id, s.name, s.kind, s.area_sqm::float8 AS area_sqm, s.notes, s.custom, s.created_at, s.updated_at
-  FROM spaces s JOIN branches b ON b.id = s.branch_id
-  WHERE s.tenant_id = ${T}`;
+// Read models (shared with the webhook payloads): see ../readmodels.ts
 
 const listQuery = z.object({
   updated_since: z.coerce.date().optional(),
@@ -553,6 +529,20 @@ export default async function integrationRoutes(app: FastifyInstance) {
     getOne('/v1/branches/:external_id', branchOut, 'b');
     getOne('/v1/spaces/:external_id', spaceOut, 's');
 
+    // By SoftifyOS id: records created in the app have no external_id (e.g. the id from a webhook)
+    const getById = (path: string, base: (tx: Tx, T: string) => Frag, alias: string) =>
+      r.get(path, async (req, reply) => {
+        if (!need(req, reply, resourceOf(path), 'read')) return;
+        const p = z.object({ id: z.string().uuid() }).safeParse(req.params);
+        if (!p.success) return problem(reply, 404, 'not_found');
+        const T = req.apiKey!.tenantId;
+        const [row] = await withTenant(T, (tx) => tx`${base(tx, T)} AND ${tx(alias)}.id = ${p.data.id}`);
+        return row ?? problem(reply, 404, 'not_found');
+      });
+    getById('/v1/customers/by-id/:id', customerOut, 'c');
+    getById('/v1/branches/by-id/:id', branchOut, 'b');
+    getById('/v1/spaces/by-id/:id', spaceOut, 's');
+
     // ----- writes: single (PUT, idempotent) and batch (POST)
     const writers = [
       ['customers', upsertCustomers, 'api.customers'],
@@ -561,11 +551,18 @@ export default async function integrationRoutes(app: FastifyInstance) {
     ] as const;
     for (const [entity, fn, action] of writers) {
       /** Webhook events for what the batch changed (same transaction → only committed changes are sent). */
-      const emitFor = async (tx: Tx, key: ApiKeyCtx, out: ItemResult[]) => {
+      const emitFor = async (tx: Tx, key: ApiKeyCtx, out: ItemResult[], before?: Map<string, Record<string, unknown>>) => {
         for (const st of ['created', 'updated'] as const) {
           const ids = [...new Set(out.filter((x) => x.status === st && x.id).map((x) => x.id!))];
-          await emitEntityEvents(tx, key.tenantId, ENTITY[entity], st, ids, src(key));
+          await emitEntityEvents(tx, key.tenantId, ENTITY[entity], st, ids, src(key), st === 'updated' ? before : undefined);
         }
+      };
+      /** Rows as they were before the write (for changed_fields), by id. */
+      const snapshot = async (tx: Tx, key: ApiKeyCtx, items: unknown[]) => {
+        const ext = [...new Set(items.map((x) => (x as { external_id?: unknown })?.external_id).filter((x): x is string => typeof x === 'string'))];
+        if (!ext.length || !(await hasWebhooks(tx, key.tenantId))) return new Map<string, Record<string, unknown>>();
+        const rows = await tx`SELECT * FROM ${tx(entity)} WHERE tenant_id = ${key.tenantId} AND external_id = ANY(${ext})`;
+        return new Map(rows.map((r) => [r.id as string, r as Record<string, unknown>]));
       };
       const logResult = (req: FastifyRequest, out: ItemResult[]) => {
         const s = summary(out);
@@ -579,10 +576,11 @@ export default async function integrationRoutes(app: FastifyInstance) {
         const body = { ...(req.body as object ?? {}), external_id };
         const key = req.apiKey!;
         const out = await withTenant(key.tenantId, async (tx) => {
+          const before = await snapshot(tx, key, [body]);
           const o = await fn(tx, key, [body]);
           if (o[0].status !== 'error') {
             await audit(tx, key, `${action}.upsert`, { [o[0].status]: 1 });
-            await emitFor(tx, key, o);
+            await emitFor(tx, key, o, before);
           }
           return o;
         });
@@ -598,10 +596,11 @@ export default async function integrationRoutes(app: FastifyInstance) {
         const key = req.apiKey!;
         const t0 = Date.now();
         const results = await withTenant(key.tenantId, async (tx) => {
+          const before = await snapshot(tx, key, items);
           const out = await fn(tx, key, items);
           const s = summary(out);
           await audit(tx, key, `${action}.batch`, { created: s.created, updated: s.updated, failed: s.failed });
-          await emitFor(tx, key, out);
+          await emitFor(tx, key, out, before);
           return out;
         });
         logResult(req, results);

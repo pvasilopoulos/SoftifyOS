@@ -120,7 +120,7 @@ export default async function registryRoutes(app: FastifyInstance) {
         await tx`INSERT INTO activities (tenant_id, customer_id, actor_id, kind, title, body)
                  VALUES (${T}, ${id}, ${sess.userId}, 'note', ${`Ενημέρωση από ${result.source === 'aade' ? 'ΑΑΔΕ' : 'VIES'}`},
                          ${Object.entries(plan).filter(([f]) => f in apply).map(([f, v]) => `${f}: ${v!.from ?? '—'} → ${v!.to}`).join(' · ')})`;
-        await emitEntityEvents(tx, T, 'customer', 'updated', [id], { type: 'user', user_id: sess.userId });
+        await emitEntityEvents(tx, T, 'customer', 'updated', [id], { type: 'user', user_id: sess.userId }, c);
       });
       return { result, changes: plan, applied: Object.keys(apply) };
     });

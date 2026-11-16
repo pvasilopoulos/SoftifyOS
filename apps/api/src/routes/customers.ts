@@ -490,7 +490,7 @@ export default async function customerRoutes(app: FastifyInstance) {
         c.code && old.code !== c.code && `Κωδικός: ${old.code} → ${c.code}`,
       ].filter(Boolean).join(' · ');
       await log(tx, s, id, 'note', 'Ενημέρωση στοιχείων', changes || null);
-      await emitEntityEvents(tx, s.tenantId, 'customer', 'updated', [id], { type: 'user', user_id: s.userId });
+      await emitEntityEvents(tx, s.tenantId, 'customer', 'updated', [id], { type: 'user', user_id: s.userId }, old);
       for (const p of new Set([old.parent_id, c.parent_id].filter(Boolean))) await refreshCounts(tx, p as string);
       return { code: 200, error: null };
     });
@@ -652,7 +652,7 @@ export default async function customerRoutes(app: FastifyInstance) {
       if (Object.keys(fields).length) return { fields };
       if (!(await branchLookupsValid(tx, b, s.tenantId))) return 400;
       const [r] = await tx`UPDATE branches SET ${tx(branchRow(tx, b))}, updated_at = now() WHERE id = ${id} RETURNING id`;
-      if (r) await emitEntityEvents(tx, s.tenantId, 'branch', 'updated', [id], { type: 'user', user_id: s.userId });
+      if (r) await emitEntityEvents(tx, s.tenantId, 'branch', 'updated', [id], { type: 'user', user_id: s.userId }, old);
       return r ? 200 : 404;
     });
     if (typeof res === 'object') return reply.code(400).send({ error: 'validation', fields: res.fields });
@@ -741,7 +741,7 @@ export default async function customerRoutes(app: FastifyInstance) {
       if (kind === false) return 'invalid' as const;
       b.kind = kind ?? null;
       const [r] = await tx`UPDATE spaces SET ${tx(b)}, updated_at = now() WHERE id = ${id} RETURNING id`;
-      if (r) await emitEntityEvents(tx, s.tenantId, 'space', 'updated', [id], { type: 'user', user_id: s.userId });
+      if (r) await emitEntityEvents(tx, s.tenantId, 'space', 'updated', [id], { type: 'user', user_id: s.userId }, old);
       return !!r;
     });
     if (ok === 'invalid') return reply.code(400).send({ error: 'invalid_value' });

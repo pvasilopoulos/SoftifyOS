@@ -912,8 +912,18 @@ X-Softify-Delivery: 0193…
 X-Softify-Signature: t=1763300000,v1=5f2c…
 
 {"id":"0193…","event":"customer.updated","occurred_at":"2026-11-16T10:00:00Z",
- "source":{"type":"api","key":"ERP sync"},
- "data":{"id":"…","external_id":"ERP-1001","code":"CUST-000123","name":"ACME Retail Α.Ε.","status":"active"}}`,
+ "source":{"type":"user","user_id":"…"},
+ "changed_fields":["status","address.city","custom.size"],
+ "data":{"id":"0193…","external_id":"ERP-1001","code":"CUST-000123","kind":"company",
+   "name":"ACME Retail Α.Ε.","vat":"094019245","status":"active","category":"Retail",
+   "parent_id":null,"parent_external_id":null,"account_manager_email":"maria@acme.gr",
+   "email":"info@acme.gr","phone":"2101234567",
+   "address":{"street":"Σταδίου 10","city":"Αθήνα","postal":"10564","region":"Αττικής","country":"GR"},
+   "geo_zone":"Αττική","payment_terms":"Πίστωση 60 ημερών","discount":5,"annual_value":150000,
+   "custom":{"size":"M"},"branches_count":3,"created_at":"…","updated_at":"…"}}`,
+    byId: `# The record of a webhook by its id (also for records created in the app, without external_id)
+curl -H "Authorization: Bearer $KEY" \\
+  https://app.example.com/api/v1/customers/by-id/0193…    # also /branches/by-id/…, /spaces/by-id/…`,
   };
   return (
     <div className="space-y-4">
@@ -936,8 +946,9 @@ X-Softify-Signature: t=1763300000,v1=5f2c…
         <div className="space-y-4 text-sm">
           <Step n={1} title={ti('docWh1')}><Code>{example.payload}</Code></Step>
           <Step n={2} title={ti('docWh2')}><Code>{example.verify}</Code></Step>
+          <Step n={3} title={ti('docWh3')}><Code>{example.byId}</Code></Step>
           <ul className="list-disc space-y-1 pl-5 text-muted">
-            <li>{ti('whRule1')}</li><li>{ti('whRule2')}</li><li>{ti('whRule3')}</li><li>{ti('whRule4')}</li>
+            <li>{ti('whRule1')}</li><li>{ti('whRule2')}</li><li>{ti('whRule3')}</li><li>{ti('whRule4')}</li><li>{ti('whRule5')}</li><li>{ti('whRule6')}</li>
           </ul>
         </div>
       </Card>
