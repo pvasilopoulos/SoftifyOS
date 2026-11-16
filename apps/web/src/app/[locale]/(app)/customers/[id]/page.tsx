@@ -339,7 +339,7 @@ function BranchCard({ branch: b, canEdit, onEdit, onAddSpace, onEditSpace, focus
                     <span className="grid h-9 w-9 place-items-center rounded-lg bg-primary-soft text-primary"><Store size={16} /></span>
                     <div className="min-w-0 flex-1">
                       <div className="truncate text-sm font-medium">{sp.name}</div>
-                      <div className="text-xs text-muted">{t(`spaceKinds.${sp.kind}` as never)}{sp.area_sqm && ` · ${Number(sp.area_sqm)} m²`}</div>
+                      <div className="text-xs text-muted">{[sp.kind, sp.area_sqm && `${Number(sp.area_sqm)} m²`].filter(Boolean).join(' · ')}</div>
                     </div>
                     {canEdit && <Pencil size={14} className="text-muted" />}
                   </button>

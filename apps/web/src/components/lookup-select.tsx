@@ -1,10 +1,16 @@
 'use client';
+// Pick-lists, all read from the database (Settings → Value lists).
+//  - LookupSelect: lists whose records keep the value id (zones, fee schedules, tours, ongoing status)
+//  - NameSelect:   lists whose records keep the value name (prefecture, category, source, payment terms, space kind)
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useTranslations } from 'next-intl';
 import { api } from '@/lib/api';
-import { PREFECTURES, PREFECTURES_LIST_ID } from '@/lib/greece';
 
-export type LookupList = 'geo_zone' | 'fee_schedule' | 'tour' | 'ongoing_status';
+export const ID_LISTS = ['geo_zone', 'fee_schedule', 'tour', 'ongoing_status'] as const;
+export const NAME_LISTS = ['prefecture', 'customer_category', 'customer_source', 'payment_terms', 'space_kind'] as const;
+export type IdList = (typeof ID_LISTS)[number];
+export type NameList = (typeof NAME_LISTS)[number];
+export type LookupList = IdList | NameList;
 export type LookupValue = { id: string; name: string; active: boolean };
 
 const ADD = '__add__';
@@ -13,25 +19,28 @@ export function useLookup(list: LookupList) {
   return useQuery({ queryKey: ['lookups', list], queryFn: () => api<LookupValue[]>(`/lookups?list=${list}`), staleTime: 300_000 });
 }
 
-/** Select from a tenant value list (zones, fee schedules, tours) with "+ New value…" inline. */
-export function LookupSelect({ list, value, onChange, className, id }: {
-  list: LookupList; value: string | null; onChange: (id: string | null) => void; className?: string; id?: string;
-}) {
+function useAddValue(list: LookupList) {
   const t = useTranslations('lookup');
   const qc = useQueryClient();
-  const { data = [] } = useLookup(list);
-
-  async function addNew() {
+  return async () => {
     const name = window.prompt(t('prompt', { list: t(list) }))?.trim();
-    if (!name) return;
+    if (!name) return null;
     const created = await api<{ id: string; name: string }>('/lookups', { method: 'POST', json: { list, name } });
     await qc.invalidateQueries({ queryKey: ['lookups', list] });
-    onChange(created.id);
-  }
+    return created;
+  };
+}
 
+/** Select from a tenant value list (zones, fee schedules, tours) with "+ New value…" inline. */
+export function LookupSelect({ list, value, onChange, className, id }: {
+  list: IdList; value: string | null; onChange: (id: string | null) => void; className?: string; id?: string;
+}) {
+  const t = useTranslations('lookup');
+  const { data = [] } = useLookup(list);
+  const add = useAddValue(list);
   return (
     <select id={id} className={className} value={value ?? ''}
-      onChange={(e) => (e.target.value === ADD ? void addNew() : onChange(e.target.value || null))}>
+      onChange={async (e) => { if (e.target.value === ADD) { const c = await add(); if (c) onChange(c.id); } else onChange(e.target.value || null); }}>
       <option value="">{t('none')}</option>
       {data.filter((v) => v.active || v.id === value).map((v) => <option key={v.id} value={v.id}>{v.name}</option>)}
       <option value={ADD}>{t('addNew')}</option>
@@ -39,7 +48,22 @@ export function LookupSelect({ list, value, onChange, className, id }: {
   );
 }
 
-/** Suggestions for "Νομός" inputs: render once per page, then use <input list={PREFECTURES_LIST_ID}>. */
-export function PrefecturesDatalist() {
-  return <datalist id={PREFECTURES_LIST_ID}>{PREFECTURES.map((p) => <option key={p} value={p} />)}</datalist>;
+/** Same, for lists stored by name. A current value that is no longer in the list is still shown. */
+export function NameSelect({ list, value, onChange, className, id, allowEmpty = true }: {
+  list: NameList; value: string | null | undefined; onChange: (name: string) => void; className?: string; id?: string; allowEmpty?: boolean;
+}) {
+  const t = useTranslations('lookup');
+  const { data = [] } = useLookup(list);
+  const add = useAddValue(list);
+  const current = value ?? '';
+  const known = data.some((v) => v.name === current);
+  return (
+    <select id={id} className={className} value={current}
+      onChange={async (e) => { if (e.target.value === ADD) { const c = await add(); if (c) onChange(c.name); } else onChange(e.target.value); }}>
+      {allowEmpty && <option value="">{t('none')}</option>}
+      {current && !known && <option value={current}>{current}</option>}
+      {data.filter((v) => v.active || v.name === current).map((v) => <option key={v.id} value={v.name}>{v.name}</option>)}
+      <option value={ADD}>{t('addNew')}</option>
+    </select>
+  );
 }

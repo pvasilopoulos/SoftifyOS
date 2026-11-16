@@ -11,6 +11,9 @@ import offerRoutes from './routes/offers.js';
 import customerRoutes from './routes/customers.js';
 import settingsRoutes from './routes/settings.js';
 import integrationRoutes from './routes/integration.js';
+import integrationSettingsRoutes from './routes/integration-settings.js';
+import brandingRoutes from './routes/branding.js';
+import viewRoutes from './routes/views.js';
 
 const app = Fastify({
   logger: { level: env.isProd ? 'info' : 'warn' },
@@ -40,6 +43,9 @@ await app.register(async (api) => {
   await api.register(customerRoutes);
   await api.register(settingsRoutes);
   await api.register(integrationRoutes);
+  await api.register(integrationSettingsRoutes);
+  await api.register(brandingRoutes);
+  await api.register(viewRoutes);
 }, { prefix: '/api' });
 
 await startRealtime();

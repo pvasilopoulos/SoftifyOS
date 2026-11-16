@@ -65,7 +65,7 @@ export default function PublicOfferPage({ params }: { params: Promise<{ token: s
       }} />
 
       {o.status === 'sent' && !data.expired && (
-        <div className="fixed inset-x-0 bottom-0 z-40 border-t border-[#e9e6f5] bg-white/95 p-4 backdrop-blur safe-bottom print:hidden">
+        <div className="fixed inset-x-0 bottom-0 z-40 border-t border-[#e9e6f5] bg-white/95 p-4 backdrop-blur sheet-pb print:hidden">
           {mode ? (
             <form className="mx-auto max-w-xl space-y-2" onSubmit={(e) => { e.preventDefault(); respond.mutate(); }}>
               <input required minLength={2} autoFocus placeholder={t('yourName')} value={name} onChange={(e) => setName(e.target.value)}

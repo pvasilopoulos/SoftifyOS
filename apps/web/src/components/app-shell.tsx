@@ -12,14 +12,25 @@ import { api, type Me } from '@/lib/api';
 import { Avatar } from './ui';
 import { useLive } from './providers';
 import { QuickSettings } from './quick-settings';
+import { brandAsset, useBrand, useBrandHead } from '@/lib/brand';
 
-export function Logo({ dark = false }: { dark?: boolean }) {
+/** Organisation logo + name (Settings → Branding). Public pages pass signedIn={false}. */
+export function Logo({ dark = false, signedIn = true }: { dark?: boolean; signedIn?: boolean }) {
+  const brand = useBrand(signedIn);
+  const logo = brandAsset(brand, 'logo');
   return (
-    <div className="flex items-center gap-2.5">
-      <span className="grid h-9 w-9 place-items-center rounded-xl bg-gradient-to-br from-[#7c63ff] to-[#4a2ee0] text-lg font-black text-white shadow-md">S</span>
-      <div className="leading-tight">
-        <div className={clsx('text-lg font-extrabold tracking-tight', dark ? 'text-white' : 'text-text')}>SoftifyOS</div>
-        <div className={clsx('text-[11px]', dark ? 'text-white/60' : 'text-muted')}>Enterprise Business OS</div>
+    <div className="flex min-w-0 items-center gap-2.5">
+      {logo ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img src={logo} alt="" className={clsx('h-9 max-w-[120px] shrink-0 object-contain', dark && 'rounded-lg bg-white p-1')} />
+      ) : (
+        <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-gradient-to-br from-[#7c63ff] to-[#4a2ee0] text-lg font-black text-white shadow-md">
+          {(brand.name.trim()[0] ?? 'S').toUpperCase()}
+        </span>
+      )}
+      <div className="min-w-0 leading-tight">
+        <div className={clsx('truncate text-lg font-extrabold tracking-tight', dark ? 'text-white' : 'text-text')}>{brand.name}</div>
+        {brand.tagline && <div className={clsx('truncate text-[11px]', dark ? 'text-white/60' : 'text-muted')}>{brand.tagline}</div>}
       </div>
     </div>
   );
@@ -52,6 +63,7 @@ export function useMe() {
 }
 
 export function AppShell({ children }: { children: ReactNode }) {
+  useBrandHead(useBrand());
   const t = useTranslations('nav');
   const tm = useTranslations('more');
   const locale = useLocale();

@@ -3,11 +3,22 @@ import type { FastifyInstance } from 'fastify';
 import { randomBytes } from 'node:crypto';
 import { z } from 'zod';
 import { decodeCursor, encodeCursor, searchKey, sql, withTenant, type Tx } from '../db.js';
-import { hasRole, requireAuth, ROLE_RANK, type Session } from '../auth.js';
+import { APPROVAL_LEVEL, can, requireAuth, type Session } from '../auth.js';
 import { publish } from '../realtime.js';
 import { enqueue } from '../jobs.js';
 import { env } from '../env.js';
 import { audit } from './settings.js';
+import { emitEvents, type EventSource, type WebhookEvent } from '../webhooks.js';
+
+/** Webhook event with the offer's current headline data. */
+async function offerEvent(tx: Tx, tenantId: string, id: string, event: WebhookEvent, source: EventSource) {
+  const [o] = await tx`
+    SELECT o.id, o.number, o.status, o.current_version AS version, o.total_amount::float8 AS total, o.valid_until,
+           o.customer_id, c.external_id AS customer_external_id, c.name AS customer_name
+    FROM offers o JOIN customers c ON c.id = o.customer_id WHERE o.id = ${id}`;
+  if (o) await emitEvents(tx, tenantId, [{ event, data: { ...o } }], source);
+}
+const by = (s: Session): EventSource => ({ type: 'user', user_id: s.userId });
 
 const STATUSES = ['draft', 'in_progress', 'pending_approval', 'approved', 'sent', 'accepted', 'rejected'] as const;
 const EDITABLE = new Set(['draft', 'in_progress', 'approved', 'sent', 'rejected']);
@@ -64,8 +75,10 @@ async function nextNumber(tx: Tx, tenantId: string) {
 }
 
 async function usersWithRole(tx: Tx, tenantId: string, minRole: string) {
-  const roles = Object.entries(ROLE_RANK).filter(([, rank]) => rank >= (ROLE_RANK[minRole] ?? 99)).map(([r]) => r);
-  const rows = await tx`SELECT user_id FROM memberships WHERE tenant_id = ${tenantId} AND role = ANY(${roles})`;
+  // Everyone whose role may sign this step (role approval level ≥ step level)
+  const rows = await tx`
+    SELECT m.user_id FROM memberships m JOIN roles r ON r.tenant_id = m.tenant_id AND r.key = m.role
+    WHERE m.tenant_id = ${tenantId} AND r.approval_level >= ${APPROVAL_LEVEL[minRole] ?? 99}`;
   return rows.map((r) => r.user_id as string);
 }
 
@@ -103,7 +116,7 @@ export default async function offerRoutes(app: FastifyInstance) {
     });
 
     r.put('/approval-flow', async (req, reply) => {
-      if (!hasRole(req.session, 'admin')) return reply.code(403).send({ error: 'forbidden' });
+      if (!can(req.session, 'settings.manage')) return reply.code(403).send({ error: 'forbidden' });
       const steps = z.array(z.object({
         title: z.string().trim().min(1).max(100),
         required_role: z.enum(['sales', 'manager', 'admin', 'owner']),
@@ -150,7 +163,7 @@ export default async function offerRoutes(app: FastifyInstance) {
 
     // ---- Create ----
     r.post('/offers', async (req, reply) => {
-      if (!hasRole(req.session, 'sales')) return reply.code(403).send({ error: 'forbidden' });
+      if (!can(req.session, 'offers.edit')) return reply.code(403).send({ error: 'forbidden' });
       const b = z.object({
         customer_id: z.string().uuid(),
         branch_id: z.string().uuid().nullish(),
@@ -168,6 +181,7 @@ export default async function offerRoutes(app: FastifyInstance) {
           VALUES (${s.tenantId}, ${number}, ${b.customer_id}, ${b.branch_id ?? null}, ${b.space_id ?? null},
                   ${b.company_id ?? null}, ${s.userId}, 'draft', 1, ${b.valid_until ?? null}, ${b.notes ?? null})
           RETURNING id, number, customer_id`;
+        await offerEvent(tx, s.tenantId, o.id, 'offer.created', by(s));
         const c = await insertVersion(tx, s, o.id, 1, b.items);
         await tx`UPDATE offers SET net_amount = ${c.net}, vat_amount = ${c.vat}, total_amount = ${c.total} WHERE id = ${o.id}`;
         await logActivity(tx, s, o, 'offer_updated', 'Νέα προσφορά', `${o.number} · v.01`);
@@ -217,10 +231,10 @@ export default async function offerRoutes(app: FastifyInstance) {
           approvals,
           publicUrl: public_token ? appUrl(`/el/p/${public_token}`) : null,
           can: {
-            edit: EDITABLE.has(offer.status) && hasRole(s, 'sales'),
-            submit: ['draft', 'in_progress'].includes(offer.status) && hasRole(s, 'sales'),
-            approve: offer.status === 'pending_approval' && !!nextStep && (ROLE_RANK[s.role] ?? -1) >= (ROLE_RANK[nextStep.required_role] ?? 99),
-            send: ['approved', 'sent'].includes(offer.status) && hasRole(s, 'sales'),
+            edit: EDITABLE.has(offer.status) && can(s, 'offers.edit'),
+            submit: ['draft', 'in_progress'].includes(offer.status) && can(s, 'offers.edit'),
+            approve: offer.status === 'pending_approval' && !!nextStep && (s.level ?? 0) >= (APPROVAL_LEVEL[nextStep.required_role] ?? 99),
+            send: ['approved', 'sent'].includes(offer.status) && can(s, 'offers.edit'),
           },
         };
       });
@@ -239,7 +253,7 @@ export default async function offerRoutes(app: FastifyInstance) {
         notes: z.string().max(5000).nullish(),
       }).parse(req.body);
       const s = req.session;
-      if (!hasRole(s, 'sales')) return reply.code(403).send({ error: 'forbidden' });
+      if (!can(s, 'offers.edit')) return reply.code(403).send({ error: 'forbidden' });
       const res = await withTenant(s.tenantId, async (tx) => {
         const [o] = await tx`SELECT id, number, status, current_version, customer_id FROM offers WHERE id = ${id} FOR UPDATE`;
         if (!o) return { code: 404 as const };
@@ -279,6 +293,7 @@ export default async function offerRoutes(app: FastifyInstance) {
         await tx`DELETE FROM offer_approvals WHERE offer_id = ${id} AND version = ${o.current_version}`;
         if (!steps.length) {
           await tx`UPDATE offers SET status = 'approved', updated_at = now() WHERE id = ${id}`;
+          await offerEvent(tx, s.tenantId, id, 'offer.approved', by(s));
           await logActivity(tx, s, o, 'approval', 'Αυτόματη έγκριση', `${o.number} · κάτω από τα όρια έγκρισης`);
           return { code: 200 as const, status: 'approved' };
         }
@@ -286,6 +301,7 @@ export default async function offerRoutes(app: FastifyInstance) {
           tenant_id: s.tenantId, offer_id: id, version: o.current_version, step: i + 1, title: st.title, required_role: st.required_role,
         })))}`;
         await tx`UPDATE offers SET status = 'pending_approval', updated_at = now() WHERE id = ${id}`;
+        await offerEvent(tx, s.tenantId, id, 'offer.submitted', by(s));
         await logActivity(tx, s, o, 'offer_updated', 'Υποβολή για έγκριση', `${o.number} · ${steps[0].title}`);
         const approvers = (await usersWithRole(tx, s.tenantId, steps[0].required_role)).filter((u) => u !== s.userId);
         if (approvers.length) {
@@ -315,7 +331,7 @@ export default async function offerRoutes(app: FastifyInstance) {
           SELECT id, step, title, required_role FROM offer_approvals
           WHERE offer_id = ${id} AND version = ${o.current_version} AND status = 'pending' ORDER BY step LIMIT 1`;
         if (!step) return { code: 409 as const, error: 'nothing_to_approve' };
-        if ((ROLE_RANK[s.role] ?? -1) < (ROLE_RANK[step.required_role] ?? 99)) return { code: 403 as const, error: 'forbidden' };
+        if ((s.level ?? 0) < (APPROVAL_LEVEL[step.required_role] ?? 99)) return { code: 403 as const, error: 'forbidden' };
 
         await tx`UPDATE offer_approvals SET status = ${b.decision === 'approve' ? 'approved' : 'rejected'},
                    approver_id = ${s.userId}, decided_at = now(), comment = ${b.comment ?? null} WHERE id = ${step.id}`;
@@ -341,6 +357,7 @@ export default async function offerRoutes(app: FastifyInstance) {
           }
         }
         if (status !== 'pending_approval') await tx`UPDATE offers SET status = ${status}, updated_at = now() WHERE id = ${id}`;
+        if (status === 'approved') await offerEvent(tx, s.tenantId, id, 'offer.approved', by(s));
         if (notify && notify.users[0] && notify.users[0] !== s.userId) {
           await enqueue('notify', { tenantId: s.tenantId, userIds: notify.users, title: notify.title, body: notify.body, url: `/el/offers/${id}` }, tx);
         }
@@ -366,6 +383,7 @@ export default async function offerRoutes(app: FastifyInstance) {
         if (!['approved', 'sent'].includes(o.status)) return { code: 409 as const };
         const token = o.public_token ?? randomBytes(24).toString('base64url');
         await tx`UPDATE offers SET status = 'sent', public_token = ${token}, sent_at = now(), sent_to = ${b.email ?? null}, updated_at = now() WHERE id = ${id}`;
+        await offerEvent(tx, s.tenantId, id, 'offer.sent', by(s));
         const url = appUrl(`/${b.locale}/p/${token}`);
         if (b.email) {
           await enqueue('email', {
@@ -427,6 +445,7 @@ export default async function offerRoutes(app: FastifyInstance) {
         UPDATE offers SET status = ${status}, responded_at = now(), responder_name = ${b.name}, response_note = ${b.note ?? null}, updated_at = now()
         WHERE id = ${o.id} AND status = 'sent' RETURNING id`;
       if (!u) return;
+      await offerEvent(tx, o.tenant_id, o.id, status === 'accepted' ? 'offer.accepted' : 'offer.rejected', { type: 'customer' });
       await tx`INSERT INTO activities (tenant_id, customer_id, offer_id, kind, title, body)
                VALUES (${o.tenant_id}, ${o.customer_id}, ${o.id}, 'approval',
                        ${status === 'accepted' ? 'Αποδοχή από τον πελάτη' : 'Απόρριψη από τον πελάτη'},

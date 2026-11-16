@@ -3,6 +3,8 @@ import { z } from 'zod';
 import { verify } from '@node-rs/argon2';
 import { sql } from '../db.js';
 import { clearSession, issueSession, requireAuth } from '../auth.js';
+import { loadBrand } from './branding.js';
+import { effectiveFilters } from '../filters.js';
 
 // Simple in-memory brute-force guard per IP+email (move to Redis when running several API instances)
 const attempts = new Map<string, { n: number; until: number }>();
@@ -46,10 +48,24 @@ export default async function authRoutes(app: FastifyInstance) {
     const [user] = await sql`SELECT id, email, full_name, avatar_url, locale FROM users WHERE id = ${userId}`;
     // (tenant defaults are used to pre-fill new offers)
     const tenants = await sql`
-      SELECT t.id, t.slug, t.name, m.role, m.title, t.currency, t.default_vat_rate, t.offer_validity_days, t.offer_terms,
-             coalesce((m.prefs->>'show_customer_avatar')::boolean, t.show_customer_avatar) AS show_customer_avatar
+      SELECT t.id, t.slug, t.name, m.role, r.name AS role_name, r.permissions, m.title, t.currency, t.default_vat_rate, t.offer_validity_days, t.offer_terms,
+             coalesce((m.prefs->>'show_customer_avatar')::boolean, t.show_customer_avatar) AS show_customer_avatar,
+             -- user choice → role default → organisation default
+             coalesce(m.prefs->>'customers_view', t.index_defaults->'customers_view'->'roles'->>m.role, t.index_defaults->'customers_view'->>'org', 'list') AS customers_view,
+             t.index_defaults, m.prefs
       FROM memberships m JOIN tenants t ON t.id = m.tenant_id
+      LEFT JOIN roles r ON r.tenant_id = m.tenant_id AND r.key = m.role
       WHERE m.user_id = ${userId} ORDER BY t.name`;
-    return { user, tenant: tenants.find((t) => t.id === tenantId), tenants };
+    const cur = tenants.find((t) => t.id === tenantId);
+    // Which filters this user sees on each index page (Settings → Indexes)
+    const tenant = cur && (({ index_defaults, prefs, ...t }) => ({
+      ...t,
+      index_filters: {
+        customers: effectiveFilters('customers', index_defaults, prefs, t.role).keys,
+        tree: effectiveFilters('tree', index_defaults, prefs, t.role).keys,
+        stores: effectiveFilters('stores', index_defaults, prefs, t.role).keys,
+      },
+    }))(cur);
+    return { user, tenant, tenants: tenants.map(({ index_defaults: _d, prefs: _p, ...t }) => t), brand: await loadBrand(tenantId) };
   });
 }

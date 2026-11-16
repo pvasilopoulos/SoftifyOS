@@ -1,22 +1,26 @@
 'use client';
-import { Suspense, type ComponentType } from 'react';
+import { Suspense, useState, type ComponentType } from 'react';
 import clsx from 'clsx';
 import { useSearchParams } from 'next/navigation';
 import { useTranslations } from 'next-intl';
-import { ArrowLeft, Building2, ChevronRight, Contact, History, Landmark, ListChecks, Package, Plug, ShieldCheck, UserRound, Users } from 'lucide-react';
+import { ArrowLeft, Search, X, Building2, ChevronRight, Contact, FileText, LayoutList, Palette, History, Landmark, ListChecks, Package, Plug, ShieldCheck, UserRound, Users } from 'lucide-react';
 import { Link, useRouter } from '@/i18n/navigation';
 import { IconButton } from '@/components/ui';
 import {
-  ApprovalsSection, AuditSection, CompaniesSection, ListsSection, OrganizationSection, ProductsSection, ProfileSection, UsersSection,
+  ApprovalsSection, AuditSection, CompaniesSection, ListsSection, OffersSettingsSection, OrganizationSection, ProductsSection, ProfileSection, UsersSection,
 } from '@/components/settings-sections';
-import { CustomersSettingsSection, IntegrationsSection } from '@/components/settings-sections-2';
+import { BrandingSection } from '@/components/branding-settings';
+import { CustomersSettingsSection, IndexesSettingsSection, IntegrationsSection } from '@/components/settings-sections-2';
 
 const SECTIONS: { key: string; icon: typeof Users; Component: ComponentType }[] = [
   { key: 'organization', icon: Building2, Component: OrganizationSection },
+  { key: 'branding', icon: Palette, Component: BrandingSection },
   { key: 'companies', icon: Landmark, Component: CompaniesSection },
   { key: 'users', icon: Users, Component: UsersSection },
+  { key: 'offers', icon: FileText, Component: OffersSettingsSection },
   { key: 'approvals', icon: ShieldCheck, Component: ApprovalsSection },
   { key: 'customers', icon: Contact, Component: CustomersSettingsSection },
+  { key: 'indexes', icon: LayoutList, Component: IndexesSettingsSection },
   { key: 'products', icon: Package, Component: ProductsSection },
   { key: 'lists', icon: ListChecks, Component: ListsSection },
   { key: 'integrations', icon: Plug, Component: IntegrationsSection },
@@ -32,10 +36,31 @@ function SettingsInner() {
   const active = current ?? SECTIONS[0];
   const Section = active.Component;
 
+  // Search across section names, descriptions and keywords (accent/case-insensitive)
+  const [q, setQ] = useState('');
+  const fold = (x: string) => x.normalize('NFD').replace(/\p{Diacritic}/gu, '').toLowerCase();
+  const needle = fold(q.trim());
+  const shown = needle
+    ? SECTIONS.filter(({ key }) => fold(`${t(`nav.${key}` as never)} ${t(`navHint.${key}` as never)} ${t(`navKeywords.${key}` as never)}`).includes(needle))
+    : SECTIONS;
+
   const nav = (
     <nav className="card overflow-hidden">
+      <div className="border-b border-border p-2 lg:border-b-0 lg:pb-0">
+        <label className="relative block">
+          <Search size={16} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted" />
+          <input type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder={t('search')} aria-label={t('search')}
+            className="w-full rounded-xl border border-border bg-surface-2 py-2 pl-9 pr-9 text-sm outline-none transition focus:border-primary [&::-webkit-search-cancel-button]:hidden" />
+          {q && (
+            <button type="button" onClick={() => setQ('')} aria-label="clear" className="absolute right-2 top-1/2 grid h-6 w-6 -translate-y-1/2 place-items-center rounded-md text-muted hover:text-text">
+              <X size={14} />
+            </button>
+          )}
+        </label>
+      </div>
+      {!shown.length && <p className="px-4 py-6 text-center text-sm text-muted">{t('noResults')}</p>}
       <ul className="divide-y divide-border lg:divide-y-0 lg:p-2">
-        {SECTIONS.map(({ key, icon: Icon }) => (
+        {shown.map(({ key, icon: Icon }) => (
           <li key={key}>
             <Link href={`/settings?s=${key}`} scroll={false}
               className={clsx('flex items-center gap-3 px-4 py-3.5 transition lg:rounded-xl lg:px-3 lg:py-2.5',

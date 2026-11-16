@@ -13,12 +13,13 @@ import { Avatar } from './ui';
 import { Dialog } from './customer-dialogs';
 import { useToast } from './providers';
 import { useMe } from './app-shell';
+import { ID_LISTS, NAME_LISTS } from './lookup-select';
+import { canDo, RolesCard, useRoles, type Role } from './roles-settings';
+import { Activity as ActivityIcon, MailWarning, Search as SearchIcon, ShieldCheck as RoleIcon, UsersRound, X as XIcon } from 'lucide-react';
 
 const input = 'w-full min-w-0 rounded-xl border border-border bg-surface-2 px-3 py-2.5 outline-none transition focus:border-primary disabled:opacity-60';
 const primaryBtn = 'flex items-center justify-center gap-2 rounded-xl bg-primary px-5 py-2.5 font-semibold text-white shadow-sm disabled:opacity-60';
 const ghostBtn = 'flex items-center justify-center gap-2 rounded-xl border border-border bg-surface px-4 py-2.5 font-medium';
-const ROLES = ['owner', 'admin', 'manager', 'sales', 'viewer'] as const;
-const RANK: Record<string, number> = { viewer: 0, sales: 1, manager: 2, admin: 3, owner: 4 };
 
 export function Card({ title, description, children, action }: { title?: string; description?: string; children: ReactNode; action?: ReactNode }) {
   return (
@@ -47,9 +48,10 @@ function Field({ label, hint, children, wide }: { label: string; hint?: ReactNod
   );
 }
 
-function useIsAdmin() {
+/** "Admin" screens need the settings permission of the user's role. */
+function useIsAdmin(perm: string = 'settings.manage') {
   const { data: me } = useMe();
-  return { isAdmin: RANK[me?.tenant?.role ?? 'viewer'] >= RANK.admin, me };
+  return { isAdmin: canDo(me, perm), me };
 }
 
 function AdminNotice() {
@@ -67,7 +69,11 @@ type Org = {
   can_edit: boolean;
 };
 
-export function OrganizationSection() {
+export function OrganizationSection() { return <OrgForm part="org" />; }
+export function OffersSettingsSection() { return <OrgForm part="offers" />; }
+
+/** Organisation and offer settings share one record (tenants), shown in two sections. */
+function OrgForm({ part }: { part: 'org' | 'offers' }) {
   const t = useTranslations('settings.org');
   const ts = useTranslations('settings');
   const toast = useToast();
@@ -78,7 +84,7 @@ export function OrganizationSection() {
   const save = useMutation({
     mutationFn: () => api('/settings/organization', { method: 'PUT', json: { ...v, default_vat_rate: Number(v!.default_vat_rate) } }),
     onSuccess: () => { toast({ title: ts('saved') }); qc.invalidateQueries({ queryKey: ['settings'] }); qc.invalidateQueries({ queryKey: ['me'] }); },
-    onError: (e) => toast({ title: ts('error'), body: errText(e) }),
+    onError: (e) => toast({ title: e instanceof ApiError && e.code === 'slug_taken' ? t('slugTaken') : ts('error'), body: e instanceof ApiError && e.code === 'slug_taken' ? undefined : errText(e) }),
   });
   if (!v) return <Loader2 className="mx-auto animate-spin text-muted" />;
   const ro = !v.can_edit;
@@ -88,6 +94,7 @@ export function OrganizationSection() {
   return (
     <form className="space-y-4" onSubmit={(e) => { e.preventDefault(); save.mutate(); }}>
       {ro && <AdminNotice />}
+      {part === 'org' && (<>
       <div className="grid grid-cols-3 gap-3">
         {[[t('users'), v.counts.users], [t('customers'), Number(v.counts.customers ?? 0)], [t('offers'), Number(v.counts.offers)]].map(([k, n]) => (
           <div key={k as string} className="card p-4"><div className="text-xs text-muted">{k}</div><div className="tabular text-xl font-bold">{Number(n).toLocaleString()}</div></div>
@@ -102,7 +109,10 @@ export function OrganizationSection() {
           <Field label={t('phone')}><input type="tel" className={input} value={v.phone ?? ''} onChange={set('phone')} /></Field>
           <Field label={t('website')}><input className={input} value={v.website ?? ''} onChange={set('website')} /></Field>
           <Field label={t('address')} wide><input className={input} value={v.address ?? ''} onChange={set('address')} /></Field>
-          <Field label={t('slug')}><input className={input} value={v.slug} disabled /></Field>
+          <Field label={t('slug')} hint={t('slugHint')}>
+            <input required minLength={3} maxLength={40} pattern="[a-z0-9][a-z0-9-]{1,38}[a-z0-9]" className={`${input} lowercase`} value={v.slug}
+              onChange={(e) => setV({ ...v, slug: e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, '') })} />
+          </Field>
         </fieldset>
       </Card>
       <Card title={t('sDefaults')}>
@@ -121,15 +131,18 @@ export function OrganizationSection() {
           <Field label={t('vatRate')}><input type="number" min={0} max={100} step="0.5" className={`${input} tabular`} value={v.default_vat_rate} onChange={set('default_vat_rate')} /></Field>
         </fieldset>
       </Card>
+      </>)}
+      {part === 'offers' && (
       <Card title={t('sOffers')}>
         <fieldset disabled={ro} className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <Field label={t('prefix')} hint={t('prefixHint', { example: `${v.offer_prefix || 'OFF'}-${year}-0001` })}>
             <input className={`${input} uppercase tabular`} maxLength={10} pattern="[A-Za-z0-9-]{1,10}" value={v.offer_prefix} onChange={(e) => setV({ ...v, offer_prefix: e.target.value.toUpperCase() })} />
           </Field>
           <Field label={t('validity')}><input type="number" min={1} max={365} className={`${input} tabular`} value={v.offer_validity_days} onChange={set('offer_validity_days')} /></Field>
-          <Field label={t('terms')} wide><textarea rows={4} className={input} value={v.offer_terms ?? ''} onChange={set('offer_terms')} /></Field>
+          <Field label={t('terms')} wide><textarea rows={6} className={input} value={v.offer_terms ?? ''} onChange={set('offer_terms')} /></Field>
         </fieldset>
       </Card>
+      )}
       {!ro && (
         <div className="card sticky bottom-24 z-20 flex justify-end p-3 lg:bottom-4">
           <button disabled={save.isPending} className={primaryBtn}>{save.isPending ? <Loader2 size={18} className="animate-spin" /> : <Check size={18} />} {ts('save')}</button>
@@ -232,8 +245,10 @@ export function UsersSection() {
   const locale = useLocale();
   const toast = useToast();
   const qc = useQueryClient();
-  const { isAdmin, me } = useIsAdmin();
-  const myRank = RANK[me?.tenant?.role ?? 'viewer'];
+  const { isAdmin, me } = useIsAdmin('users.manage');
+  const myRole = me?.tenant?.role ?? 'viewer';
+  const roles = useRoles().data?.roles ?? [];
+  const roleName = (key: string) => roles.find((r) => r.key === key)?.name ?? key;
   const { data = [] } = useQuery({ queryKey: ['settings', 'users'], queryFn: () => api<Member[]>('/settings/users') });
   const [inviting, setInviting] = useState(false);
   const [link, setLink] = useState<{ url: string | null; emailed?: boolean; existing?: boolean } | null>(null);
@@ -242,16 +257,95 @@ export function UsersSection() {
   const role = useMutation({ mutationFn: (x: { id: string; role: string; title: string | null }) => api(`/settings/users/${x.id}`, { method: 'PUT', json: { role: x.role, title: x.title } }), onSuccess: refresh, onError: onErr });
   const remove = useMutation({ mutationFn: (id: string) => api(`/settings/users/${id}`, { method: 'DELETE' }), onSuccess: refresh, onError: onErr });
   const resend = useMutation({ mutationFn: (id: string) => api<{ inviteUrl: string }>(`/settings/users/${id}/resend`, { method: 'POST' }), onSuccess: (r) => setLink({ url: r.inviteUrl }), onError: onErr });
-  const assignable = ROLES.filter((r) => RANK[r] <= (myRank === RANK.owner ? RANK.owner : RANK.admin));
+  // Only owners can grant (or act on) the owner role
+  const assignable = roles.filter((r) => r.key !== 'owner' || myRole === 'owner');
+
+  // Tabs, search and filters; users are grouped by role (in the roles' order)
+  const [tab, setTab] = useState<'users' | 'roles'>('users');
+  const [q, setQ] = useState('');
+  const [roleFilter, setRoleFilter] = useState('');
+  const [state, setState] = useState<'all' | 'active' | 'pending' | 'inactive'>('all');
+  const weekAgo = Date.now() - 7 * 86_400_000;
+  const fold = (x: string) => x.normalize('NFD').replace(/\p{Diacritic}/gu, '').toLowerCase();
+  const needle = fold(q.trim());
+  const stateOf = (u: Member) => (!u.password_set ? 'pending' : u.last_seen_at && new Date(u.last_seen_at).getTime() > weekAgo ? 'active' : 'inactive');
+  const filtered = data.filter((u) =>
+    (!needle || fold(`${u.full_name} ${u.email} ${u.title ?? ''}`).includes(needle))
+    && (!roleFilter || u.role === roleFilter)
+    && (state === 'all' || stateOf(u) === state));
+  const groups = [...roles.map((r) => r.key), ...new Set(data.map((u) => u.role).filter((k) => !roles.some((r) => r.key === k)))]
+    .map((key) => ({ key, users: filtered.filter((u) => u.role === key) }))
+    .filter((g) => g.users.length);
+  const stats = [
+    { icon: UsersRound, label: t('statUsers'), value: data.length },
+    { icon: ActivityIcon, label: t('statActive'), value: data.filter((u) => stateOf(u) === 'active').length },
+    { icon: MailWarning, label: t('statPending'), value: data.filter((u) => !u.password_set).length },
+    { icon: RoleIcon, label: t('statRoles'), value: roles.length },
+  ];
+  const filtersOn = !!(q || roleFilter || state !== 'all');
 
   return (
-    <div className="space-y-3">
+    <div className="space-y-4">
       {!isAdmin && <AdminNotice />}
-      {isAdmin && <button onClick={() => setInviting(true)} className={clsx(primaryBtn, 'w-full sm:w-auto')}><UserPlus size={18} /> {t('invite')}</button>}
+      <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
+        {stats.map(({ icon: Icon, label, value }) => (
+          <div key={label} className="card flex items-center gap-3 p-3.5">
+            <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-primary-soft text-primary"><Icon size={17} /></span>
+            <div className="min-w-0"><div className="tabular text-lg font-bold leading-tight">{value}</div><div className="truncate text-xs text-muted">{label}</div></div>
+          </div>
+        ))}
+      </div>
+
+      <div role="tablist" className="grid grid-cols-2 gap-1 rounded-2xl bg-surface-2 p-1">
+        {(['users', 'roles'] as const).map((k) => (
+          <button key={k} role="tab" aria-selected={tab === k} onClick={() => setTab(k)}
+            className={clsx('flex items-center justify-center gap-1.5 rounded-xl px-3 py-2 text-sm font-medium transition', tab === k ? 'bg-surface text-primary shadow-sm' : 'text-muted hover:text-text')}>
+            {k === 'users' ? <UsersRound size={16} /> : <RoleIcon size={16} />}
+            {k === 'users' ? t('tabUsers', { count: data.length }) : t('tabRoles', { count: roles.length })}
+          </button>
+        ))}
+      </div>
+
+      {tab === 'roles' ? <RolesCard /> : (
+      <>
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+        <label className="relative min-w-0 flex-1">
+          <SearchIcon size={16} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted" />
+          <input type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder={t('search')} aria-label={t('search')}
+            className="w-full rounded-xl border border-border bg-surface py-2.5 pl-9 pr-3 text-sm outline-none focus:border-primary" />
+        </label>
+        <select value={roleFilter} onChange={(e) => setRoleFilter(e.target.value)} aria-label={t('role')}
+          className="rounded-xl border border-border bg-surface px-3 py-2.5 text-sm outline-none focus:border-primary">
+          <option value="">{t('allRoles')}</option>
+          {roles.map((r) => <option key={r.key} value={r.key}>{r.name}</option>)}
+        </select>
+        {isAdmin && <button onClick={() => setInviting(true)} className={primaryBtn}><UserPlus size={18} /> {t('invite')}</button>}
+      </div>
+      <div className="flex flex-wrap items-center gap-1.5">
+        {(['all', 'active', 'inactive', 'pending'] as const).map((k) => (
+          <button key={k} onClick={() => setState(k)}
+            className={clsx('rounded-full border px-3 py-1.5 text-sm', state === k ? 'border-primary bg-primary-soft font-medium text-primary' : 'border-border text-muted hover:text-text')}>
+            {t(`state_${k}`)}
+          </button>
+        ))}
+        {filtersOn && (
+          <button onClick={() => { setQ(''); setRoleFilter(''); setState('all'); }} className="ml-auto flex items-center gap-1 text-sm font-medium text-primary">
+            <XIcon size={14} /> {t('clear')}
+          </button>
+        )}
+      </div>
+
+      {!groups.length && <div className="card p-8 text-center text-sm text-muted">{t('noMatch')}</div>}
+      {groups.map((g) => (
+      <section key={g.key}>
+        <div className="mb-2 flex items-center gap-2 px-1">
+          <span className="text-xs font-semibold uppercase tracking-wide text-muted">{roleName(g.key)}</span>
+          <span className="rounded-full bg-surface-2 px-2 py-0.5 text-xs text-muted">{g.users.length}</span>
+        </div>
       <div className="card divide-y divide-border">
-        {data.map((u) => {
+        {g.users.map((u) => {
           const isMe = u.id === me?.user.id;
-          const editable = isAdmin && !isMe && RANK[u.role] <= (myRank === RANK.owner ? RANK.owner : RANK.admin);
+          const editable = isAdmin && !isMe && (u.role !== 'owner' || myRole === 'owner');
           return (
             <div key={u.id} className="flex flex-wrap items-center gap-3 p-4">
               <Avatar name={u.full_name} size={40} />
@@ -261,13 +355,17 @@ export function UsersSection() {
                   {!u.password_set && <span className="rounded-full bg-warning-soft px-2 py-0.5 text-xs font-medium text-warning">{t('pending')}</span>}
                 </div>
                 <div className="truncate text-sm text-muted">{u.email}{u.title && ` · ${u.title}`}</div>
-                <div className="text-xs text-muted">{t('lastSeen')}: {u.last_seen_at ? relative(u.last_seen_at, locale, { today: ta('today'), yesterday: ta('yesterday') }) : t('never')}</div>
+                <div className="flex items-center gap-1.5 text-xs text-muted">
+                  <span className={clsx('h-2 w-2 shrink-0 rounded-full', stateOf(u) === 'active' ? 'bg-success' : stateOf(u) === 'pending' ? 'bg-warning' : 'bg-border')} />
+                  {t('lastSeen')}: {u.last_seen_at ? relative(u.last_seen_at, locale, { today: ta('today'), yesterday: ta('yesterday') }) : t('never')}
+                </div>
               </div>
               <div className="flex items-center gap-1.5">
                 <select aria-label={t('role')} value={u.role} disabled={!editable || role.isPending}
                   onChange={(e) => role.mutate({ id: u.id, role: e.target.value, title: u.title })}
                   className="rounded-xl border border-border bg-surface-2 px-3 py-2 text-sm font-medium outline-none focus:border-primary disabled:opacity-70">
-                  {(editable ? assignable : ROLES).map((r) => <option key={r} value={r}>{t(`roles.${r}`)}</option>)}
+                  {!roles.some((r) => r.key === u.role) && <option value={u.role}>{roleName(u.role)}</option>}
+                  {(editable ? assignable : roles).map((r) => <option key={r.key} value={r.key}>{r.name}</option>)}
                 </select>
                 {editable && !u.password_set && (
                   <button onClick={() => resend.mutate(u.id)} title={t('resend')} aria-label={t('resend')} className="grid h-9 w-9 place-items-center rounded-lg text-muted hover:bg-surface-2 hover:text-primary"><Mail size={16} /></button>
@@ -281,20 +379,17 @@ export function UsersSection() {
           );
         })}
       </div>
-      <Card title={t('role')}>
-        <ul className="grid gap-2 sm:grid-cols-2">
-          {ROLES.map((r) => (
-            <li key={r} className="rounded-xl bg-surface-2 px-3 py-2 text-sm"><span className="font-semibold">{t(`roles.${r}`)}</span><span className="text-muted"> · {t(`roleHints.${r}`)}</span></li>
-          ))}
-        </ul>
-      </Card>
+      </section>
+      ))}
+      </>
+      )}
       {inviting && <InviteDialog roles={assignable} onClose={() => setInviting(false)} onDone={(r) => { setInviting(false); setLink(r); refresh(); }} />}
       {link && <InviteLinkDialog {...link} onClose={() => setLink(null)} />}
     </div>
   );
 }
 
-function InviteDialog({ roles, onClose, onDone }: { roles: readonly string[]; onClose: () => void; onDone: (r: { url: string | null; emailed: boolean; existing: boolean }) => void }) {
+function InviteDialog({ roles, onClose, onDone }: { roles: Role[]; onClose: () => void; onDone: (r: { url: string | null; emailed: boolean; existing: boolean }) => void }) {
   const t = useTranslations('settings.users');
   const ts = useTranslations('settings');
   const locale = useLocale();
@@ -310,8 +405,8 @@ function InviteDialog({ roles, onClose, onDone }: { roles: readonly string[]; on
       <form className="grid grid-cols-1 gap-3 sm:grid-cols-2" onSubmit={(e) => { e.preventDefault(); save.mutate(); }}>
         <Field label={`${t('fullName')} *`}><input required minLength={2} autoFocus className={input} value={v.full_name} onChange={(e) => setV({ ...v, full_name: e.target.value })} /></Field>
         <Field label={`${t('email')} *`}><input required type="email" className={input} value={v.email} onChange={(e) => setV({ ...v, email: e.target.value })} /></Field>
-        <Field label={t('role')} hint={t(`roleHints.${v.role}` as never)}>
-          <select className={input} value={v.role} onChange={(e) => setV({ ...v, role: e.target.value })}>{roles.map((r) => <option key={r} value={r}>{t(`roles.${r}`)}</option>)}</select>
+        <Field label={t('role')} hint={roles.find((r) => r.key === v.role)?.description ?? undefined}>
+          <select className={input} value={v.role} onChange={(e) => setV({ ...v, role: e.target.value })}>{roles.map((r) => <option key={r.key} value={r.key}>{r.name}</option>)}</select>
         </Field>
         <Field label={t('title')}><input className={input} value={v.title} onChange={(e) => setV({ ...v, title: e.target.value })} /></Field>
         <Field label={t('language')}>
@@ -502,7 +597,7 @@ function ProductDialog({ product, onClose }: { product: Partial<Product>; onClos
 
 // ======================================== Value lists ========================================
 type ListValue = { id: string; name: string; sort: number; active: boolean; usage: number };
-const LISTS = ['geo_zone', 'fee_schedule', 'tour', 'ongoing_status'] as const;
+const LISTS = [...ID_LISTS, ...NAME_LISTS] as const;
 
 export function ListsSection() {
   const t = useTranslations('settings.lists');
@@ -526,9 +621,15 @@ export function ListsSection() {
   return (
     <div className="space-y-3">
       {!isAdmin && <AdminNotice />}
-      <div className="grid grid-cols-2 gap-1 rounded-2xl bg-surface-2 p-1 sm:grid-cols-4">
+      {/* Phone: one dropdown; larger screens: an even 3×3 grid of tabs */}
+      <select value={list} onChange={(e) => setList(e.target.value as (typeof LISTS)[number])} aria-label={t('choose')}
+        className={clsx(input, 'font-medium sm:hidden')}>
+        {LISTS.map((l) => <option key={l} value={l}>{tl(l)}</option>)}
+      </select>
+      <div className="hidden grid-cols-3 gap-1 rounded-2xl bg-surface-2 p-1 sm:grid">
         {LISTS.map((l) => (
-          <button key={l} onClick={() => setList(l)} className={clsx('truncate rounded-xl px-2 py-2 text-sm font-medium', list === l ? 'bg-surface text-primary shadow-sm' : 'text-muted')}>{tl(l)}</button>
+          <button key={l} onClick={() => setList(l)} aria-pressed={list === l}
+            className={clsx('truncate rounded-xl px-3 py-2 text-center text-sm font-medium transition', list === l ? 'bg-surface text-primary shadow-sm' : 'text-muted hover:text-text')}>{tl(l)}</button>
         ))}
       </div>
       <p className="text-sm text-muted">{t('intro')}</p>
@@ -550,20 +651,24 @@ export function ListsSection() {
             ) : (
               <>
                 <div className="min-w-0 flex-1">
-                  <div className="truncate font-medium">{x.name}</div>
-                  <div className="text-xs text-muted">{t('usage', { count: x.usage })}{!x.active && ` · ${ts('inactive')}`}</div>
+                  <div className="break-words font-medium leading-snug">{x.name}</div>
+                  <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted">
+                    {isAdmin ? (
+                      <button onClick={() => upd.mutate({ ...x, active: !x.active })} className={clsx('rounded-full px-2 py-0.5 text-xs font-medium', x.active ? 'bg-success-soft text-success' : 'bg-surface-2 text-muted')}>
+                        {x.active ? ts('active') : ts('inactive')}
+                      </button>
+                    ) : !x.active && <span>{ts('inactive')}</span>}
+                    <span className="tabular">{t('usage', { count: x.usage })}</span>
+                  </div>
                 </div>
                 {isAdmin && (
-                  <>
-                    <button onClick={() => upd.mutate({ ...x, active: !x.active })} className={clsx('rounded-full px-2.5 py-1 text-xs font-medium', x.active ? 'bg-success-soft text-success' : 'bg-surface-2 text-muted')}>
-                      {x.active ? ts('active') : ts('inactive')}
-                    </button>
+                  <div className="flex shrink-0 items-center">
                     <button disabled={i === 0} onClick={() => move(i, -1)} aria-label="up" className="grid h-8 w-8 place-items-center rounded-lg text-muted hover:bg-surface-2 disabled:opacity-30"><ArrowUp size={15} /></button>
                     <button disabled={i === data.length - 1} onClick={() => move(i, 1)} aria-label="down" className="grid h-8 w-8 place-items-center rounded-lg text-muted hover:bg-surface-2 disabled:opacity-30"><ArrowDown size={15} /></button>
                     <button onClick={() => setEditing({ id: x.id, name: x.name })} aria-label={ts('edit')} className="grid h-8 w-8 place-items-center rounded-lg text-muted hover:bg-surface-2 hover:text-primary"><Pencil size={15} /></button>
                     <button disabled={x.usage > 0} title={x.usage > 0 ? t('inUse') : ts('delete')} onClick={() => del.mutate(x.id)} aria-label={ts('delete')}
                       className="grid h-8 w-8 place-items-center rounded-lg text-muted hover:bg-danger-soft hover:text-danger disabled:opacity-30"><Trash2 size={15} /></button>
-                  </>
+                  </div>
                 )}
               </>
             )}
@@ -585,6 +690,16 @@ export function ProfileSection() {
   const [lang, setLang] = useState<'el' | 'en'>('el');
   useEffect(() => { if (me) { setName(me.user.full_name); setLang((me.user as { locale?: 'el' | 'en' }).locale ?? 'el'); } }, [me]);
   const [pw, setPw] = useState({ current: '', next: '', confirm: '' });
+  const [email, setEmail] = useState('');
+  const [emailPw, setEmailPw] = useState('');
+  const [emailError, setEmailError] = useState<string | null>(null);
+  useEffect(() => { if (me) setEmail(me.user.email); }, [me]);
+  const emailChanged = !!me && email.trim().toLowerCase() !== me.user.email.toLowerCase();
+  const saveEmail = useMutation({
+    mutationFn: () => api('/me/email', { method: 'POST', json: { email, password: emailPw } }),
+    onSuccess: () => { toast({ title: t('emailChanged') }); setEmailPw(''); setEmailError(null); qc.invalidateQueries({ queryKey: ['me'] }); },
+    onError: (e) => setEmailError(e instanceof ApiError && e.code === 'wrong_password' ? t('wrong') : e instanceof ApiError && e.code === 'email_taken' ? t('emailTaken') : errText(e)),
+  });
   const [pwError, setPwError] = useState<string | null>(null);
   const saveProfile = useMutation({
     mutationFn: () => api('/me', { method: 'PUT', json: { full_name: name, locale: lang } }),
@@ -601,11 +716,20 @@ export function ProfileSection() {
       <Card title={t('sDetails')}>
         <form className="grid grid-cols-1 gap-3 sm:grid-cols-2" onSubmit={(e) => { e.preventDefault(); saveProfile.mutate(); }}>
           <Field label={t('fullName')}><input required minLength={2} className={input} value={name} onChange={(e) => setName(e.target.value)} /></Field>
-          <Field label={t('email')}><input className={input} value={me?.user.email ?? ''} disabled /></Field>
           <Field label={t('language')}>
             <select className={input} value={lang} onChange={(e) => setLang(e.target.value as 'el' | 'en')}><option value="el">Ελληνικά</option><option value="en">English</option></select>
           </Field>
           <div className="flex items-end justify-end"><button disabled={saveProfile.isPending} className={primaryBtn}><Check size={17} /> {ts('save')}</button></div>
+        </form>
+      </Card>
+      <Card title={t('sEmail')} description={t('emailIntro')}>
+        <form className="grid grid-cols-1 gap-3 sm:grid-cols-2" onSubmit={(e) => { e.preventDefault(); if (emailChanged) saveEmail.mutate(); }}>
+          <Field label={t('email')}><input required type="email" autoComplete="email" className={input} value={email} onChange={(e) => { setEmail(e.target.value); setEmailError(null); }} /></Field>
+          <Field label={t('current')}><input required={emailChanged} disabled={!emailChanged} type="password" autoComplete="current-password" className={input} value={emailPw} onChange={(e) => setEmailPw(e.target.value)} /></Field>
+          <div className="flex items-center justify-end gap-3 sm:col-span-2">
+            {emailError && <span className="mr-auto text-sm text-danger">{emailError}</span>}
+            <button disabled={!emailChanged || !emailPw || saveEmail.isPending} className={primaryBtn}>{saveEmail.isPending ? <Loader2 size={17} className="animate-spin" /> : <Check size={17} />} {t('emailSave')}</button>
+          </div>
         </form>
       </Card>
       <Card title={t('sPassword')}>
@@ -628,38 +752,5 @@ export function ProfileSection() {
 }
 
 // ======================================== Audit log ========================================
-type AuditRow = { id: string; action: string; entity: string | null; details: unknown; created_at: string; actor_name: string | null };
-
-export function AuditSection() {
-  const t = useTranslations('settings.audit');
-  const ts = useTranslations('settings');
-  const ta = useTranslations('activity');
-  const locale = useLocale();
-  const { isAdmin } = useIsAdmin();
-  const query = useInfiniteQuery({
-    queryKey: ['settings', 'audit'], enabled: isAdmin,
-    initialPageParam: null as string | null,
-    queryFn: ({ pageParam }) => api<Page<AuditRow>>(`/settings/audit${pageParam ? `?cursor=${pageParam}` : ''}`),
-    getNextPageParam: (l) => l.nextCursor,
-  });
-  if (!isAdmin) return <AdminNotice />;
-  const rows = query.data?.pages.flatMap((p) => p.items) ?? [];
-  return (
-    <div className="space-y-3">
-      <ul className="card divide-y divide-border">
-        {rows.length === 0 && !query.isLoading && <li className="p-6 text-center text-sm text-muted">{t('empty')}</li>}
-        {rows.map((a) => (
-          <li key={a.id} className="flex items-start gap-3 p-3.5">
-            <Avatar name={a.actor_name} size={34} />
-            <div className="min-w-0 flex-1">
-              <div className="text-sm"><span className="font-semibold">{a.actor_name ?? '—'}</span> · {t.has(`actions.${a.action.replaceAll('.', '_')}`) ? t(`actions.${a.action.replaceAll('.', '_')}` as never) : a.action}</div>
-              {a.entity && <div className="truncate text-xs text-muted">{a.entity}</div>}
-            </div>
-            <span className="shrink-0 text-xs text-muted">{relative(a.created_at, locale, { today: ta('today'), yesterday: ta('yesterday') })}</span>
-          </li>
-        ))}
-      </ul>
-      {query.hasNextPage && <button onClick={() => query.fetchNextPage()} className={clsx(ghostBtn, 'w-full')}>{ts('loadMore')}</button>}
-    </div>
-  );
-}
+// Change history: ./audit-log.tsx
+export { AuditSection } from './audit-log';

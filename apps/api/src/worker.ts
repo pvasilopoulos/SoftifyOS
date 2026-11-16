@@ -6,7 +6,8 @@ import nodemailer from 'nodemailer';
 import { env } from './env.js';
 import { sql } from './db.js';
 import { publish } from './realtime.js';
-import type { EmailJob, JobMap, NotifyJob } from './jobs.js';
+import type { EmailJob, JobMap, NotifyJob, WebhookJob } from './jobs.js';
+import { deliver } from './webhooks.js';
 
 // SMTP (e.g. the Plesk mail server on localhost). Without SMTP_HOST, emails are logged instead of sent.
 const mailer = env.smtpConfigured
@@ -57,6 +58,14 @@ async function handleNotify(p: NotifyJob) {
   }));
 }
 
+// Webhooks keep their own (longer) retry schedule: a failed attempt queues the next one instead of throwing.
+async function handleWebhook(p: WebhookJob) {
+  const r = await deliver(p.deliveryId);
+  if (r?.retryIn) {
+    await sql`INSERT INTO jobs (kind, payload, run_at) VALUES ('webhook', ${sql.json(p as never)}, now() + (${r.retryIn} * interval '1 second'))`;
+  }
+}
+
 async function processBatch(): Promise<number> {
   const jobs = await sql<Job[]>`
     UPDATE jobs SET locked_at = now(), attempts = attempts + 1
@@ -68,6 +77,7 @@ async function processBatch(): Promise<number> {
     try {
       if (j.kind === 'notify') await handleNotify(j.payload as NotifyJob);
       else if (j.kind === 'email') await handleEmail(j.payload as EmailJob);
+      else if (j.kind === 'webhook') await handleWebhook(j.payload as WebhookJob);
       await sql`DELETE FROM jobs WHERE id = ${j.id}`;
     } catch (e) {
       const msg = (e as Error).message;
@@ -100,6 +110,9 @@ async function scheduleReminders() {
 async function maintenance() {
   await sql`UPDATE jobs SET locked_at = NULL WHERE locked_at < now() - interval '5 minutes'`; // crashed workers
   await sql`SELECT ensure_activity_partitions(1, 3)`;
+  // Integration logs are kept 30 days
+  await sql`DELETE FROM api_requests WHERE created_at < now() - interval '30 days'`;
+  await sql`DELETE FROM webhook_deliveries WHERE created_at < now() - interval '30 days' AND status <> 'pending'`;
 }
 
 let running = true;

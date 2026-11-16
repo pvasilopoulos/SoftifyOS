@@ -12,7 +12,8 @@ const inter = Inter({ subsets: ['latin', 'greek'], variable: '--font-inter', dis
 export const metadata: Metadata = {
   title: { default: 'SoftifyOS', template: '%s · SoftifyOS' },
   description: 'Enterprise Business OS',
-  manifest: '/manifest.webmanifest',
+  // Per-organisation name and icons (falls back to the SoftifyOS defaults when signed out)
+  manifest: '/api/brand/manifest.webmanifest',
   appleWebApp: { capable: true, title: 'SoftifyOS', statusBarStyle: 'default' },
   icons: { icon: '/icons/192', apple: '/icons/180' },
 };

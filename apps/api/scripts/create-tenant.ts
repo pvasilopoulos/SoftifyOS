@@ -74,6 +74,7 @@ try {
     if (existing) fail(`Υπάρχει ήδη οργανισμός με slug "${a.slug}".`);
     const [tenant] = await tx`INSERT INTO tenants (slug, name) VALUES (${a.slug!}, ${a.name!}) RETURNING id`;
     await tx`SELECT provision_tenant(${tenant.id})`; // default approval flow + sample catalogue
+    await tx`SELECT seed_default_lookups(${tenant.id})`; // value lists: prefectures, categories, payment terms…
     await tx`INSERT INTO companies (tenant_id, name, vat) VALUES (${tenant.id}, ${a.company ?? a.name!}, ${a.vat ?? null})`;
 
     const [user] = await tx`SELECT id FROM users WHERE lower(email) = lower(${a.email!})`;

@@ -1,6 +1,6 @@
 // Same-origin API client: cookies carry the session, nginx (prod) / Next rewrite (dev) route /api.
 export class ApiError extends Error {
-  constructor(public status: number, public code: string) { super(code); }
+  constructor(public status: number, public code: string, public body?: unknown) { super(code); }
 }
 
 export async function api<T>(path: string, init?: RequestInit & { json?: unknown }): Promise<T> {
@@ -16,7 +16,7 @@ export async function api<T>(path: string, init?: RequestInit & { json?: unknown
   }
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
-    throw new ApiError(res.status, body.error ?? 'error');
+    throw new ApiError(res.status, body.error ?? 'error', body);
   }
   return res.json() as Promise<T>;
 }
@@ -35,6 +35,7 @@ export type Activity = { id: string; kind: string; title: string; body: string |
 export type CalEvent = { id: string; kind: string; title: string; location: string | null; starts_at: string; ends_at: string; customer_name: string | null };
 export type Me = {
   user: { id: string; email: string; full_name: string; avatar_url: string | null };
-  tenant: { id: string; slug: string; name: string; role: string; title: string | null; show_customer_avatar?: boolean };
+  tenant: { id: string; slug: string; name: string; role: string; title: string | null; show_customer_avatar?: boolean; customers_view?: 'list' | 'tree' | 'stores'; role_name?: string; permissions?: string[] };
   tenants: { id: string; slug: string; name: string; role: string }[];
+  brand?: import('./brand').Brand;
 };

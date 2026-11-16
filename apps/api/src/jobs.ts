@@ -10,7 +10,9 @@ export type NotifyJob = {
 
 export type EmailJob = { to: string; subject: string; text: string; html?: string };
 
-export type JobMap = { notify: NotifyJob; email: EmailJob };
+export type WebhookJob = { deliveryId: string };
+
+export type JobMap = { notify: NotifyJob; email: EmailJob; webhook: WebhookJob };
 
 export async function enqueue<K extends keyof JobMap>(kind: K, payload: JobMap[K], db: Tx | typeof sql = sql, runAt?: Date) {
   await db`INSERT INTO jobs (kind, payload, run_at) VALUES (${kind}, ${db.json(payload as never)}, ${runAt ?? new Date()})`;

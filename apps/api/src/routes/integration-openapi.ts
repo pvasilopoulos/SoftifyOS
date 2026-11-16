@@ -38,7 +38,7 @@ const Space = {
   type: 'object', required: ['external_id'], additionalProperties: false,
   properties: {
     external_id: ext, branch_external_id: { ...ext, description: 'Required on create' },
-    name: { type: 'string', maxLength: 200, description: 'Required on create' }, kind: { enum: ['retail', 'warehouse', 'office', 'department'] },
+    name: { type: 'string', maxLength: 200, description: 'Required on create' }, kind: { type: 'string', maxLength: 80, description: 'Space kind by name from the value list (added if missing), e.g. Αποθήκη' },
     area_sqm: { type: ['number', 'null'], minimum: 0 }, notes: nstr(2000),
   },
 };

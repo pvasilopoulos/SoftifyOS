@@ -70,7 +70,7 @@ export default function MorePage() {
         <div className="min-w-0 flex-1">
           <div className="font-semibold">{me?.user.full_name}</div>
           <div className="truncate text-sm text-muted">{me?.user.email}</div>
-          <div className="text-xs text-muted">{t('tenant')}: {me?.tenant?.name} · {me?.tenant?.role}</div>
+          <div className="text-xs text-muted">{t('tenant')}: {me?.tenant?.name} · {me?.tenant?.role_name ?? me?.tenant?.role}</div>
         </div>
       </section>
 

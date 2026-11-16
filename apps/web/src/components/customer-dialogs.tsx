@@ -7,8 +7,7 @@ import clsx from 'clsx';
 import { api, ApiError } from '@/lib/api';
 import type { Branch, Contact, Space } from '@/lib/customers';
 import { IconButton } from './ui';
-import { LookupSelect, PrefecturesDatalist } from './lookup-select';
-import { PREFECTURES_LIST_ID } from '@/lib/greece';
+import { LookupSelect, NameSelect } from './lookup-select';
 
 const input = 'w-full min-w-0 rounded-xl border border-border bg-surface-2 px-3 py-2.5 outline-none focus:border-primary';
 
@@ -16,7 +15,7 @@ export function Dialog({ title, onClose, children }: { title: string; onClose: (
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 sm:items-center" onClick={onClose}>
       <div onClick={(e) => e.stopPropagation()} role="dialog" aria-label={title}
-        className="max-h-[90dvh] w-full max-w-lg overflow-auto rounded-t-3xl bg-surface p-5 safe-bottom sm:rounded-3xl sm:p-6">
+        className="max-h-[90dvh] w-full max-w-lg overflow-auto rounded-t-3xl bg-surface p-5 sheet-pb sm:rounded-3xl sm:p-6">
         <div className="mb-4 flex items-center justify-between">
           <h2 className="text-lg font-bold">{title}</h2>
           <IconButton label="close" onClick={onClose}><X size={20} /></IconButton>
@@ -105,7 +104,7 @@ export function BranchDialog({ customerId, branch, onClose }: { customerId: stri
         <F label={t('street')} wide><input className={input} value={v.address} onChange={set('address')} /></F>
         <F label={t('city')}><input className={input} value={v.city} onChange={set('city')} /></F>
         <F label={t('postal')}><input className={input} inputMode="numeric" value={v.postal_code} onChange={set('postal_code')} /></F>
-        <F label={t('prefecture')}><input className={input} list={PREFECTURES_LIST_ID} value={v.region} onChange={set('region')} /></F>
+        <F label={t('prefecture')}><NameSelect list="prefecture" className={input} value={v.region} onChange={(x) => setV((s) => ({ ...s, region: x }))} /></F>
         <F label={t('geoZone')}><LookupSelect list="geo_zone" className={input} value={v.geo_zone_id} onChange={(id) => setV((x) => ({ ...x, geo_zone_id: id }))} /></F>
 
         <Head>{t('sCommercial')}</Head>
@@ -131,7 +130,6 @@ export function BranchDialog({ customerId, branch, onClose }: { customerId: stri
         <Head>{t('sContact')}</Head>
         <F label={t('phone')}><input type="tel" className={input} value={v.phone} onChange={set('phone')} /></F>
         <F label={t('branchManager')}><input className={input} value={v.manager_name} onChange={set('manager_name')} /></F>
-        <PrefecturesDatalist />
         <Actions busy={busy} error={error} onCancel={onClose}
           onDelete={branch ? () => { if (confirm(t('confirmDeleteBranch', { name: branch.name }))) run(() => api(`/branches/${branch.id}`, { method: 'DELETE' })); } : undefined} />
       </form>
@@ -139,11 +137,9 @@ export function BranchDialog({ customerId, branch, onClose }: { customerId: stri
   );
 }
 
-const SPACE_KINDS = ['retail', 'warehouse', 'office', 'department'] as const;
-
 export function SpaceDialog({ customerId, branchId, space, onClose }: { customerId: string; branchId: string; space?: Space; onClose: () => void }) {
   const t = useTranslations('customer');
-  const [v, setV] = useState({ name: space?.name ?? '', kind: (space?.kind ?? 'retail') as (typeof SPACE_KINDS)[number], area_sqm: space?.area_sqm ?? '', notes: space?.notes ?? '' });
+  const [v, setV] = useState({ name: space?.name ?? '', kind: space?.kind ?? '', area_sqm: space?.area_sqm ?? '', notes: space?.notes ?? '' });
   const { run, busy, error } = useSave(customerId, onClose);
   return (
     <Dialog title={space ? t('editSpace') : t('addSpace')} onClose={onClose}>
@@ -154,9 +150,7 @@ export function SpaceDialog({ customerId, branchId, space, onClose }: { customer
       }}>
         <F label={`${t('spaceName')} *`} wide><input required autoFocus className={input} value={v.name} onChange={(e) => setV({ ...v, name: e.target.value })} /></F>
         <F label={t('spaceKind')}>
-          <select className={input} value={v.kind} onChange={(e) => setV({ ...v, kind: e.target.value as typeof v.kind })}>
-            {SPACE_KINDS.map((k) => <option key={k} value={k}>{t(`spaceKinds.${k}`)}</option>)}
-          </select>
+          <NameSelect list="space_kind" className={input} value={v.kind} onChange={(x) => setV({ ...v, kind: x })} />
         </F>
         <F label={t('area')}><input type="number" min={0} step="0.5" className={input} value={v.area_sqm} onChange={(e) => setV({ ...v, area_sqm: e.target.value })} /></F>
         <F label={t('notes')} wide><input className={input} value={v.notes} onChange={(e) => setV({ ...v, notes: e.target.value })} /></F>

@@ -7,7 +7,16 @@ export const COOKIE = 'sos_session';
 const key = new TextEncoder().encode(env.jwtSecret);
 const TTL_DAYS = 7;
 
-export type Session = { userId: string; tenantId: string; role: string };
+/** perms/level come from the role (database) on every request; the token only carries ids. */
+export type Session = { userId: string; tenantId: string; role: string; perms?: string[]; level?: number };
+
+/** Every permission a role can have (Settings → Users & roles). */
+export const PERMISSIONS = ['customers.edit', 'customers.delete', 'offers.edit', 'views.share', 'settings.manage', 'users.manage', 'integrations.manage', 'audit.view'] as const;
+export type Permission = (typeof PERMISSIONS)[number];
+/** Owners can do everything; everyone else needs the permission in their role. */
+export const can = (s: Session, p: Permission) => s.role === 'owner' || !!s.perms?.includes(p);
+/** Approval levels (approval_flow_steps.required_role uses these names). */
+export const APPROVAL_LEVEL: Record<string, number> = { sales: 1, manager: 2, admin: 3, owner: 4 };
 
 declare module 'fastify' {
   interface FastifyRequest { session: Session }
@@ -32,19 +41,26 @@ export function clearSession(reply: FastifyReply) {
 // Membership check with a short cache: removing a user (or changing their role) takes effect
 // within MEMBERSHIP_TTL, instead of when the 7-day token expires.
 const MEMBERSHIP_TTL = 60_000;
-const memberships = new Map<string, { role: string | null; at: number }>();
+type RoleInfo = { role: string; perms: string[]; level: number } | null;
+const memberships = new Map<string, { info: RoleInfo; at: number }>();
 
-async function currentRole(userId: string, tenantId: string): Promise<string | null> {
+async function currentRole(userId: string, tenantId: string): Promise<RoleInfo> {
   const k = `${tenantId}:${userId}`;
   const hit = memberships.get(k);
-  if (hit && Date.now() - hit.at < MEMBERSHIP_TTL) return hit.role;
-  // One query per user per minute: re-check membership and record "last seen" for the Users screen
-  const [m] = await sql<{ role: string }[]>`
-    UPDATE memberships SET last_seen_at = now() WHERE tenant_id = ${tenantId} AND user_id = ${userId} RETURNING role`;
-  const role = m?.role ?? null;
+  if (hit && Date.now() - hit.at < MEMBERSHIP_TTL) return hit.info;
+  // One query per user per minute: re-check membership + role permissions, record "last seen" for the Users screen
+  const [m] = await sql<{ role: string; permissions: string[]; approval_level: number }[]>`
+    WITH m AS (UPDATE memberships SET last_seen_at = now() WHERE tenant_id = ${tenantId} AND user_id = ${userId} RETURNING tenant_id, role)
+    SELECT m.role, r.permissions, r.approval_level FROM m JOIN roles r ON r.tenant_id = m.tenant_id AND r.key = m.role`;
+  const info = m ? { role: m.role, perms: m.permissions, level: m.approval_level } : null;
   if (memberships.size > 50_000) memberships.clear();
-  memberships.set(k, { role, at: Date.now() });
-  return role;
+  memberships.set(k, { info, at: Date.now() });
+  return info;
+}
+
+/** A role's permissions changed: everyone in the organisation gets them on their next request (this instance). */
+export function invalidateTenantRoles(tenantId: string) {
+  for (const k of memberships.keys()) if (k.startsWith(`${tenantId}:`)) memberships.delete(k);
 }
 
 /** Role change / removal: take effect on this instance immediately (others within MEMBERSHIP_TTL). */
@@ -63,11 +79,10 @@ export async function requireAuth(req: FastifyRequest, reply: FastifyReply) {
   } catch {
     return reply.code(401).send({ error: 'unauthorized' });
   }
-  const role = await currentRole(userId, tenantId);
-  if (!role) { clearSession(reply); return reply.code(401).send({ error: 'unauthorized' }); }
-  // Role always comes from the database, so role changes apply without re-login
-  req.session = { userId, tenantId, role };
+  const info = await currentRole(userId, tenantId);
+  if (!info) { clearSession(reply); return reply.code(401).send({ error: 'unauthorized' }); }
+  // Role and permissions always come from the database, so changes apply without re-login
+  req.session = { userId, tenantId, role: info.role, perms: info.perms, level: info.level };
 }
 
-export const ROLE_RANK: Record<string, number> = { viewer: 0, sales: 1, manager: 2, admin: 3, owner: 4 };
-export const hasRole = (s: Session, min: keyof typeof ROLE_RANK) => (ROLE_RANK[s.role] ?? -1) >= ROLE_RANK[min];
+

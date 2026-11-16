@@ -43,7 +43,7 @@ export async function seedDemoBranches(sql: postgres.Sql, tenantIds: string[], l
       INSERT INTO spaces (tenant_id, branch_id, name, kind, area_sqm)
       SELECT nb.tenant_id, nb.id,
              (ARRAY['Εμπορικός χώρος','Αποθήκη','Γραφεία','Τμήμα'])[1 + (g + nb.h) % 4] || ' ' || g,
-             (ARRAY['retail','warehouse','office','department'])[1 + (g + nb.h) % 4],
+             (ARRAY['Εμπορικός χώρος','Αποθήκη','Γραφεία','Τμήμα / Διεύθυνση'])[1 + (g + nb.h) % 4],
              (20 + (nb.h + g * 97) % 480)::numeric
       FROM nb CROSS JOIN LATERAL generate_series(1, 1 + (nb.h % 5)::int) g
       RETURNING 1)

@@ -1,6 +1,6 @@
 'use client';
 import { CustomerAvatar } from '@/components/customer-avatar';
-import { useEffect, useRef, useState } from 'react';
+import { Suspense, useEffect, useRef, useState } from 'react';
 import clsx from 'clsx';
 import { useInfiniteQuery, useQuery } from '@tanstack/react-query';
 import { useWindowVirtualizer } from '@tanstack/react-virtual';
@@ -10,10 +10,12 @@ import { api, type Customer, type Page } from '@/lib/api';
 import { money } from '@/lib/format';
 import { Link } from '@/i18n/navigation';
 import { EntityTile, PageHeader, Skeleton, StatusBadge } from '@/components/ui';
-import {
-  ActiveFilterChips, CustomerTreeView, ExpandToggle, FilterMenu, SortMenu, StoresView, type ExpandMode, type FilterGroup,
-} from '@/components/customer-views';
-import { useLookup } from '@/components/lookup-select';
+import { ActiveFilterChips, CustomerTreeView, ExpandToggle, SortMenu, StoresView, type ExpandMode } from '@/components/customer-views';
+import { IndexFilterMenu, useFilterChips, useIndexFilters } from '@/components/index-filters';
+import { useMe } from '@/components/app-shell';
+import { decodeConfig, ManageViewsDialog, sameConfig, SavedViewsBar, SaveViewButton, useSavedViews, type SavedView, type ViewConfig } from '@/components/saved-views';
+import { useRouter, usePathname } from '@/i18n/navigation';
+import { useSearchParams } from 'next/navigation';
 
 type View = 'list' | 'tree' | 'stores';
 type Row = Customer & { trade_name: string | null; tags: string[]; address_city: string | null; archived_at: string | null };
@@ -31,47 +33,101 @@ function usePersisted<T>(key: string, initial: T): [T, (v: T) => void] {
   return [v, (x: T) => { setV(x); try { sessionStorage.setItem(key, JSON.stringify(x)); } catch {} }];
 }
 
-export default function CustomersPage() {
+function CustomersPageInner() {
   const t = useTranslations('customers');
   const ts = useTranslations('status');
   const tl = useTranslations('lookup');
   const locale = useLocale();
-  const [view, setView] = usePersisted<View>('cust.view', 'list');
+  // Opens with the default view from Settings → Indexes (user → role → organisation);
+  // a view picked here is kept for this browser session.
+  const [view, setViewState] = useState<View | null>(null);
+  const { data: me } = useMe();
+  const defaultView = (me?.tenant?.customers_view ?? null) as View | null;
+  useEffect(() => {
+    if (view) return;
+    let saved: View | null = null;
+    try { saved = JSON.parse(sessionStorage.getItem('cust.view') ?? 'null'); } catch {}
+    if (saved) setViewState(saved);
+    else if (defaultView) setViewState(defaultView);
+  }, [view, defaultView]);
+  const setView = (v: View) => { setViewState(v); try { sessionStorage.setItem('cust.view', JSON.stringify(v)); } catch {} };
   const [q, setQ] = useState('');
   const dq = useDebounced(q.trim());
   const [expand, setExpand] = useState<ExpandMode>('none');
 
-  // Customer filters (list + tree)
-  const [status, setStatus] = usePersisted('cust.status2', '');
+  // Filters (which ones are visible: Settings → Indexes). Customers list + tree share one set, stores have their own.
+  const custFilters = useIndexFilters('customers');
+  const treeFilters = useIndexFilters('tree');
+  const storeFilters = useIndexFilters('stores');
   const [sort, setSort] = usePersisted('cust.sort', 'name');
-  const [mine, setMine] = usePersisted('cust.mine', false);
-  const [archived, setArchived] = usePersisted('cust.archived', false);
-  // Store filters
-  const [sCity, setSCity] = usePersisted('store.city', '');
-  const [sZone, setSZone] = usePersisted('store.zone', '');
-  const [sTour, setSTour] = usePersisted('store.tour', '');
-  const [sOngoing, setSOngoing] = usePersisted('store.ongoing', '');
-  const [sStatus, setSStatus] = usePersisted('store.status', '');
   const [sSort, setSSort] = usePersisted('store.sort', 'name');
-
   const isStores = view === 'stores';
-  const cities = useQuery({ queryKey: ['branch-cities'], enabled: isStores, queryFn: () => api<{ city: string; stores: number }[]>('/branches/cities'), staleTime: 300_000 });
-  const zones = useLookup('geo_zone');
-  const tours = useLookup('tour');
-  const ongoing = useLookup('ongoing_status');
+  const filters = isStores ? storeFilters : view === 'tree' ? treeFilters : custFilters;
+  const custChips = useFilterChips(custFilters);
+  const treeChips = useFilterChips(treeFilters);
+  const storeChips = useFilterChips(storeFilters);
+
+  // ---- Saved views: the active view, what it would look like now, and whether it changed ----
+  const router = useRouter();
+  const pathname = usePathname();
+  const params = useSearchParams();
+  const views = useSavedViews();
+  const [activeId, setActiveIdState] = useState<string | null>(null);
+  const [manage, setManage] = useState(false);
+  const setActiveId = (id: string | null) => {
+    setActiveIdState(id);
+    try { if (id) sessionStorage.setItem('cust.activeView', id); else sessionStorage.removeItem('cust.activeView'); } catch {}
+  };
+  const filtersFor = (v: View) => (v === 'stores' ? storeFilters : v === 'tree' ? treeFilters : custFilters);
+  const current: ViewConfig | null = view ? {
+    view, filters: filtersFor(view).values, sort: view === 'stores' ? sSort : sort, q: q.trim(), expand,
+  } : null;
+  const active = views.data?.views.find((x) => x.id === activeId) ?? null;
+  const dirty = !!active && !!current && !sameConfig(current, active.config);
+  const applyConfig = (c: ViewConfig) => {
+    setView(c.view);
+    filtersFor(c.view).replace(c.filters ?? {});
+    if (c.view === 'stores') setSSort(c.sort || 'name'); else setSort(c.sort || 'name');
+    setQ(c.q ?? '');
+    setExpand(c.expand ?? 'none');
+  };
+  const applyView = (sv: SavedView) => {
+    applyConfig(sv.config);
+    setActiveId(sv.id);
+    if (params.get('v') || params.get('cfg')) router.replace(pathname, { scroll: false });
+  };
+  // Opening the page: a shared link (?v= / ?cfg=) wins, then this session's view, then the default view
+  const booted = useRef(false);
+  useEffect(() => {
+    if (booted.current || !views.data) return;
+    booted.current = true;
+    const link = params.get('v');
+    const linked = link ? views.data.views.find((x) => x.id === link) : null;
+    const cfg = decodeConfig(params.get('cfg'));
+    let sessionId: string | null = null;
+    try { sessionId = sessionStorage.getItem('cust.activeView'); } catch {}
+    if (linked) { applyView(linked); return; }
+    if (cfg) { applyConfig(cfg); setActiveId(null); return; }
+    if (sessionId && views.data.views.some((x) => x.id === sessionId)) { setActiveIdState(sessionId); return; }
+    let touched = false;
+    try { touched = !!sessionStorage.getItem('cust.view'); } catch {}
+    const def = views.data.views.find((x) => x.id === views.data!.default_view);
+    if (def && !touched) applyView(def);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [views.data]);
+  const exportHref = view === 'stores'
+    ? `/api/branches/export.csv?${new URLSearchParams(q.trim() ? { q: q.trim() } : {})}${storeFilters.query ? `&${storeFilters.query}` : ''}`
+    : `/api/customers/export.csv?${new URLSearchParams({ ...(q.trim() ? { q: q.trim() } : {}), tree: view === 'tree' ? '1' : '0' })}${(view === 'tree' ? treeFilters : custFilters).query ? `&${(view === 'tree' ? treeFilters : custFilters).query}` : ''}`;
 
   const query = useInfiniteQuery({
     enabled: view === 'list',
-    queryKey: ['customers', status, sort, mine, archived, dq],
+    queryKey: ['customers', sort, custFilters.query, dq],
     initialPageParam: null as string | null,
     queryFn: ({ pageParam, signal }) => {
       const p = new URLSearchParams({ limit: '40', sort });
-      if (status) p.set('status', status);
-      if (mine) p.set('manager', 'me');
-      if (archived) p.set('archived', '1');
       if (dq.length >= 2) p.set('q', dq);
       if (pageParam) p.set('cursor', pageParam);
-      return api<Page<Row>>(`/customers?${p}`, { signal });
+      return api<Page<Row>>(`/customers?${p}${custFilters.query ? `&${custFilters.query}` : ''}`, { signal });
     },
     getNextPageParam: (last) => last.nextCursor,
   });
@@ -87,33 +143,7 @@ export default function CustomersPage() {
   }, [lastIndex, rows.length, query]);
 
   // ---- Toolbar configuration per view ----
-  const statusOptions = (['active', 'prospect', 'negotiation', 'inactive'] as const).map((s) => ({ value: s, label: ts(s) }));
-  const nameOf = (list: { id: string; name: string }[] | undefined, id: string) => list?.find((x) => x.id === id)?.name ?? '';
-
-  const groups: FilterGroup[] = isStores ? [
-    { key: 'city', label: t('city'), value: sCity, onChange: setSCity, options: (cities.data ?? []).map((c) => ({ value: c.city, label: `${c.city} (${c.stores.toLocaleString(locale)})` })) },
-    { key: 'zone', label: tl('geo_zone'), value: sZone, onChange: setSZone, options: (zones.data ?? []).map((z) => ({ value: z.id, label: z.name })) },
-    { key: 'tour', label: tl('tour'), value: sTour, onChange: setSTour, options: (tours.data ?? []).map((z) => ({ value: z.id, label: z.name })) },
-    { key: 'ongoing', label: tl('ongoing_status'), value: sOngoing, onChange: setSOngoing, options: (ongoing.data ?? []).map((z) => ({ value: z.id, label: z.name })) },
-    { key: 'status', label: t('statusLabel'), value: sStatus, onChange: setSStatus, options: [{ value: 'active', label: t('activeStores') }, { value: 'inactive', label: t('inactiveStores') }] },
-  ] : [
-    { key: 'status', label: t('statusLabel'), value: status, onChange: setStatus, options: statusOptions },
-  ];
-  const toggles = [
-    { key: 'mine', label: t('mine'), value: mine, onChange: setMine },
-    ...(isStores ? [] : [{ key: 'archived', label: t('archivedList'), value: archived, onChange: setArchived }]),
-  ];
-  const resetFilters = () => {
-    setMine(false);
-    if (isStores) { setSCity(''); setSZone(''); setSTour(''); setSOngoing(''); setSStatus(''); } else { setStatus(''); setArchived(false); }
-  };
-  const chips = [
-    ...groups.filter((g) => g.value).map((g) => ({
-      key: g.key, onRemove: () => g.onChange(''),
-      label: `${g.label}: ${g.key === 'zone' ? nameOf(zones.data, g.value) : g.key === 'tour' ? nameOf(tours.data, g.value) : g.key === 'ongoing' ? nameOf(ongoing.data, g.value) : g.key === 'city' ? g.value : g.options.find((o) => o.value === g.value)?.label ?? g.value}`,
-    })),
-    ...toggles.filter((x) => x.value).map((x) => ({ key: x.key, label: x.label, onRemove: () => x.onChange(false) })),
-  ];
+  const chips = isStores ? storeChips : view === 'tree' ? treeChips : custChips;
   const sortOptions = isStores
     ? [{ value: 'name', label: t('sortName') }, { value: 'city', label: t('sortCity') }, { value: 'spaces', label: t('sortSpaces') }]
     : [{ value: 'name', label: t('sortName') }, { value: 'recent', label: t('sortRecent') }, { value: 'value', label: t('sortValue') }];
@@ -127,37 +157,46 @@ export default function CustomersPage() {
       } />
 
       {/* View switcher */}
-      <div className="mb-3 grid grid-cols-3 gap-1 rounded-2xl bg-surface-2 p-1">
+      <div className="mb-3 grid grid-cols-3 gap-1 rounded-2xl border border-border bg-surface-2 p-1">
         {([
           { value: 'list', icon: Users, label: t('viewList') },
           { value: 'tree', icon: ListTree, label: t('viewTree') },
           { value: 'stores', icon: Store, label: t('viewStores') },
         ] as const).map(({ value, icon: Icon, label }) => (
+          // Phone: icon above the full name (2 lines), active one filled with the brand colour
           <button key={value} onClick={() => setView(value)} aria-pressed={view === value}
-            className={clsx('flex min-w-0 items-center justify-center gap-1.5 rounded-xl px-2 py-2 text-sm font-medium transition',
-              view === value ? 'bg-surface text-primary shadow-sm' : 'text-muted hover:text-text')}>
-            <Icon size={16} className="shrink-0" /> <span className="truncate">{label}</span>
+            className={clsx('flex min-w-0 flex-col items-center justify-center gap-1 rounded-xl px-1.5 py-2 text-[12px] font-semibold leading-tight transition sm:flex-row sm:gap-1.5 sm:px-2 sm:text-sm sm:font-medium',
+              view === value ? 'bg-primary text-white shadow-md shadow-primary/25' : 'text-muted hover:bg-surface hover:text-text')}>
+            <Icon size={18} className="shrink-0 sm:size-4" /> <span className="line-clamp-2 text-center sm:truncate">{label}</span>
           </button>
         ))}
       </div>
 
+      <SavedViewsBar activeId={activeId} dirty={dirty} onApply={applyView} onManage={() => setManage(true)} />
+
       {/* Toolbar: search + filters + sort (+ expand on the tree) */}
-      <div className="mb-3 flex items-center gap-2">
-        <div className="flex h-11 min-w-0 flex-1 items-center gap-2 rounded-xl border border-border bg-surface px-3.5">
+      {/* Phone: search on its own row, the filter / sort / expand buttons below it */}
+      <div className="mb-3 flex flex-wrap items-center gap-2 sm:flex-nowrap">
+        <div className="flex h-11 min-w-0 basis-full items-center gap-2 rounded-xl border border-border bg-surface px-3.5 sm:basis-auto sm:flex-1">
           <Search size={18} className="shrink-0 text-muted" />
           <input value={q} onChange={(e) => setQ(e.target.value)} placeholder={isStores ? t('searchStores') : t('search')} className="w-full min-w-0 bg-transparent outline-none" />
           {q && <button onClick={() => setQ('')} aria-label="clear"><X size={18} className="text-muted" /></button>}
           {query.isFetching && !query.isFetchingNextPage && <Loader2 size={16} className="animate-spin text-muted" />}
         </div>
-        <FilterMenu groups={groups} toggles={toggles} onReset={resetFilters} />
+        <IndexFilterMenu state={filters} />
         <SortMenu value={isStores ? sSort : sort} options={sortOptions} onChange={isStores ? setSSort : setSort} />
         {view === 'tree' && <ExpandToggle mode={expand} onChange={setExpand} />}
+        {current && (
+          <SaveViewButton active={active} dirty={dirty} current={current} exportHref={exportHref}
+            onSaved={(id) => setActiveId(id)} onRevert={() => active && applyConfig(active.config)} onManage={() => setManage(true)} />
+        )}
       </div>
+      {manage && <ManageViewsDialog onClose={() => setManage(false)} onApply={applyView} />}
       <ActiveFilterChips chips={chips} />
 
-      {view === 'tree' ? <CustomerTreeView filters={{ status, sort, mine, archived, q: dq }} mode={expand} />
-      : isStores ? <StoresView filters={{ q: dq, mine, city: sCity, zone: sZone, tour: sTour, ongoing: sOngoing, status: sStatus, sort: sSort }} />
-      : query.isLoading ? (
+      {view === 'tree' ? <CustomerTreeView filters={{ sort, q: dq, extra: treeFilters.query }} mode={expand} />
+      : isStores ? <StoresView filters={{ q: dq, sort: sSort, extra: storeFilters.query }} />
+      : !view || query.isLoading ? (
         <div className="space-y-3">{Array.from({ length: 6 }).map((_, i) => <Skeleton key={i} className="h-[84px]" />)}</div>
       ) : rows.length === 0 ? (
         <p className="py-16 text-center text-muted">{t('empty')}</p>
@@ -198,4 +237,9 @@ export default function CustomersPage() {
       </Link>
     </div>
   );
+}
+
+// useSearchParams (shared view links) needs a Suspense boundary
+export default function CustomersPage() {
+  return <Suspense><CustomersPageInner /></Suspense>;
 }

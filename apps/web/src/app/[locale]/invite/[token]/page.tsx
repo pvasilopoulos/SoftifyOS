@@ -30,7 +30,7 @@ export default function InvitePage({ params }: { params: Promise<{ token: string
     <div className="relative grid min-h-dvh place-items-center overflow-hidden bg-sidebar px-4">
       <div className="pointer-events-none absolute -left-32 -top-32 h-96 w-96 rounded-full bg-primary/40 blur-3xl" />
       <div className="card relative w-full max-w-sm p-7">
-        <Logo />
+        <Logo signedIn={false} />
         <h1 className="mt-7 text-2xl font-bold">{t('title')}</h1>
         {info.isLoading ? <Loader2 className="mt-6 animate-spin text-muted" /> : info.error ? (
           <p className="mt-4 rounded-lg bg-danger-soft px-3 py-2 text-sm text-danger">

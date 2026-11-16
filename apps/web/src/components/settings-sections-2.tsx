@@ -1,20 +1,23 @@
 'use client';
-// Settings: "Customers" display preferences and "Integrations" (API keys + guide).
-import { useEffect, useState, type ReactNode } from 'react';
+// Settings: "Customers" display preferences, "Indexes" (default views + visible filters) and "Integrations".
+import { useState, type ReactNode } from 'react';
 import clsx from 'clsx';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useLocale, useTranslations } from 'next-intl';
-import { Ban, Check, Copy, ExternalLink, KeyRound, Loader2, Plus, ShieldCheck } from 'lucide-react';
-import { api, ApiError } from '@/lib/api';
-import { relative } from '@/lib/format';
-import { Card } from './settings-sections';
+import { useTranslations } from 'next-intl';
+import { Bookmark, Check, ChevronDown, CircleUser, Contact, LayoutList, ListFilter, ListTree, Loader2, PenLine, Search, ShieldCheck, Store, Users, X } from 'lucide-react';
+import { api } from '@/lib/api';
+import { useRoles } from './roles-settings';
 import { Dialog } from './customer-dialogs';
+import { FILTER_GROUPS, type IndexKey } from './index-filters';
 import { EntityTile } from './ui';
+import { ManageViews, useSavedViews } from './saved-views';
+import { matchRank } from '@/lib/search';
 import { useToast } from './providers';
 
-const primaryBtn = 'flex items-center justify-center gap-2 rounded-xl bg-primary px-5 py-2.5 font-semibold text-white shadow-sm disabled:opacity-60';
+const primaryBtn = 'flex shrink-0 items-center justify-center gap-2 whitespace-nowrap rounded-xl bg-primary px-4 py-2.5 font-semibold text-white shadow-sm disabled:opacity-60';
 const ghostBtn = 'flex items-center justify-center gap-2 rounded-xl border border-border bg-surface px-4 py-2.5 font-medium';
-const input = 'w-full min-w-0 rounded-xl border border-border bg-surface-2 px-3 py-2.5 outline-none transition focus:border-primary';
+const smallBtn = 'flex items-center gap-1.5 rounded-xl border border-border px-3 py-1.5 text-sm font-medium hover:bg-surface-2 disabled:opacity-60';
+const label = 'mb-2 text-xs font-semibold uppercase tracking-wide text-muted';
 
 function Choice({ active, onClick, title, hint, disabled }: { active: boolean; onClick: () => void; title: string; hint?: string; disabled?: boolean }) {
   return (
@@ -29,6 +32,67 @@ function Choice({ active, onClick, title, hint, disabled }: { active: boolean; o
   );
 }
 
+/** A settings item that opens like a drop-down: icon, title, one-line summary; details on click. */
+export function Expandable({ icon: Icon, title, summary, open, onToggle, children }: {
+  icon: typeof Users; title: string; summary?: ReactNode; open: boolean; onToggle: () => void; children: ReactNode;
+}) {
+  return (
+    <section className="card overflow-hidden">
+      <button type="button" onClick={onToggle} aria-expanded={open} className="flex w-full items-center gap-3 p-4 text-left transition hover:bg-surface-2 sm:px-6">
+        <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-primary-soft text-primary"><Icon size={19} /></span>
+        <span className="min-w-0 flex-1">
+          <span className="block font-semibold">{title}</span>
+          {summary && <span className="block truncate text-sm text-muted">{summary}</span>}
+        </span>
+        <ChevronDown size={20} className={clsx('shrink-0 text-muted transition', open && 'rotate-180')} />
+      </button>
+      {open && <div className="border-t border-border p-4 sm:p-6">{children}</div>}
+    </section>
+  );
+}
+
+// ======================================== Searchable groups of settings items ========================================
+export type SettingsItem = { key: string; icon: typeof Users; title: string; summary?: string; keywords?: string; content: ReactNode };
+export type SettingsGroup = { key: string; icon: typeof Users; title: string; hint?: string; items: SettingsItem[] };
+
+/** Search box + groups (module → items). Typing opens the first match; accents, case and greeklish are ignored. */
+export function SettingsItems({ groups, placeholder }: { groups: SettingsGroup[]; placeholder: string }) {
+  const [q, setQ] = useState('');
+  const [open, setOpen] = useState<string | null>(null);
+  const shown = groups.map((g) => ({
+    ...g, items: g.items.filter((i) => !q.trim() || matchRank(`${g.title} ${i.title} ${i.summary ?? ''} ${i.keywords ?? ''}`, q) !== null),
+  })).filter((g) => g.items.length);
+  const first = q.trim() ? shown[0]?.items[0]?.key : null;
+  return (
+    <div className="space-y-4">
+      <label className="relative block">
+        <Search size={16} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-muted" />
+        <input type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder={placeholder} aria-label={placeholder}
+          className="w-full rounded-xl border border-border bg-surface py-2.5 pl-9 pr-9 text-sm outline-none focus:border-primary [&::-webkit-search-cancel-button]:hidden" />
+        {q && <button type="button" onClick={() => setQ('')} aria-label="clear" className="absolute right-2 top-1/2 grid h-6 w-6 -translate-y-1/2 place-items-center text-muted"><X size={14} /></button>}
+      </label>
+      {!shown.length && <p className="card p-6 text-center text-sm text-muted">—</p>}
+      {shown.map((g) => (
+        <section key={g.key}>
+          <div className="mb-2 flex items-center gap-2 px-1">
+            <g.icon size={16} className="text-primary" />
+            <h3 className="text-sm font-semibold">{g.title}</h3>
+            {g.hint && <span className="truncate text-xs text-muted">· {g.hint}</span>}
+          </div>
+          <div className="space-y-2">
+            {g.items.map((i) => (
+              <Expandable key={i.key} icon={i.icon} title={i.title} summary={i.summary}
+                open={open === i.key || (open === null && first === i.key)} onToggle={() => setOpen(open === i.key ? '' : i.key)}>
+                {i.content}
+              </Expandable>
+            ))}
+          </div>
+        </section>
+      ))}
+    </div>
+  );
+}
+
 // ======================================== Customers display ========================================
 type CustomersPrefs = { organization: { show_avatar: boolean }; mine: { show_avatar: boolean | null }; effective: { show_avatar: boolean }; can_edit_organization: boolean };
 
@@ -37,6 +101,7 @@ export function CustomersSettingsSection() {
   const ts = useTranslations('settings');
   const toast = useToast();
   const qc = useQueryClient();
+  const [open, setOpen] = useState(false);
   const { data } = useQuery({ queryKey: ['settings', 'customers'], queryFn: () => api<CustomersPrefs>('/settings/customers') });
   const refresh = () => { qc.invalidateQueries({ queryKey: ['settings', 'customers'] }); qc.invalidateQueries({ queryKey: ['me'] }); toast({ title: ts('saved') }); };
   const org = useMutation({ mutationFn: (show: boolean) => api('/settings/customers/organization', { method: 'PUT', json: { show_avatar: show } }), onSuccess: refresh });
@@ -44,185 +109,266 @@ export function CustomersSettingsSection() {
   if (!data) return <Loader2 className="mx-auto animate-spin text-muted" />;
   const orgLabel = data.organization.show_avatar ? t('shown') : t('hidden');
 
-  const Preview = ({ show }: { show: boolean }) => (
-    <div className="card flex items-center gap-3 p-3">
-      {show && <EntityTile name="ACME Group" size={40} />}
-      <div className="min-w-0"><div className="font-semibold">ACME Group</div><div className="text-xs text-muted">{t('previewLine')}</div></div>
-    </div>
-  );
-
+  void open; void setOpen;
   return (
-    <div className="space-y-4">
-      <Card title={t('avatarTitle')} description={t('avatarHint')}>
-        <div className="mb-4"><Preview show={data.effective.show_avatar} /></div>
-
-        <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted">{t('organization')}</div>
+    <SettingsItems placeholder={ts('searchIn')} groups={[{ key: 'display', icon: Contact, title: t('groupDisplay'), items: [{
+      key: 'avatar', icon: CircleUser, title: t('avatarTitle'), keywords: 'avatar εικονίδιο αρχικά logo initials',
+      summary: `${data.effective.show_avatar ? t('shown') : t('hidden')} · ${data.mine.show_avatar === null ? t('followOrg') : t('mine')}`,
+      content: (<>
+        <p className="mb-4 text-sm text-muted">{t('avatarHint')}</p>
+        <div className="mb-4 card flex items-center gap-3 p-3">
+          {data.effective.show_avatar && <EntityTile name="ACME Group" size={40} />}
+          <div className="min-w-0"><div className="font-semibold">ACME Group</div><div className="text-xs text-muted">{t('previewLine')}</div></div>
+        </div>
+        <div className={label}>{t('organization')}</div>
         <div className="grid gap-2 sm:grid-cols-2">
           <Choice active={data.organization.show_avatar} disabled={!data.can_edit_organization || org.isPending} onClick={() => org.mutate(true)} title={t('show')} />
           <Choice active={!data.organization.show_avatar} disabled={!data.can_edit_organization || org.isPending} onClick={() => org.mutate(false)} title={t('hide')} />
         </div>
         {!data.can_edit_organization && <p className="mt-2 flex items-center gap-1.5 text-xs text-muted"><ShieldCheck size={13} /> {ts('adminOnly')}</p>}
-
-        <div className="mb-2 mt-5 text-xs font-semibold uppercase tracking-wide text-muted">{t('mine')}</div>
+        <div className={clsx(label, 'mt-5')}>{t('mine')}</div>
         <div className="grid gap-2 sm:grid-cols-3">
           <Choice active={data.mine.show_avatar === null} disabled={mine.isPending} onClick={() => mine.mutate(null)} title={t('followOrg')} hint={orgLabel} />
           <Choice active={data.mine.show_avatar === true} disabled={mine.isPending} onClick={() => mine.mutate(true)} title={t('show')} />
           <Choice active={data.mine.show_avatar === false} disabled={mine.isPending} onClick={() => mine.mutate(false)} title={t('hide')} />
         </div>
-      </Card>
-    </div>
+      </>),
+    }] }]} />
   );
 }
 
-// ======================================== Integrations (API) ========================================
-type ApiKey = { id: string; name: string; prefix: string; scope: 'read' | 'write'; created_at: string; last_used_at: string | null; requests: string; revoked_at: string | null; created_by_name: string | null };
+// ======================================== Indexes (default views + filters) ========================================
+const VIEWS = [
+  { value: 'list', icon: Users, label: 'viewList' },
+  { value: 'tree', icon: ListTree, label: 'viewTree' },
+  { value: 'stores', icon: Store, label: 'viewStores' },
+] as const;
+type ViewKey = (typeof VIEWS)[number]['value'];
+type FilterCfg = {
+  available: string[]; defaults: string[]; organization: string[] | null; roles: Record<string, string[]>; mine: string[] | null;
+  effective: { keys: string[]; source: 'user' | 'role' | 'organization' | 'default' };
+};
+type IndexPrefs = {
+  customers_view: { organization: ViewKey; roles: Partial<Record<string, ViewKey>>; mine: ViewKey | null; my_role: string; effective: ViewKey; source: 'user' | 'role' | 'organization' };
+  filters: Record<IndexKey, FilterCfg>;
+  can_edit_organization: boolean;
+};
 
-function Code({ children }: { children: string }) {
-  const [copied, setCopied] = useState(false);
+function ViewPicker({ value, onChange, disabled }: { value: ViewKey | null; onChange: (v: ViewKey) => void; disabled?: boolean }) {
+  const tc = useTranslations('customers');
   return (
-    <div className="relative">
-      <pre className="overflow-x-auto rounded-xl bg-[#17142b] p-3 pr-12 text-xs leading-relaxed text-[#e9e6f5]"><code>{children}</code></pre>
-      <button onClick={async () => { await navigator.clipboard.writeText(children); setCopied(true); setTimeout(() => setCopied(false), 1500); }}
-        aria-label="copy" className="absolute right-2 top-2 grid h-8 w-8 place-items-center rounded-lg bg-white/10 text-white hover:bg-white/20">
-        {copied ? <Check size={14} /> : <Copy size={14} />}
-      </button>
+    <div className="grid grid-cols-3 gap-1 rounded-2xl bg-surface-2 p-1">
+      {VIEWS.map(({ value: v, icon: Icon, label: l }) => (
+        <button key={v} type="button" disabled={disabled} onClick={() => onChange(v)} aria-pressed={value === v}
+          className={clsx('flex min-w-0 items-center justify-center gap-1.5 rounded-xl px-2 py-2 text-sm font-medium transition disabled:opacity-60',
+            value === v ? 'bg-surface text-primary shadow-sm' : 'text-muted hover:text-text')}>
+          <Icon size={16} className="shrink-0" /> <span className="truncate">{tc(l)}</span>
+        </button>
+      ))}
     </div>
   );
 }
 
-export function IntegrationsSection() {
-  const t = useTranslations('settings.integrations');
+export function IndexesSettingsSection() {
+  const t = useTranslations('settings.indexes');
   const ts = useTranslations('settings');
-  const ta = useTranslations('activity');
-  const locale = useLocale();
+  const tc = useTranslations('customers');
   const toast = useToast();
   const qc = useQueryClient();
-  const keys = useQuery({ queryKey: ['settings', 'api-keys'], queryFn: () => api<ApiKey[]>('/settings/api-keys'), retry: false });
-  const [creating, setCreating] = useState(false);
-  const [created, setCreated] = useState<string | null>(null);
-  const revoke = useMutation({
-    mutationFn: (id: string) => api(`/settings/api-keys/${id}`, { method: 'DELETE' }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['settings', 'api-keys'] }),
-    onError: () => toast({ title: ts('error') }),
+  const { data } = useQuery({ queryKey: ['settings', 'indexes'], queryFn: () => api<IndexPrefs>('/settings/indexes') });
+  const roles = useRoles().data?.roles ?? [];
+  const savedCount = useSavedViews().data?.views.length ?? 0;
+  const [open, setOpen] = useState<string | null>(null);
+  const done = () => { qc.invalidateQueries({ queryKey: ['settings', 'indexes'] }); qc.invalidateQueries({ queryKey: ['me'] }); toast({ title: ts('saved') }); };
+  const fail = () => toast({ title: ts('error') });
+  const saveOrg = useMutation({ mutationFn: (body: object) => api('/settings/indexes/organization', { method: 'PUT', json: body }), onSuccess: done, onError: fail });
+  const saveMine = useMutation({
+    mutationFn: (body: object) => api('/me/preferences', { method: 'PUT', json: body }),
+    onSuccess: () => { try { sessionStorage.removeItem('cust.view'); } catch {} done(); }, onError: fail,
   });
-  // Set after mount so server and client render the same HTML (no hydration mismatch)
-  const [origin, setOrigin] = useState('https://app.softify.gr');
-  useEffect(() => setOrigin(window.location.origin), []);
+  if (!data) return <Loader2 className="mx-auto animate-spin text-muted" />;
+  const cv = data.customers_view;
+  const ro = !data.can_edit_organization || saveOrg.isPending;
+  const viewLabel = (v: ViewKey) => tc(VIEWS.find((x) => x.value === v)!.label);
+  const setRoleView = (role: string, v: ViewKey | '') => {
+    const r = { ...cv.roles };
+    if (v) r[role] = v; else delete r[role];
+    saveOrg.mutate({ customers_view: { org: cv.organization, roles: r } });
+  };
+  void open; void setOpen;
 
-  if (keys.error instanceof ApiError && keys.error.status === 403) {
-    return <div className="flex items-center gap-2 rounded-2xl bg-info-soft px-4 py-3 text-sm text-info"><ShieldCheck size={16} /> {ts('adminOnly')}</div>;
-  }
+  const viewContent = (
+    <>
+        <p className="mb-4 text-sm text-muted">{t('customersHint')}</p>
+        <div className={label}>{t('organization')}</div>
+        <ViewPicker value={cv.organization} disabled={ro} onChange={(v) => saveOrg.mutate({ customers_view: { org: v, roles: cv.roles } })} />
+        <div className={clsx(label, 'mt-5')}>{t('perRole')}</div>
+        <ul className="divide-y divide-border rounded-2xl border border-border">
+          {roles.map(({ key: r, name }) => (
+            <li key={r} className="flex flex-wrap items-center justify-between gap-2 px-3 py-2.5">
+              <span className="text-sm font-medium">{name}{r === cv.my_role && <span className="ml-1.5 text-xs font-normal text-muted">({t('yourRole')})</span>}</span>
+              <select disabled={ro} value={cv.roles[r] ?? ''} onChange={(e) => setRoleView(r, e.target.value as ViewKey | '')} aria-label={name}
+                className="rounded-xl border border-border bg-surface-2 px-3 py-1.5 text-sm outline-none focus:border-primary disabled:opacity-60">
+                <option value="">{t('asOrganization', { view: viewLabel(cv.organization) })}</option>
+                {VIEWS.map((v) => <option key={v.value} value={v.value}>{tc(v.label)}</option>)}
+              </select>
+            </li>
+          ))}
+        </ul>
+        {!data.can_edit_organization && <p className="mt-2 flex items-center gap-1.5 text-xs text-muted"><ShieldCheck size={13} /> {ts('adminOnly')}</p>}
+        <div className={clsx(label, 'mt-5')}>{t('mine')}</div>
+        <div className="space-y-2">
+          <Choice active={cv.mine === null} disabled={saveMine.isPending} onClick={() => saveMine.mutate({ customers_view: null })} title={t('followDefault')}
+            hint={viewLabel(cv.roles[cv.my_role] ?? cv.organization)} />
+          <ViewPicker value={cv.mine} disabled={saveMine.isPending} onChange={(v) => saveMine.mutate({ customers_view: v })} />
+        </div>
+    </>
+  );
+  const filterItem = (ix: IndexKey, icon: typeof Users): SettingsItem => ({
+    key: `filters-${ix}`, icon, title: t(`${ix}FiltersTitle`), keywords: 'φίλτρα filters',
+    summary: `${t('filtersEffective', { count: data.filters[ix].effective.keys.length })} · ${t(`source_${data.filters[ix].effective.source}`)}`,
+    content: (
+      <FilterVisibility index={ix} cfg={data.filters[ix]} myRole={cv.my_role} roles={roles} canEdit={data.can_edit_organization}
+        busy={saveOrg.isPending || saveMine.isPending}
+        onSaveOrg={(org, r) => saveOrg.mutate({ [`${ix}_filters`]: { org, roles: r } })}
+        onSaveMine={(keys) => saveMine.mutate({ [`${ix}_filters`]: keys })} />
+    ),
+  });
 
-  const example = {
-    ping: `curl ${origin}/api/v1/ping \\\n  -H "Authorization: Bearer $SOFTIFY_KEY"`,
-    customers: `curl -X POST ${origin}/api/v1/customers/batch \\
-  -H "Authorization: Bearer $SOFTIFY_KEY" \\
-  -H "Content-Type: application/json" \\
-  -d '{"items":[
-    {"external_id":"ERP-G-1","kind":"group","name":"ACME Group","geo_zone":"Αττική"},
-    {"external_id":"ERP-1001","name":"ACME Retail Α.Ε.","vat":"094014201",
-     "parent_external_id":"ERP-G-1","account_manager_email":"sales@example.com",
-     "address":{"street":"Σταδίου 1","city":"Αθήνα","postal":"10562","region":"Αττικής"}}
-  ]}'`,
-    branches: `curl -X POST ${origin}/api/v1/branches/batch \\
-  -H "Authorization: Bearer $SOFTIFY_KEY" -H "Content-Type: application/json" \\
-  -d '{"items":[{"external_id":"ERP-ST-55","customer_external_id":"ERP-1001",
-    "name":"Κατάστημα Σταδίου","city":"Αθήνα","region":"Αττικής","geo_zone":"Αττική",
-    "fee_schedule":"Βασικό αμοιβολόγιο","tour":"Εξόρμηση Αττικής",
-    "ongoing_status":"Σε εξέλιξη","seasonality":"all_year"}]}'`,
-    spaces: `curl -X POST ${origin}/api/v1/spaces/batch \\
-  -H "Authorization: Bearer $SOFTIFY_KEY" -H "Content-Type: application/json" \\
-  -d '{"items":[{"external_id":"ERP-SP-9","branch_external_id":"ERP-ST-55",
-    "name":"Εκθεσιακός χώρος","kind":"retail","area_sqm":220}]}'`,
-    sync: `curl "${origin}/api/v1/customers?updated_since=2026-11-01T00:00:00Z&limit=500" \\
-  -H "Authorization: Bearer $SOFTIFY_KEY"`,
+  return (
+    <SettingsItems placeholder={ts('searchIn')} groups={[
+      { key: 'customers', icon: Contact, title: t('moduleCustomers'), hint: t('moduleCustomersHint'), items: [
+        { key: 'first-view', icon: LayoutList, title: t('firstViewTitle'), keywords: 'προβολή ανοίγει πρώτη default view',
+          summary: `${t('effective', { view: viewLabel(cv.effective) })} · ${t(`source_${cv.source}`)}`, content: viewContent },
+        { key: 'saved-views', icon: Bookmark, title: t('savedViewsTitle'), keywords: 'αποθηκευμένες προβολές saved views αγαπημένες προεπιλογή',
+          summary: t('savedViewsSummary', { count: savedCount }), content: <ManageViews /> },
+        filterItem('customers', Users),
+        filterItem('tree', ListTree),
+        filterItem('stores', Store),
+      ] },
+    ]} />
+  );
+}
+
+/** Who sees which filters: organisation default, per-role overrides, my own choice. */
+function FilterVisibility({ index, cfg, myRole, roles, canEdit, busy, onSaveOrg, onSaveMine }: {
+  index: IndexKey; cfg: FilterCfg; myRole: string; roles: { key: string; name: string }[]; canEdit: boolean; busy: boolean;
+  onSaveOrg: (org: string[] | null, roles: Record<string, string[]>) => void; onSaveMine: (keys: string[] | null) => void;
+}) {
+  const t = useTranslations('settings.indexes');
+  const ts = useTranslations('settings');
+  const [picking, setPicking] = useState<{ title: string; value: string[]; onSave: (keys: string[]) => void; onReset?: () => void } | null>(null);
+  const orgKeys = cfg.organization ?? cfg.defaults;
+  const count = (k: string[]) => t('filtersCount', { count: k.length });
+  const roleSet = (key: string, keys: string[] | null) => {
+    const r = { ...cfg.roles };
+    if (keys) r[key] = keys; else delete r[key];
+    onSaveOrg(cfg.organization, r);
   };
 
   return (
-    <div className="space-y-4">
-      <Card title={t('keysTitle')} description={t('keysHint')}
-        action={<button onClick={() => setCreating(true)} className={primaryBtn}><Plus size={17} /> <span className="hidden sm:inline">{t('newKey')}</span></button>}>
-        {!keys.data?.length ? <p className="text-sm text-muted">{t('noKeys')}</p> : (
-          <ul className="divide-y divide-border">
-            {keys.data.map((k) => (
-              <li key={k.id} className={clsx('flex flex-wrap items-center gap-3 py-3', k.revoked_at && 'opacity-55')}>
-                <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-primary-soft text-primary"><KeyRound size={18} /></span>
-                <div className="min-w-0 flex-1">
-                  <div className="flex flex-wrap items-center gap-2 font-semibold">
-                    {k.name}
-                    <span className={clsx('rounded-full px-2 py-0.5 text-xs font-medium', k.scope === 'write' ? 'bg-warning-soft text-warning' : 'bg-info-soft text-info')}>{t(`scope_${k.scope}`)}</span>
-                    {k.revoked_at && <span className="rounded-full bg-danger-soft px-2 py-0.5 text-xs font-medium text-danger">{t('revoked')}</span>}
-                  </div>
-                  <div className="text-xs text-muted">
-                    <code>sos_{k.prefix}_••••</code> · {t('lastUsed')}: {k.last_used_at ? relative(k.last_used_at, locale, { today: ta('today'), yesterday: ta('yesterday') }) : t('never')}
-                    {' · '}{t('requests', { count: Number(k.requests) })}{k.created_by_name && ` · ${k.created_by_name}`}
-                  </div>
-                </div>
-                {!k.revoked_at && (
-                  <button onClick={() => { if (confirm(t('confirmRevoke', { name: k.name }))) revoke.mutate(k.id); }}
-                    className="flex items-center gap-1.5 rounded-xl border border-border px-3 py-2 text-sm font-medium text-danger hover:bg-danger-soft"><Ban size={15} /> {t('revoke')}</button>
-                )}
-              </li>
-            ))}
-          </ul>
-        )}
-      </Card>
+    <div>
+      <p className="mb-4 text-sm text-muted">{t('filtersHint')}</p>
 
-      <Card title={t('guideTitle')} description={t('guideHint')}>
-        <div className="space-y-4 text-sm">
-          <Step n={1} title={t('step1')}><Code>{example.ping}</Code></Step>
-          <Step n={2} title={t('step2')}><Code>{example.customers}</Code></Step>
-          <Step n={3} title={t('step3')}><Code>{example.branches}</Code></Step>
-          <Step n={4} title={t('step4')}><Code>{example.spaces}</Code></Step>
-          <Step n={5} title={t('step5')}><Code>{example.sync}</Code></Step>
-          <ul className="list-disc space-y-1 pl-5 text-muted">
-            <li>{t('rule1')}</li><li>{t('rule2')}</li><li>{t('rule3')}</li><li>{t('rule4')}</li><li>{t('rule5')}</li>
-          </ul>
-          <a href="/api/v1/openapi.json" target="_blank" rel="noopener" className={clsx(ghostBtn, 'w-full sm:w-auto')}><ExternalLink size={16} /> {t('openapi')}</a>
+      <div className={label}>{t('organization')}</div>
+      <div className="flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-border px-3 py-2.5">
+        <div className="min-w-0 text-sm">
+          <span className="font-medium">{count(orgKeys)}</span>
+          <span className="text-muted"> · {cfg.organization ? t('custom') : t('builtIn')}</span>
         </div>
-      </Card>
+        {canEdit && (
+          <button disabled={busy} onClick={() => setPicking({
+            title: t('organization'), value: orgKeys, onSave: (k) => onSaveOrg(k, cfg.roles),
+            onReset: cfg.organization ? () => onSaveOrg(null, cfg.roles) : undefined,
+          })} className={smallBtn}><PenLine size={14} /> {t('edit')}</button>
+        )}
+      </div>
 
-      {creating && <CreateKeyDialog onClose={() => setCreating(false)} onCreated={(k) => { setCreating(false); setCreated(k); qc.invalidateQueries({ queryKey: ['settings', 'api-keys'] }); }} />}
-      {created && (
-        <Dialog title={t('keyCreated')} onClose={() => setCreated(null)}>
-          <p className="mb-3 rounded-xl bg-warning-soft px-3 py-2 text-sm text-warning">{t('copyNow')}</p>
-          <Code>{created}</Code>
-          <div className="mt-4 flex justify-end"><button onClick={() => setCreated(null)} className={primaryBtn}>{t('done')}</button></div>
-        </Dialog>
+      <div className={clsx(label, 'mt-5')}>{t('perRole')}</div>
+      <ul className="divide-y divide-border rounded-2xl border border-border">
+        {roles.map(({ key, name }) => {
+          const own = cfg.roles[key];
+          return (
+            <li key={key} className="flex flex-wrap items-center justify-between gap-2 px-3 py-2.5">
+              <span className="min-w-0 text-sm">
+                <span className="font-medium">{name}</span>{key === myRole && <span className="ml-1.5 text-xs text-muted">({t('yourRole')})</span>}
+                <span className="block text-xs text-muted">{own ? `${t('custom')} · ${count(own)}` : t('asOrganizationShort')}</span>
+              </span>
+              {canEdit && (
+                <span className="flex gap-1.5">
+                  {own && <button disabled={busy} onClick={() => roleSet(key, null)} className={smallBtn}>{t('asOrganizationShort')}</button>}
+                  <button disabled={busy} onClick={() => setPicking({ title: name, value: own ?? orgKeys, onSave: (k) => roleSet(key, k) })} className={smallBtn}>
+                    <PenLine size={14} /> {t('edit')}
+                  </button>
+                </span>
+              )}
+            </li>
+          );
+        })}
+      </ul>
+      {!canEdit && <p className="mt-2 flex items-center gap-1.5 text-xs text-muted"><ShieldCheck size={13} /> {ts('adminOnly')}</p>}
+
+      <div className={clsx(label, 'mt-5')}>{t('mine')}</div>
+      <div className="grid gap-2 sm:grid-cols-2">
+        <Choice active={cfg.mine === null} disabled={busy} onClick={() => onSaveMine(null)} title={t('myFollow')}
+          hint={count(cfg.roles[myRole] ?? orgKeys)} />
+        <Choice active={cfg.mine !== null} disabled={busy} title={t('myCustom')} hint={cfg.mine ? count(cfg.mine) : undefined}
+          onClick={() => setPicking({ title: t('mine'), value: cfg.mine ?? cfg.effective.keys, onSave: (k) => onSaveMine(k) })} />
+      </div>
+
+      {picking && (
+        <FilterPicker index={index} available={cfg.available} title={picking.title} value={picking.value} onClose={() => setPicking(null)}
+          onSave={(k) => { picking.onSave(k); setPicking(null); }} onReset={picking.onReset ? () => { picking.onReset!(); setPicking(null); } : undefined} />
       )}
     </div>
   );
 }
 
-function Step({ n, title, children }: { n: number; title: string; children: ReactNode }) {
-  return (
-    <div>
-      <div className="mb-1.5 flex items-center gap-2 font-semibold"><span className="grid h-6 w-6 place-items-center rounded-full bg-primary text-xs text-white">{n}</span>{title}</div>
-      {children}
-    </div>
-  );
-}
-
-function CreateKeyDialog({ onClose, onCreated }: { onClose: () => void; onCreated: (key: string) => void }) {
-  const t = useTranslations('settings.integrations');
+function FilterPicker({ index, available, title, value, onClose, onSave, onReset }: {
+  index: IndexKey; available: string[]; title: string; value: string[]; onClose: () => void; onSave: (keys: string[]) => void; onReset?: () => void;
+}) {
+  const t = useTranslations('settings.indexes');
+  const tf = useTranslations('filters');
   const ts = useTranslations('settings');
-  const [name, setName] = useState('');
-  const [scope, setScope] = useState<'read' | 'write'>('write');
-  const save = useMutation({ mutationFn: () => api<{ key: string }>('/settings/api-keys', { method: 'POST', json: { name, scope } }), onSuccess: (r) => onCreated(r.key) });
+  const [sel, setSel] = useState<Set<string>>(new Set(value));
+  const flip = (k: string) => { const n = new Set(sel); if (n.has(k)) n.delete(k); else n.add(k); setSel(n); };
   return (
-    <Dialog title={t('newKey')} onClose={onClose}>
-      <form className="space-y-3" onSubmit={(e) => { e.preventDefault(); save.mutate(); }}>
-        <label className="block"><span className="mb-1 block text-xs font-medium text-muted">{t('keyName')}</span>
-          <input required minLength={2} autoFocus className={input} placeholder="ERP sync" value={name} onChange={(e) => setName(e.target.value)} /></label>
-        <div className="grid gap-2 sm:grid-cols-2">
-          <Choice active={scope === 'write'} onClick={() => setScope('write')} title={t('scope_write')} hint={t('scopeWriteHint')} />
-          <Choice active={scope === 'read'} onClick={() => setScope('read')} title={t('scope_read')} hint={t('scopeReadHint')} />
-        </div>
-        <div className="flex justify-end gap-2 pt-2">
-          <button type="button" onClick={onClose} className={ghostBtn}>{ts('cancel')}</button>
-          <button disabled={save.isPending} className={primaryBtn}>{save.isPending ? <Loader2 size={16} className="animate-spin" /> : <KeyRound size={16} />} {t('create')}</button>
-        </div>
-      </form>
+    <Dialog title={`${t(`${index}FiltersTitle`)} · ${title}`} onClose={onClose}>
+      <div className="mb-3 flex gap-2">
+        <button type="button" onClick={() => setSel(new Set(available))} className={smallBtn}>{t('selectAll')}</button>
+        <button type="button" onClick={() => setSel(new Set())} className={smallBtn}>{t('selectNone')}</button>
+        <span className="ml-auto self-center text-sm text-muted">{t('filtersCount', { count: sel.size })}</span>
+      </div>
+      <div className="space-y-3">
+        {FILTER_GROUPS.map((g) => {
+          const keys = available.filter((k) => k.startsWith(`${g}_`));
+          if (!keys.length) return null;
+          return (
+            <div key={g} className="rounded-2xl border border-border p-3">
+              <div className="mb-1 flex items-baseline justify-between gap-2">
+                <span className="text-sm font-semibold">{tf(`g_${g}`)}</span>
+                {g !== 'c' && <span className="truncate text-[11px] text-muted">{tf(`hint_${index}_${g}`)}</span>}
+              </div>
+              <div className="grid gap-x-3 sm:grid-cols-2">
+                {keys.map((k) => (
+                  <label key={k} className="flex cursor-pointer items-center gap-2.5 rounded-lg px-1 py-1.5 text-sm hover:bg-surface-2">
+                    <input type="checkbox" className="h-4 w-4 shrink-0 accent-[var(--primary)]" checked={sel.has(k)} onChange={() => flip(k)} />
+                    {tf(k)}
+                  </label>
+                ))}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+      <div className="mt-5 flex flex-col-reverse gap-2 border-t border-border pt-4 sm:flex-row sm:justify-end">
+        {onReset && <button type="button" onClick={onReset} className={clsx(ghostBtn, 'sm:mr-auto')}>{t('builtIn')}</button>}
+        <button type="button" onClick={onClose} className={ghostBtn}>{ts('cancel')}</button>
+        <button type="button" onClick={() => onSave(available.filter((k) => sel.has(k)))} className={primaryBtn}><Check size={16} /> {t('save')}</button>
+      </div>
     </Dialog>
   );
 }
+
+// Integrations moved to ./integrations.tsx (overview, keys, webhooks, request log, docs)
+export { IntegrationsSection } from './integrations';

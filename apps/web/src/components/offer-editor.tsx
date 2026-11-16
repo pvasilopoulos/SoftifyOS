@@ -289,7 +289,7 @@ function ProductPicker({ onPick, onClose }: { onPick: (p: Product) => void; onCl
   const res = useQuery({ queryKey: ['products', dq], queryFn: () => api<Product[]>(`/products${dq ? `?q=${encodeURIComponent(dq)}` : ''}`) });
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 sm:items-center" onClick={onClose}>
-      <div onClick={(e) => e.stopPropagation()} className="flex max-h-[80dvh] w-full max-w-lg flex-col rounded-t-3xl bg-surface p-5 safe-bottom sm:rounded-3xl">
+      <div onClick={(e) => e.stopPropagation()} className="flex max-h-[80dvh] w-full max-w-lg flex-col rounded-t-3xl bg-surface p-5 sheet-pb sm:rounded-3xl">
         <div className="mb-3 flex items-center justify-between">
           <h2 className="text-lg font-bold">{t('addProduct')}</h2>
           <IconButton label="close" onClick={onClose}><X size={20} /></IconButton>

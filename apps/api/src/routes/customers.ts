@@ -3,11 +3,16 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { decodeCursor, encodeCursor, searchKey, withTenant, type Tx } from '../db.js';
-import { hasRole, requireAuth, type Session } from '../auth.js';
+import { can, requireAuth, type Session } from '../auth.js';
 import { publish } from '../realtime.js';
+import { emitEntityEvents, emitEvents } from '../webhooks.js';
+import { ALL_LISTS, canonicalName, canonicalizeFields } from '../lookups.js';
+import { filterSql, parseFilters } from '../filters.js';
+
+// Fields whose value must come from a value list (stored as the value's name)
+const CUSTOMER_LIST_FIELDS = [['category', 'customer_category'], ['source', 'customer_source'], ['payment_terms', 'payment_terms'], ['address_region', 'prefecture']] as const;
 
 const STATUSES = ['active', 'prospect', 'negotiation', 'inactive'] as const;
-const SPACE_KINDS = ['retail', 'warehouse', 'office', 'department'] as const;
 const ACTIVITY_KINDS = ['call', 'email_sent', 'meeting_done', 'note'] as const;
 
 /** Greek ΑΦΜ checksum (9 digits). */
@@ -144,6 +149,9 @@ export default async function customerRoutes(app: FastifyInstance) {
     const key = q.q && q.q.length >= 2 ? `%${searchKey(q.q)}%` : null;
     const manager = q.manager === 'me' ? s.userId : q.manager;
     const withBranches = q.include === 'branches';
+    // f_* = filters from Settings → Indexes (customer, store and space fields)
+    const f = parseFilters(req.query as Record<string, unknown>, withBranches ? 'tree' : 'customers');
+    const archived = q.archived === '1' || f.c_archived === true;
 
     return withTenant(T, async (tx) => {
       const order = q.sort === 'recent' ? tx`created_at DESC, id DESC`
@@ -172,7 +180,8 @@ export default async function customerRoutes(app: FastifyInstance) {
                ${withBranches && key ? tx`, ARRAY(SELECT b.id FROM branches b WHERE b.customer_id = customers.id AND b.search LIKE ${key}) AS matched_branches` : tx``}
         FROM customers
         WHERE tenant_id = ${T}
-          ${q.archived === '1' ? tx`AND archived_at IS NOT NULL` : tx`AND archived_at IS NULL`}
+          ${archived ? tx`AND archived_at IS NOT NULL` : tx`AND archived_at IS NULL`}
+          ${filterSql(tx, f, s, 'customers', { c: 'customers' })}
           ${q.status ? tx`AND status = ${q.status}` : tx``}
           ${q.kind ? tx`AND kind = ${q.kind}` : tx``}
           ${manager ? tx`AND account_manager_id = ${manager}` : tx``}
@@ -208,6 +217,7 @@ export default async function customerRoutes(app: FastifyInstance) {
     const T = s.tenantId;
     const cur = decodeCursor<string[]>(q.cursor);
     const key = q.q && q.q.length >= 2 ? `%${searchKey(q.q)}%` : null;
+    const f = parseFilters(req.query as Record<string, unknown>, 'stores');
 
     return withTenant(T, async (tx) => {
       const order = q.sort === 'city' ? tx`coalesce(b.city, ''), b.name, b.id`
@@ -233,6 +243,7 @@ export default async function customerRoutes(app: FastifyInstance) {
           ${q.ongoing ? tx`AND b.ongoing_status_id = ${q.ongoing}` : tx``}
           ${q.city ? tx`AND b.city_key = ${searchKey(q.city)}` : tx``}
           ${q.manager ? tx`AND c.account_manager_id = ${s.userId}` : tx``}
+          ${filterSql(tx, f, s, 'stores', { c: 'c', b: 'b' })}
           ${key ? tx`AND (b.search LIKE ${key} OR b.customer_id IN (SELECT id FROM customers WHERE tenant_id = ${T} AND search LIKE ${key}))` : tx``}
           ${after}
         ORDER BY ${order}
@@ -252,6 +263,77 @@ export default async function customerRoutes(app: FastifyInstance) {
     return withTenant(T, (tx) => tx`
       SELECT city, count(*)::int AS stores FROM branches
       WHERE tenant_id = ${T} AND city IS NOT NULL GROUP BY city ORDER BY stores DESC, city LIMIT 100`);
+  });
+
+  // ---- CSV export of a list with its filters (what the user sees; up to 50.000 rows, opens in Excel) ----
+  const csvCell = (v: unknown) => {
+    const x = v == null ? '' : v instanceof Date ? v.toISOString() : Array.isArray(v) ? v.join(', ') : String(v);
+    return /[";\n\r]/.test(x) ? `"${x.replace(/"/g, '""')}"` : x;
+  };
+  const sendCsv = (reply: import('fastify').FastifyReply, name: string, header: string[], rows: unknown[][]) => {
+    const csv = [header.join(';'), ...rows.map((r) => r.map(csvCell).join(';'))].join('\r\n');
+    reply.header('Content-Disposition', `attachment; filename="${name}-${new Date().toISOString().slice(0, 10)}.csv"`);
+    return reply.type('text/csv; charset=utf-8').send('\uFEFF' + csv);
+  };
+
+  app.get('/customers/export.csv', async (req, reply) => {
+    const q = z.object({ q: z.string().trim().max(100).optional(), tree: z.enum(['0', '1']).default('0') }).parse(req.query);
+    const s = req.session;
+    const T = s.tenantId;
+    const f = parseFilters(req.query as Record<string, unknown>, q.tree === '1' ? 'tree' : 'customers');
+    const key = q.q && q.q.length >= 2 ? `%${searchKey(q.q)}%` : null;
+    const rows = await withTenant(T, (tx) => tx`
+      SELECT c.code, c.name, c.trade_name, c.kind, c.status, c.vat, c.tax_office, c.category, c.source, c.payment_terms,
+             c.email, c.phone, c.address_street, c.address_city, c.address_postal, c.address_region,
+             (SELECT name FROM lookup_values WHERE id = c.geo_zone_id) AS geo_zone, u.full_name AS manager,
+             c.annual_value, c.branches_count, c.spaces_count, c.tags, c.created_at
+      FROM customers c LEFT JOIN users u ON u.id = c.account_manager_id
+      WHERE c.tenant_id = ${T} ${f.c_archived ? tx`AND c.archived_at IS NOT NULL` : tx`AND c.archived_at IS NULL`}
+        ${filterSql(tx, f, s, 'customers', { c: 'c' })}
+        ${key ? (q.tree === '1'
+          ? tx`AND (c.search LIKE ${key} OR c.id IN (SELECT customer_id FROM branches WHERE tenant_id = ${T} AND search LIKE ${key}))`
+          : tx`AND c.search LIKE ${key}`) : tx``}
+      ORDER BY c.name LIMIT 50000`);
+    await withTenant(T, (tx) => tx`INSERT INTO audit_log (tenant_id, actor_id, action, entity, details)
+      VALUES (${T}, ${s.userId}, 'customers.export', null, ${tx.json({ rows: rows.length })})`);
+    return sendCsv(reply, 'customers',
+      ['code', 'name', 'trade_name', 'kind', 'status', 'vat', 'tax_office', 'category', 'source', 'payment_terms', 'email', 'phone',
+        'street', 'city', 'postal', 'prefecture', 'geo_zone', 'account_manager', 'annual_value', 'stores', 'spaces', 'tags', 'created_at'],
+      rows.map((r) => [r.code, r.name, r.trade_name, r.kind, r.status, r.vat, r.tax_office, r.category, r.source, r.payment_terms, r.email, r.phone,
+        r.address_street, r.address_city, r.address_postal, r.address_region, r.geo_zone, r.manager, r.annual_value, r.branches_count, r.spaces_count, r.tags, r.created_at]));
+  });
+
+  app.get('/branches/export.csv', async (req, reply) => {
+    const q = z.object({ q: z.string().trim().max(100).optional() }).parse(req.query);
+    const s = req.session;
+    const T = s.tenantId;
+    const f = parseFilters(req.query as Record<string, unknown>, 'stores');
+    const key = q.q && q.q.length >= 2 ? `%${searchKey(q.q)}%` : null;
+    const rows = await withTenant(T, (tx) => tx`
+      SELECT c.code AS customer_code, c.name AS customer, b.name, b.trade_name, b.status, b.address, b.city, b.postal_code, b.region,
+             b.phone, b.manager_name, (SELECT name FROM lookup_values WHERE id = b.geo_zone_id) AS geo_zone,
+             (SELECT name FROM lookup_values WHERE id = b.fee_schedule_id) AS fee_schedule, (SELECT name FROM lookup_values WHERE id = b.tour_id) AS tour,
+             (SELECT name FROM lookup_values WHERE id = b.ongoing_status_id) AS ongoing_status, b.seasonality, b.season_months, b.spaces_count
+      FROM branches b JOIN customers c ON c.id = b.customer_id
+      WHERE b.tenant_id = ${T} AND c.archived_at IS NULL ${filterSql(tx, f, s, 'stores', { c: 'c', b: 'b' })}
+        ${key ? tx`AND (b.search LIKE ${key} OR b.customer_id IN (SELECT id FROM customers WHERE tenant_id = ${T} AND search LIKE ${key}))` : tx``}
+      ORDER BY c.name, b.name LIMIT 50000`);
+    await withTenant(T, (tx) => tx`INSERT INTO audit_log (tenant_id, actor_id, action, entity, details)
+      VALUES (${T}, ${s.userId}, 'branches.export', null, ${tx.json({ rows: rows.length })})`);
+    return sendCsv(reply, 'stores',
+      ['customer_code', 'customer', 'store', 'trade_name', 'status', 'address', 'city', 'postal', 'prefecture', 'phone', 'manager',
+        'geo_zone', 'fee_schedule', 'tour', 'ongoing_status', 'seasonality', 'season_months', 'spaces'],
+      rows.map((r) => [r.customer_code, r.customer, r.name, r.trade_name, r.status, r.address, r.city, r.postal_code, r.region, r.phone, r.manager_name,
+        r.geo_zone, r.fee_schedule, r.tour, r.ongoing_status, r.seasonality, r.season_months, r.spaces_count]));
+  });
+
+  // Customer cities (city filter on the customer lists), most customers first
+  app.get('/customers/cities', async (req) => {
+    const T = req.session.tenantId;
+    return withTenant(T, (tx) => tx`
+      SELECT address_city AS city, count(*)::int AS customers FROM customers
+      WHERE tenant_id = ${T} AND address_city IS NOT NULL AND address_city <> '' AND archived_at IS NULL
+      GROUP BY address_city ORDER BY customers DESC, address_city LIMIT 200`);
   });
 
   // Groups for the "parent group" picker
@@ -324,19 +406,20 @@ export default async function customerRoutes(app: FastifyInstance) {
         customer: profile,
         stats: { ...stats, win_rate: decided ? Math.round((stats.won_offers / decided) * 100) : null, last_activity_at: last?.at ?? null },
         branches, contacts, subsidiaries,
-        can: { edit: hasRole(req.session, 'sales'), archive: hasRole(req.session, 'manager') },
+        can: { edit: can(req.session, 'customers.edit'), archive: can(req.session, 'customers.delete') },
       };
     });
   });
 
   // ---- Create ----
   app.post('/customers', async (req, reply) => {
-    if (!hasRole(req.session, 'sales')) return reply.code(403).send({ error: 'forbidden' });
+    if (!can(req.session, 'customers.edit')) return reply.code(403).send({ error: 'forbidden' });
     const c = customerSchema.parse(req.body);
     const s = req.session;
     const res = await withTenant(s.tenantId, async (tx) => {
       if (!(await validParent(tx, null, c.parent_id))) return { error: 'invalid_parent' as const };
       if (!(await validLookup(tx, c.geo_zone_id, 'geo_zone'))) return { error: 'invalid_geo_zone' as const };
+      if (await canonicalizeFields(tx, s.tenantId, c, CUSTOMER_LIST_FIELDS)) return { error: 'invalid_value' as const };
       // User-given code
       if (c.code) {
         const [taken] = await tx`SELECT 1 FROM customers WHERE tenant_id = ${s.tenantId} AND code = ${c.code}`;
@@ -345,6 +428,7 @@ export default async function customerRoutes(app: FastifyInstance) {
           INSERT INTO customers ${tx({ ...columns(c), tenant_id: s.tenantId, account_manager_id: c.account_manager_id ?? s.userId })}
           RETURNING id, name, code, parent_id`;
         await log(tx, s, row.id, 'note', 'Δημιουργία πελάτη', row.code);
+        await emitEntityEvents(tx, s.tenantId, 'customer', 'created', [row.id], { type: 'user', user_id: s.userId });
         if (row.parent_id) await refreshCounts(tx, row.parent_id);
         return { customer: row };
       }
@@ -360,6 +444,7 @@ export default async function customerRoutes(app: FastifyInstance) {
           INSERT INTO customers ${tx({ ...columns(c), tenant_id: s.tenantId, code, account_manager_id: c.account_manager_id ?? s.userId })}
           RETURNING id, name, code, parent_id`;
         await log(tx, s, row.id, 'note', 'Δημιουργία πελάτη', row.code);
+        await emitEntityEvents(tx, s.tenantId, 'customer', 'created', [row.id], { type: 'user', user_id: s.userId });
         if (row.parent_id) await refreshCounts(tx, row.parent_id);
         return { customer: row };
       }
@@ -372,7 +457,7 @@ export default async function customerRoutes(app: FastifyInstance) {
 
   // ---- Update ----
   app.put('/customers/:id', async (req, reply) => {
-    if (!hasRole(req.session, 'sales')) return reply.code(403).send({ error: 'forbidden' });
+    if (!can(req.session, 'customers.edit')) return reply.code(403).send({ error: 'forbidden' });
     const { id } = idParam.parse(req.params);
     const c = customerSchema.parse(req.body);
     const s = req.session;
@@ -381,6 +466,7 @@ export default async function customerRoutes(app: FastifyInstance) {
       if (!old) return { code: 404, error: 'not_found' };
       if (!(await validParent(tx, id, c.parent_id))) return { code: 400, error: 'invalid_parent' };
       if (!(await validLookup(tx, c.geo_zone_id, 'geo_zone'))) return { code: 400, error: 'invalid_geo_zone' };
+      if (await canonicalizeFields(tx, s.tenantId, c, CUSTOMER_LIST_FIELDS)) return { code: 400, error: 'invalid_value' };
       if (c.code && c.code !== old.code) {
         const [taken] = await tx`SELECT 1 FROM customers WHERE tenant_id = ${s.tenantId} AND code = ${c.code} AND id <> ${id}`;
         if (taken) return { code: 409, error: 'code_taken' };
@@ -392,6 +478,7 @@ export default async function customerRoutes(app: FastifyInstance) {
         c.code && old.code !== c.code && `Κωδικός: ${old.code} → ${c.code}`,
       ].filter(Boolean).join(' · ');
       await log(tx, s, id, 'note', 'Ενημέρωση στοιχείων', changes || null);
+      await emitEntityEvents(tx, s.tenantId, 'customer', 'updated', [id], { type: 'user', user_id: s.userId });
       for (const p of new Set([old.parent_id, c.parent_id].filter(Boolean))) await refreshCounts(tx, p as string);
       return { code: 200, error: null };
     });
@@ -402,7 +489,7 @@ export default async function customerRoutes(app: FastifyInstance) {
 
   // ---- Archive / restore (soft; history and offers are kept) ----
   app.post('/customers/:id/archive', async (req, reply) => {
-    if (!hasRole(req.session, 'manager')) return reply.code(403).send({ error: 'forbidden' });
+    if (!can(req.session, 'customers.delete')) return reply.code(403).send({ error: 'forbidden' });
     const { id } = idParam.parse(req.params);
     const { archived } = z.object({ archived: z.boolean() }).parse(req.body);
     const s = req.session;
@@ -410,6 +497,7 @@ export default async function customerRoutes(app: FastifyInstance) {
       const [c] = await tx`UPDATE customers SET archived_at = ${archived ? tx`now()` : null}, updated_at = now() WHERE id = ${id} RETURNING parent_id`;
       if (!c) return;
       await log(tx, s, id, 'note', archived ? 'Αρχειοθέτηση πελάτη' : 'Επαναφορά πελάτη');
+      await emitEntityEvents(tx, s.tenantId, 'customer', archived ? 'archived' : 'updated', [id], { type: 'user', user_id: s.userId });
       if (c.parent_id) await refreshCounts(tx, c.parent_id);
     });
     await publish({ tenantId: s.tenantId, type: 'customer.updated', data: { id } });
@@ -437,7 +525,7 @@ export default async function customerRoutes(app: FastifyInstance) {
   });
 
   app.post('/customers/:id/activities', async (req, reply) => {
-    if (!hasRole(req.session, 'sales')) return reply.code(403).send({ error: 'forbidden' });
+    if (!can(req.session, 'customers.edit')) return reply.code(403).send({ error: 'forbidden' });
     const { id } = idParam.parse(req.params);
     const b = z.object({ kind: z.enum(ACTIVITY_KINDS), title: z.string().trim().min(1).max(200), body: opt(5000) }).parse(req.body);
     const s = req.session;
@@ -474,7 +562,8 @@ export default async function customerRoutes(app: FastifyInstance) {
   }));
   type BranchInput = z.infer<typeof branchSchema>;
 
-  async function branchLookupsValid(tx: Tx, b: BranchInput) {
+  async function branchLookupsValid(tx: Tx, b: BranchInput, tenantId: string) {
+    if (await canonicalizeFields(tx, tenantId, b, [['region', 'prefecture']])) return false;
     return (await validLookup(tx, b.geo_zone_id, 'geo_zone'))
       && (await validLookup(tx, b.fee_schedule_id, 'fee_schedule'))
       && (await validLookup(tx, b.tour_id, 'tour'))
@@ -484,14 +573,15 @@ export default async function customerRoutes(app: FastifyInstance) {
   const branchRow = (tx: Tx, b: BranchInput) => ({ ...b, season_months: tx.array(b.season_months, 21 /* smallint */) as unknown as number[] });
 
   app.post('/customers/:id/branches', async (req, reply) => {
-    if (!hasRole(req.session, 'sales')) return reply.code(403).send({ error: 'forbidden' });
+    if (!can(req.session, 'customers.edit')) return reply.code(403).send({ error: 'forbidden' });
     const { id } = idParam.parse(req.params);
     const b = branchSchema.parse(req.body);
     const s = req.session;
     const row = await withTenant(s.tenantId, async (tx) => {
-      if (!(await branchLookupsValid(tx, b))) return null;
+      if (!(await branchLookupsValid(tx, b, s.tenantId))) return null;
       const [r] = await tx`INSERT INTO branches ${tx({ ...branchRow(tx, b), tenant_id: s.tenantId, customer_id: id })} RETURNING id`;
       await log(tx, s, id, 'note', 'Νέο κατάστημα', b.name);
+      await emitEntityEvents(tx, s.tenantId, 'branch', 'created', [r.id], { type: 'user', user_id: s.userId });
       await refreshCounts(tx, id);
       return r;
     });
@@ -499,19 +589,21 @@ export default async function customerRoutes(app: FastifyInstance) {
   });
 
   app.put('/branches/:id', async (req, reply) => {
-    if (!hasRole(req.session, 'sales')) return reply.code(403).send({ error: 'forbidden' });
+    if (!can(req.session, 'customers.edit')) return reply.code(403).send({ error: 'forbidden' });
     const { id } = idParam.parse(req.params);
     const b = branchSchema.parse(req.body);
-    const res = await withTenant(req.session.tenantId, async (tx) => {
-      if (!(await branchLookupsValid(tx, b))) return 400;
-      const [r] = await tx`UPDATE branches SET ${tx(branchRow(tx, b))} WHERE id = ${id} RETURNING id`;
+    const s = req.session;
+    const res = await withTenant(s.tenantId, async (tx) => {
+      if (!(await branchLookupsValid(tx, b, s.tenantId))) return 400;
+      const [r] = await tx`UPDATE branches SET ${tx(branchRow(tx, b))}, updated_at = now() WHERE id = ${id} RETURNING id`;
+      if (r) await emitEntityEvents(tx, s.tenantId, 'branch', 'updated', [id], { type: 'user', user_id: s.userId });
       return r ? 200 : 404;
     });
     return res === 200 ? { ok: true } : reply.code(res).send({ error: res === 404 ? 'not_found' : 'invalid_lookup' });
   });
 
   // ---- Value lists (geographic zones, fee schedules, field tours) ----
-  const listParam = z.enum(['geo_zone', 'fee_schedule', 'tour', 'ongoing_status']);
+  const listParam = z.enum(ALL_LISTS);
   app.get('/lookups', async (req) => {
     const { list } = z.object({ list: listParam }).parse(req.query);
     const T = req.session.tenantId;
@@ -520,7 +612,7 @@ export default async function customerRoutes(app: FastifyInstance) {
   });
 
   app.post('/lookups', async (req, reply) => {
-    if (!hasRole(req.session, 'sales')) return reply.code(403).send({ error: 'forbidden' });
+    if (!can(req.session, 'customers.edit')) return reply.code(403).send({ error: 'forbidden' });
     const b = z.object({ list: listParam, name: z.string().trim().min(1).max(80) }).parse(req.body);
     const T = req.session.tenantId;
     const row = await withTenant(T, async (tx) => {
@@ -534,12 +626,13 @@ export default async function customerRoutes(app: FastifyInstance) {
   });
 
   app.delete('/branches/:id', async (req, reply) => {
-    if (!hasRole(req.session, 'manager')) return reply.code(403).send({ error: 'forbidden' });
+    if (!can(req.session, 'customers.delete')) return reply.code(403).send({ error: 'forbidden' });
     const { id } = idParam.parse(req.params);
     const s = req.session;
     const ok = await withTenant(s.tenantId, async (tx) => {
-      const [r] = await tx`DELETE FROM branches WHERE id = ${id} RETURNING customer_id, name`;
+      const [r] = await tx`DELETE FROM branches WHERE id = ${id} RETURNING customer_id, name, external_id`;
       if (!r) return false;
+      await emitEvents(tx, s.tenantId, [{ event: 'branch.deleted', data: { id, external_id: r.external_id, name: r.name, customer_id: r.customer_id } }], { type: 'user', user_id: s.userId });
       await log(tx, s, r.customer_id, 'note', 'Διαγραφή καταστήματος', r.name);
       await refreshCounts(tx, r.customer_id);
       return true;
@@ -549,39 +642,55 @@ export default async function customerRoutes(app: FastifyInstance) {
 
   // ---- Spaces ----
   const spaceSchema = z.object({
-    name: z.string().trim().min(1).max(200), kind: z.enum(SPACE_KINDS).default('retail'),
+    name: z.string().trim().min(1).max(200), kind: opt(80),
     area_sqm: z.coerce.number().min(0).max(1e7).nullish().transform((v) => v ?? null), notes: opt(2000),
   });
 
   app.post('/branches/:id/spaces', async (req, reply) => {
-    if (!hasRole(req.session, 'sales')) return reply.code(403).send({ error: 'forbidden' });
+    if (!can(req.session, 'customers.edit')) return reply.code(403).send({ error: 'forbidden' });
     const { id } = idParam.parse(req.params);
     const b = spaceSchema.parse(req.body);
     const s = req.session;
     const row = await withTenant(s.tenantId, async (tx) => {
       const [br] = await tx`SELECT customer_id FROM branches WHERE id = ${id}`;
       if (!br) return null;
+      const kind = await canonicalName(tx, s.tenantId, 'space_kind', b.kind);
+      if (kind === false) return 'invalid' as const;
+      b.kind = kind ?? null;
       const [r] = await tx`INSERT INTO spaces ${tx({ ...b, tenant_id: s.tenantId, branch_id: id })} RETURNING id`;
+      await emitEntityEvents(tx, s.tenantId, 'space', 'created', [r.id], { type: 'user', user_id: s.userId });
       await refreshCounts(tx, br.customer_id);
       return r;
     });
+    if (row === 'invalid') return reply.code(400).send({ error: 'invalid_value' });
     return row ? reply.code(201).send(row) : reply.code(404).send({ error: 'not_found' });
   });
 
   app.put('/spaces/:id', async (req, reply) => {
-    if (!hasRole(req.session, 'sales')) return reply.code(403).send({ error: 'forbidden' });
+    if (!can(req.session, 'customers.edit')) return reply.code(403).send({ error: 'forbidden' });
     const { id } = idParam.parse(req.params);
     const b = spaceSchema.parse(req.body);
-    const ok = await withTenant(req.session.tenantId, async (tx) => !!(await tx`UPDATE spaces SET ${tx(b)} WHERE id = ${id} RETURNING id`)[0]);
+    const s = req.session;
+    const ok = await withTenant(s.tenantId, async (tx) => {
+      const kind = await canonicalName(tx, s.tenantId, 'space_kind', b.kind);
+      if (kind === false) return 'invalid' as const;
+      b.kind = kind ?? null;
+      const [r] = await tx`UPDATE spaces SET ${tx(b)}, updated_at = now() WHERE id = ${id} RETURNING id`;
+      if (r) await emitEntityEvents(tx, s.tenantId, 'space', 'updated', [id], { type: 'user', user_id: s.userId });
+      return !!r;
+    });
+    if (ok === 'invalid') return reply.code(400).send({ error: 'invalid_value' });
     return ok ? { ok } : reply.code(404).send({ error: 'not_found' });
   });
 
   app.delete('/spaces/:id', async (req, reply) => {
-    if (!hasRole(req.session, 'manager')) return reply.code(403).send({ error: 'forbidden' });
+    if (!can(req.session, 'customers.delete')) return reply.code(403).send({ error: 'forbidden' });
     const { id } = idParam.parse(req.params);
-    const ok = await withTenant(req.session.tenantId, async (tx) => {
-      const [r] = await tx`DELETE FROM spaces s USING branches b WHERE s.id = ${id} AND b.id = s.branch_id RETURNING b.customer_id`;
+    const ses = req.session;
+    const ok = await withTenant(ses.tenantId, async (tx) => {
+      const [r] = await tx`DELETE FROM spaces s USING branches b WHERE s.id = ${id} AND b.id = s.branch_id RETURNING b.customer_id, s.branch_id, s.name, s.external_id`;
       if (!r) return false;
+      await emitEvents(tx, ses.tenantId, [{ event: 'space.deleted', data: { id, external_id: r.external_id, name: r.name, branch_id: r.branch_id } }], { type: 'user', user_id: ses.userId });
       await refreshCounts(tx, r.customer_id);
       return true;
     });
@@ -596,7 +705,7 @@ export default async function customerRoutes(app: FastifyInstance) {
   });
 
   app.post('/customers/:id/contacts', async (req, reply) => {
-    if (!hasRole(req.session, 'sales')) return reply.code(403).send({ error: 'forbidden' });
+    if (!can(req.session, 'customers.edit')) return reply.code(403).send({ error: 'forbidden' });
     const { id } = idParam.parse(req.params);
     const b = contactSchema.parse(req.body);
     const s = req.session;
@@ -610,7 +719,7 @@ export default async function customerRoutes(app: FastifyInstance) {
   });
 
   app.put('/contacts/:id', async (req, reply) => {
-    if (!hasRole(req.session, 'sales')) return reply.code(403).send({ error: 'forbidden' });
+    if (!can(req.session, 'customers.edit')) return reply.code(403).send({ error: 'forbidden' });
     const { id } = idParam.parse(req.params);
     const b = contactSchema.parse(req.body);
     const ok = await withTenant(req.session.tenantId, async (tx) => {
@@ -624,7 +733,7 @@ export default async function customerRoutes(app: FastifyInstance) {
   });
 
   app.delete('/contacts/:id', async (req, reply) => {
-    if (!hasRole(req.session, 'sales')) return reply.code(403).send({ error: 'forbidden' });
+    if (!can(req.session, 'customers.edit')) return reply.code(403).send({ error: 'forbidden' });
     const { id } = idParam.parse(req.params);
     const ok = await withTenant(req.session.tenantId, async (tx) => !!(await tx`DELETE FROM contacts WHERE id = ${id} RETURNING id`)[0]);
     return ok ? { ok } : reply.code(404).send({ error: 'not_found' });

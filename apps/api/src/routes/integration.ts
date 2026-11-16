@@ -6,16 +6,29 @@
 // only the fields you send are changed, and `null` clears a field. Batches: up to 1000 items, one result per item.
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { createHash, timingSafeEqual } from 'node:crypto';
+import { BlockList, isIP } from 'node:net';
 import { z, ZodError } from 'zod';
 import { decodeCursor, encodeCursor, sql, withTenant, type Tx } from '../db.js';
 import { isValidAfm } from './customers.js';
 import { openApiSpec } from './integration-openapi.js';
+import { emitEntityEvents, emitEvents, type EventSource } from '../webhooks.js';
+import { canonicalName, type NameList } from '../lookups.js';
+
+/** Name-list fields: unknown values are added to the list (like zones), and the list's spelling is stored. */
+async function listNames(sp: Tx, T: string, cols: Record<string, unknown>, fields: [string, NameList][], cache: Map<string, string>) {
+  for (const [field, list] of fields) {
+    if (cols[field] !== undefined) cols[field] = await canonicalName(sp, T, list, cols[field] as string | null, { create: true, cache });
+  }
+}
 import type postgres from 'postgres';
 
 type Frag = postgres.PendingQuery<postgres.Row[]>;
 
-type ApiKeyCtx = { id: string; tenantId: string; scope: 'read' | 'write'; name: string };
-declare module 'fastify' { interface FastifyRequest { apiKey?: ApiKeyCtx } }
+type Resource = 'customers' | 'branches' | 'spaces';
+type Level = 'none' | 'read' | 'write';
+type ApiKeyCtx = { id: string; tenantId: string; name: string; permissions: Record<Resource, Level>; expiresAt: number | null; ips: BlockList | null };
+type ApiLog = { tenantId?: string; keyId?: string; items?: number; created?: number; updated?: number; failed?: number; error?: string; errors?: unknown };
+declare module 'fastify' { interface FastifyRequest { apiKey?: ApiKeyCtx; apiLog?: ApiLog } }
 
 const MAX_BATCH = 1000;
 const RATE_PER_MIN = 1200;
@@ -27,7 +40,34 @@ const usage = new Map<string, { n: number; flushedAt: number }>();
 const buckets = new Map<string, { tokens: number; at: number }>();
 
 function problem(reply: FastifyReply, status: number, error: string, detail?: unknown) {
+  const log = (reply.request.apiLog ??= {});
+  log.error = error;
   return reply.code(status).send({ error, ...(detail !== undefined ? { detail } : {}) });
+}
+
+/** "1.2.3.4", "10.0.0.0/8", "2001:db8::/32" → BlockList (null = any address). */
+export function parseIpList(list: string[]): BlockList | null {
+  if (!list.length) return null;
+  const b = new BlockList();
+  for (const raw of list) {
+    const [addr, bits] = raw.trim().split('/');
+    const type = isIP(addr) === 6 ? 'ipv6' : 'ipv4';
+    if (bits !== undefined) b.addSubnet(addr, Number(bits), type);
+    else b.addAddress(addr, type);
+  }
+  return b;
+}
+export function validIpEntry(raw: string) {
+  const [addr, bits, extra] = raw.trim().split('/');
+  const v = isIP(addr);
+  if (!v || extra !== undefined) return false;
+  if (bits === undefined) return true;
+  const n = Number(bits);
+  return /^[0-9]+$/.test(bits) && n >= 0 && n <= (v === 6 ? 128 : 32);
+}
+function ipAllowed(list: BlockList, ip: string) {
+  const a = ip.startsWith('::ffff:') ? ip.slice(7) : ip;
+  return list.check(a, isIP(a) === 6 ? 'ipv6' : 'ipv4');
 }
 
 async function authenticate(req: FastifyRequest, reply: FastifyReply) {
@@ -37,13 +77,23 @@ async function authenticate(req: FastifyRequest, reply: FastifyReply) {
   let hit = keyCache.get(prefix);
   if (!hit || Date.now() - hit.at > 60_000) {
     // Cross-tenant lookup by prefix with the owner connection; the tenant comes from the key itself.
-    const [k] = await sql`SELECT id, tenant_id, scope, name, secret_hash, revoked_at FROM api_keys WHERE prefix = ${prefix}`;
-    hit = { ctx: k && !k.revoked_at ? { id: k.id, tenantId: k.tenant_id, scope: k.scope, name: k.name } : null, hash: k?.secret_hash ?? '', at: Date.now() };
+    const [k] = await sql`SELECT id, tenant_id, name, secret_hash, revoked_at, permissions, expires_at, allowed_ips FROM api_keys WHERE prefix = ${prefix}`;
+    hit = {
+      ctx: k && !k.revoked_at ? {
+        id: k.id, tenantId: k.tenant_id, name: k.name, permissions: k.permissions,
+        expiresAt: k.expires_at ? new Date(k.expires_at).getTime() : null, ips: parseIpList(k.allowed_ips ?? []),
+      } : null,
+      hash: k?.secret_hash ?? '', at: Date.now(),
+    };
     keyCache.set(prefix, hit);
   }
   const given = Buffer.from(sha256(secret), 'hex');
   const stored = Buffer.from(hit.hash.padEnd(64, '0'), 'hex');
   if (!hit.ctx || given.length !== stored.length || !timingSafeEqual(given, stored)) return problem(reply, 401, 'unauthorized', 'Invalid or revoked API key');
+  const ctx = hit.ctx;
+  req.apiLog = { tenantId: ctx.tenantId, keyId: ctx.id };
+  if (ctx.expiresAt !== null && ctx.expiresAt <= Date.now()) return problem(reply, 401, 'key_expired', 'This API key has expired');
+  if (ctx.ips && !ipAllowed(ctx.ips, req.ip)) return problem(reply, 403, 'ip_not_allowed', `Requests from ${req.ip} are not allowed for this key`);
 
   // Token bucket per key
   const b = buckets.get(prefix) ?? { tokens: RATE_PER_MIN, at: Date.now() };
@@ -56,24 +106,53 @@ async function authenticate(req: FastifyRequest, reply: FastifyReply) {
   }
   b.tokens -= 1;
   buckets.set(prefix, b);
+  reply.header('X-RateLimit-Limit', String(RATE_PER_MIN));
   reply.header('X-RateLimit-Remaining', String(Math.floor(b.tokens)));
 
   // Usage counter (flushed at most every 30s per key)
-  const u = usage.get(hit.ctx.id) ?? { n: 0, flushedAt: 0 };
+  const u = usage.get(ctx.id) ?? { n: 0, flushedAt: 0 };
   u.n++;
   if (Date.now() - u.flushedAt > 30_000) {
     const n = u.n;
     u.n = 0; u.flushedAt = Date.now();
-    sql`UPDATE api_keys SET last_used_at = now(), requests = requests + ${n} WHERE id = ${hit.ctx.id}`.catch(() => {});
+    sql`UPDATE api_keys SET last_used_at = now(), requests = requests + ${n} WHERE id = ${ctx.id}`.catch(() => {});
   }
-  usage.set(hit.ctx.id, u);
-  req.apiKey = hit.ctx;
+  usage.set(ctx.id, u);
+  req.apiKey = ctx;
 }
 
-const needWrite = (req: FastifyRequest, reply: FastifyReply) => {
-  if (req.apiKey?.scope !== 'write') { problem(reply, 403, 'forbidden', 'This API key is read-only'); return false; }
-  return true;
+/** Per-resource permission: read for GET, write for changes ("write" includes read). */
+const need = (req: FastifyRequest, reply: FastifyReply, res: Resource, level: 'read' | 'write') => {
+  const has = req.apiKey?.permissions?.[res] ?? 'none';
+  if (has === 'write' || has === level) return true;
+  problem(reply, 403, 'forbidden', `This API key has no ${level} access to ${res}`);
+  return false;
 };
+
+// ---------------------------------------------------------------- request log (buffered, flushed every second)
+let logBuffer: Record<string, unknown>[] = [];
+let flushTimer: NodeJS.Timeout | null = null;
+async function flushLog() {
+  flushTimer = null;
+  const rows = logBuffer;
+  logBuffer = [];
+  if (rows.length) await sql`INSERT INTO api_requests ${sql(rows as never)}`.catch((e: Error) => console.error('api log flush failed', e.message));
+}
+function logRequest(req: FastifyRequest, reply: FastifyReply) {
+  const l = req.apiLog;
+  if (!l?.tenantId) return; // unknown key: nothing to attribute it to
+  logBuffer.push({
+    tenant_id: l.tenantId, key_id: l.keyId ?? null, method: req.method, path: (req.url.split('?')[0] ?? '').slice(0, 300),
+    status: reply.statusCode, duration_ms: Math.round(reply.elapsedTime), ip: req.ip ?? null,
+    items: l.items ?? null, created: l.created ?? null, updated: l.updated ?? null, failed: l.failed ?? null,
+    error: l.error ?? null, errors: l.errors ? sql.json(l.errors as never) : null,
+  });
+  if (logBuffer.length >= 500) void flushLog();
+  else flushTimer ??= setTimeout(() => void flushLog(), 1000);
+}
+
+const src = (k: ApiKeyCtx): EventSource => ({ type: 'api', key: k.name });
+const ENTITY = { customers: 'customer', branches: 'branch', spaces: 'space' } as const;
 
 /** Revoked keys stop working immediately on this instance. */
 export function forgetApiKey(prefix: string) { keyCache.delete(prefix); }
@@ -121,7 +200,7 @@ const spaceIn = z.object({
   external_id: ext,
   branch_external_id: ext.optional(),
   name: z.string().trim().min(1).max(200).optional(),
-  kind: z.enum(['retail', 'warehouse', 'office', 'department']).optional(),
+  kind: str(80),
   area_sqm: z.number().min(0).max(1e7).nullable().optional(),
   notes: str(2000),
 }).strict();
@@ -243,6 +322,7 @@ async function upsertCustomers(tx: Tx, key: ApiKeyCtx, items: unknown[]) {
     }
     const zone = await lookupId(sp, T, 'geo_zone', c.geo_zone, cache);
     if (zone !== undefined) cols.geo_zone_id = zone;
+    await listNames(sp, T, cols, [['category', 'customer_category'], ['source', 'customer_source'], ['payment_terms', 'payment_terms'], ['address_region', 'prefecture']], cache);
     if (c.parent_external_id !== undefined) {
       if (c.parent_external_id === null) cols.parent_id = null;
       else {
@@ -300,6 +380,7 @@ async function upsertBranches(tx: Tx, key: ApiKeyCtx, items: unknown[]) {
       const id = await lookupId(sp, T, list, b[field], cache);
       if (id !== undefined) cols[`${field}_id`] = id;
     }
+    await listNames(sp, T, cols, [['region', 'prefecture']], cache);
     if (b.season_months !== undefined) cols.season_months = sp.array([...new Set(b.season_months)].sort((x, y) => x - y), 21);
     if (b.seasonality && b.seasonality !== 'custom') cols.season_months = sp.array([], 21);
     if (b.customer_external_id) {
@@ -326,8 +407,10 @@ async function upsertBranches(tx: Tx, key: ApiKeyCtx, items: unknown[]) {
 async function upsertSpaces(tx: Tx, key: ApiKeyCtx, items: unknown[]) {
   const T = key.tenantId;
   const branchIds = new Set<string>();
+  const cache = new Map<string, string>();
   const results = await runBatch(tx, items, spaceIn, async (s, sp) => {
     const cols: Record<string, unknown> = pick(s, ['name', 'kind', 'area_sqm', 'notes']);
+    await listNames(sp, T, cols, [['kind', 'space_kind']], cache);
     if (s.branch_external_id) {
       const [b] = await sp`SELECT id FROM branches WHERE tenant_id = ${T} AND external_id = ${s.branch_external_id}`;
       if (!b) throw new RowError('branch_not_found', s.branch_external_id);
@@ -391,6 +474,7 @@ export default async function integrationRoutes(app: FastifyInstance) {
 
   await app.register(async (r) => {
     r.addHook('preHandler', authenticate);
+    r.addHook('onResponse', async (req, reply) => logRequest(req, reply));
     r.setErrorHandler((err, _req, reply) => {
       if (err instanceof ZodError) return problem(reply, 400, 'validation', zodDetail(err));
       const code = (err as { statusCode?: number }).statusCode;
@@ -401,12 +485,15 @@ export default async function integrationRoutes(app: FastifyInstance) {
 
     r.get('/v1/ping', async (req) => {
       const [t] = await sql`SELECT name FROM tenants WHERE id = ${req.apiKey!.tenantId}`;
-      return { ok: true, tenant: t.name, key: req.apiKey!.name, scope: req.apiKey!.scope };
+      const k = req.apiKey!;
+      return { ok: true, tenant: t.name, key: k.name, permissions: k.permissions, expires_at: k.expiresAt ? new Date(k.expiresAt).toISOString() : null };
     });
 
     // ----- generic list/get helpers (keyset on updated_at, id → incremental sync)
+    const resourceOf = (path: string) => path.split('/')[2] as Resource;
     const list = (path: string, base: (tx: Tx, T: string) => Frag, alias: string, filters?: (q: Record<string, string>, tx: Tx) => Frag) =>
-      r.get(path, async (req) => {
+      r.get(path, async (req, reply) => {
+        if (!need(req, reply, resourceOf(path), 'read')) return;
         const q = listQuery.parse(req.query);
         const extra = req.query as Record<string, string>;
         const cur = decodeCursor<[string, string]>(q.cursor);
@@ -432,6 +519,7 @@ export default async function integrationRoutes(app: FastifyInstance) {
 
     const getOne = (path: string, base: (tx: Tx, T: string) => Frag, alias: string) =>
       r.get(path, async (req, reply) => {
+        if (!need(req, reply, resourceOf(path), 'read')) return;
         const { external_id } = z.object({ external_id: ext }).parse(req.params);
         const T = req.apiKey!.tenantId;
         const [row] = await withTenant(T, (tx) => tx`${base(tx, T)} AND ${tx(alias)}.external_id = ${external_id}`);
@@ -450,22 +538,40 @@ export default async function integrationRoutes(app: FastifyInstance) {
       ['spaces', upsertSpaces, 'api.spaces'],
     ] as const;
     for (const [entity, fn, action] of writers) {
+      /** Webhook events for what the batch changed (same transaction → only committed changes are sent). */
+      const emitFor = async (tx: Tx, key: ApiKeyCtx, out: ItemResult[]) => {
+        for (const st of ['created', 'updated'] as const) {
+          const ids = [...new Set(out.filter((x) => x.status === st && x.id).map((x) => x.id!))];
+          await emitEntityEvents(tx, key.tenantId, ENTITY[entity], st, ids, src(key));
+        }
+      };
+      const logResult = (req: FastifyRequest, out: ItemResult[]) => {
+        const s = summary(out);
+        req.apiLog = { ...req.apiLog, items: out.length, created: s.created, updated: s.updated, failed: s.failed,
+          errors: s.failed ? out.filter((x) => x.status === 'error').slice(0, 20) : undefined };
+      };
+
       r.put(`/v1/${entity}/:external_id`, { bodyLimit: 1_000_000 }, async (req, reply) => {
-        if (!needWrite(req, reply)) return;
+        if (!need(req, reply, entity, 'write')) return;
         const { external_id } = z.object({ external_id: ext }).parse(req.params);
         const body = { ...(req.body as object ?? {}), external_id };
         const key = req.apiKey!;
-        const [res] = await withTenant(key.tenantId, async (tx) => {
-          const out = await fn(tx, key, [body]);
-          if (out[0].status !== 'error') await audit(tx, key, `${action}.upsert`, { [out[0].status]: 1 });
-          return out;
+        const out = await withTenant(key.tenantId, async (tx) => {
+          const o = await fn(tx, key, [body]);
+          if (o[0].status !== 'error') {
+            await audit(tx, key, `${action}.upsert`, { [o[0].status]: 1 });
+            await emitFor(tx, key, o);
+          }
+          return o;
         });
-        if (res.status === 'error') return reply.code(422).send(res);
+        logResult(req, out);
+        const [res] = out;
+        if (res.status === 'error') { req.apiLog!.error = res.error; return reply.code(422).send(res); }
         return reply.code(res.status === 'created' ? 201 : 200).send(res);
       });
 
       r.post(`/v1/${entity}/batch`, { bodyLimit: 20_000_000 }, async (req, reply) => {
-        if (!needWrite(req, reply)) return;
+        if (!need(req, reply, entity, 'write')) return;
         const { items } = z.object({ items: z.array(z.unknown()).min(1).max(MAX_BATCH) }).parse(req.body);
         const key = req.apiKey!;
         const t0 = Date.now();
@@ -473,15 +579,17 @@ export default async function integrationRoutes(app: FastifyInstance) {
           const out = await fn(tx, key, items);
           const s = summary(out);
           await audit(tx, key, `${action}.batch`, { created: s.created, updated: s.updated, failed: s.failed });
+          await emitFor(tx, key, out);
           return out;
         });
+        logResult(req, results);
         return { ...summary(results), duration_ms: Date.now() - t0 };
       });
     }
 
     // ----- deletes: customers are archived (history kept); stores/spaces are removed
     r.delete('/v1/customers/:external_id', async (req, reply) => {
-      if (!needWrite(req, reply)) return;
+      if (!need(req, reply, 'customers', 'write')) return;
       const { external_id } = z.object({ external_id: ext }).parse(req.params);
       const key = req.apiKey!;
       const ok = await withTenant(key.tenantId, async (tx) => {
@@ -489,6 +597,7 @@ export default async function integrationRoutes(app: FastifyInstance) {
                              WHERE tenant_id = ${key.tenantId} AND external_id = ${external_id} RETURNING id, parent_id`;
         if (c?.parent_id) await refreshCounters(tx, new Set(), new Set(), new Set([c.parent_id]));
         if (c) await audit(tx, key, 'api.customers.archive', { external_id });
+        if (c) await emitEntityEvents(tx, key.tenantId, 'customer', 'archived', [c.id], src(key));
         return !!c;
       });
       return ok ? { ok: true, archived: true } : problem(reply, 404, 'not_found');
@@ -496,20 +605,22 @@ export default async function integrationRoutes(app: FastifyInstance) {
 
     for (const entity of ['branches', 'spaces'] as const) {
       r.delete(`/v1/${entity}/:external_id`, async (req, reply) => {
-        if (!needWrite(req, reply)) return;
+        if (!need(req, reply, entity, 'write')) return;
         const { external_id } = z.object({ external_id: ext }).parse(req.params);
         const key = req.apiKey!;
         const ok = await withTenant(key.tenantId, async (tx) => {
           if (entity === 'branches') {
-            const [b] = await tx`DELETE FROM branches WHERE tenant_id = ${key.tenantId} AND external_id = ${external_id} RETURNING customer_id`;
+            const [b] = await tx`DELETE FROM branches WHERE tenant_id = ${key.tenantId} AND external_id = ${external_id} RETURNING id, name, customer_id`;
             if (b) await refreshCounters(tx, new Set(), new Set([b.customer_id]), new Set());
             if (b) await audit(tx, key, 'api.branches.delete', { external_id });
+            if (b) await emitEvents(tx, key.tenantId, [{ event: 'branch.deleted', data: { id: b.id, external_id, name: b.name, customer_id: b.customer_id } }], src(key));
             return !!b;
           }
           const [s] = await tx`DELETE FROM spaces s USING branches b WHERE s.tenant_id = ${key.tenantId} AND s.external_id = ${external_id} AND b.id = s.branch_id
-                               RETURNING s.branch_id, b.customer_id`;
+                               RETURNING s.id, s.name, s.branch_id, b.customer_id`;
           if (s) await refreshCounters(tx, new Set([s.branch_id]), new Set([s.customer_id]), new Set());
           if (s) await audit(tx, key, 'api.spaces.delete', { external_id });
+          if (s) await emitEvents(tx, key.tenantId, [{ event: 'space.deleted', data: { id: s.id, external_id, name: s.name, branch_id: s.branch_id } }], src(key));
           return !!s;
         });
         return ok ? { ok: true } : problem(reply, 404, 'not_found');

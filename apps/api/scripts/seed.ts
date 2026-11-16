@@ -46,6 +46,7 @@ const pw = await hash(DEMO_PASSWORD);
 async function seedTenant(slug: string, name: string, customers: number, withDemoUser: boolean) {
   const [tenant] = await sql<{ id: string }[]>`INSERT INTO tenants (slug, name) VALUES (${slug}, ${name}) RETURNING id`;
   const T = tenant.id;
+  await sql`SELECT seed_default_lookups(${T})`;
 
   const people = [
     ['Γιάννης Παπαδόπουλος', 'Sales Manager', 'owner'],
@@ -83,7 +84,7 @@ async function seedTenant(slug: string, name: string, customers: number, withDem
   for (const [bname, city, n] of branches) {
     const [b] = await sql<{ id: string }[]>`INSERT INTO branches (tenant_id, customer_id, name, city, spaces_count) VALUES (${T}, ${acme}, ${bname}, ${city}, ${n}) RETURNING id`;
     await sql`INSERT INTO spaces (tenant_id, branch_id, name, kind)
-              SELECT ${T}, ${b.id}, 'Χώρος ' || g, (ARRAY['retail','warehouse','office','department'])[1 + g % 4]
+              SELECT ${T}, ${b.id}, 'Χώρος ' || g, (ARRAY['Εμπορικός χώρος','Αποθήκη','Γραφεία','Τμήμα / Διεύθυνση'])[1 + g % 4]
               FROM generate_series(1, ${n}) g`;
   }
   await sql`UPDATE customers SET companies_count = 3, branches_count = 3, spaces_count = 12 WHERE id = ${acme}`;

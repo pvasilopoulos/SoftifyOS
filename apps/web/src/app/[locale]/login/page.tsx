@@ -5,9 +5,11 @@ import { Loader2 } from 'lucide-react';
 import { api, ApiError } from '@/lib/api';
 import { Logo } from '@/components/app-shell';
 import { Link } from '@/i18n/navigation';
+import { useBrand } from '@/lib/brand';
 
 export default function LoginPage() {
   const t = useTranslations('login');
+  const brand = useBrand(false);
   const locale = useLocale();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -28,13 +30,11 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="relative grid min-h-dvh place-items-center overflow-hidden bg-sidebar px-4">
-      <div className="pointer-events-none absolute -left-32 -top-32 h-96 w-96 rounded-full bg-primary/40 blur-3xl" />
-      <div className="pointer-events-none absolute -bottom-40 -right-24 h-[28rem] w-[28rem] rounded-full bg-[#2f6fe4]/25 blur-3xl" />
+    <div className="grid min-h-dvh place-items-center bg-bg px-4">
       <form onSubmit={submit} className="card relative w-full max-w-sm p-7">
-        <Logo />
+        <Logo signedIn={false} />
         <h1 className="mt-7 text-2xl font-bold">{t('title')}</h1>
-        <p className="mb-6 text-sm text-muted">{t('subtitle')}</p>
+        <p className="mb-6 text-sm text-muted">{t('subtitle', { name: brand.name })}</p>
         <label className="mb-1.5 block text-sm font-medium" htmlFor="email">{t('email')}</label>
         <input id="email" type="email" autoComplete="username" required value={email} onChange={(e) => setEmail(e.target.value)}
           className="mb-4 w-full rounded-xl border border-border bg-surface-2 px-3.5 py-3 outline-none focus:border-primary" />

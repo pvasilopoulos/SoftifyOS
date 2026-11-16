@@ -83,6 +83,9 @@ body {
 
 .tabular { font-variant-numeric: tabular-nums; }
 .safe-bottom { padding-bottom: env(safe-area-inset-bottom); }
+/* Dialogs & bottom sheets: keep their own bottom padding AND clear the iPhone home indicator */
+.sheet-pb { padding-bottom: calc(1.25rem + env(safe-area-inset-bottom)); }
+@media (min-width: 640px) { .sheet-pb { padding-bottom: 1.5rem; } }
 .safe-top { padding-top: env(safe-area-inset-top); }
 .no-scrollbar::-webkit-scrollbar { display: none; }
 .no-scrollbar { scrollbar-width: none; }

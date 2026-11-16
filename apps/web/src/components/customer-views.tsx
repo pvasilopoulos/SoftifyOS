@@ -21,7 +21,7 @@ import { BranchDetails } from './branch-details';
 const iconBtn = 'relative grid h-11 w-11 shrink-0 place-items-center rounded-xl border border-border bg-surface text-muted transition hover:text-text';
 
 /** Popover on desktop, bottom sheet on phones. Closes on outside click / Escape. */
-function Popover({ open, onClose, children, align = 'right' }: { open: boolean; onClose: () => void; children: ReactNode; align?: 'right' | 'left' }) {
+export function Popover({ open, onClose, children, align = 'right' }: { open: boolean; onClose: () => void; children: ReactNode; align?: 'right' | 'left' }) {
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (!open) return;
@@ -36,7 +36,7 @@ function Popover({ open, onClose, children, align = 'right' }: { open: boolean; 
     <>
       <div className="fixed inset-0 z-40 bg-black/30 sm:hidden" onClick={onClose} />
       <div ref={ref} role="dialog"
-        className={clsx('fixed inset-x-0 bottom-0 z-50 max-h-[80dvh] overflow-auto rounded-t-3xl border border-border bg-surface p-4 shadow-2xl safe-bottom',
+        className={clsx('fixed inset-x-0 bottom-0 z-50 max-h-[80dvh] overflow-auto rounded-t-3xl border border-border bg-surface p-4 shadow-2xl sheet-pb',
           'sm:absolute sm:inset-x-auto sm:bottom-auto sm:top-full sm:mt-2 sm:w-80 sm:rounded-2xl', align === 'right' ? 'sm:right-0' : 'sm:left-0')}>
         {children}
       </div>
@@ -169,7 +169,8 @@ export function ExpandToggle({ mode, onChange }: { mode: ExpandMode; onChange: (
 }
 
 // ============================== Customers & stores ==============================
-export type ListFilters = { status: string; sort: string; mine: boolean; archived: boolean; q: string };
+/** extra = the f_* filter query from useIndexFilters */
+export type ListFilters = { sort: string; q: string; extra: string };
 
 type TreeSpace = { id: string; name: string; kind: string; area_sqm: string | null };
 type TreeBranch = BranchLike & { status: string; spaces_count: number; open_offers: number; spaces: TreeSpace[] };
@@ -200,12 +201,9 @@ export function CustomerTreeView({ filters, mode }: { filters: ListFilters; mode
     initialPageParam: null as string | null,
     queryFn: ({ pageParam, signal }) => {
       const p = new URLSearchParams({ limit: '30', sort: filters.sort, include: 'branches' });
-      if (filters.status) p.set('status', filters.status);
-      if (filters.mine) p.set('manager', 'me');
-      if (filters.archived) p.set('archived', '1');
       if (filters.q.length >= 2) p.set('q', filters.q);
       if (pageParam) p.set('cursor', pageParam);
-      return api<Page<TreeCustomer>>(`/customers?${p}`, { signal });
+      return api<Page<TreeCustomer>>(`/customers?${p}${filters.extra ? `&${filters.extra}` : ''}`, { signal });
     },
     getNextPageParam: (l) => l.nextCursor,
   });
@@ -277,21 +275,24 @@ export function CustomerTreeView({ filters, mode }: { filters: ListFilters; mode
                             {/* tree connector */}
                             <span className={clsx('absolute left-[29px] top-0 w-px bg-border', last ? 'h-[26px]' : 'h-full')} />
                             <span className="absolute left-[29px] top-[26px] h-px w-3 bg-border" />
-                            <div className={clsx('ml-3 flex items-center gap-1 rounded-xl px-2 py-2', matched.has(b.id) && 'bg-warning-soft ring-1 ring-warning/40')}>
+                            {/* Phone: name gets the full width; status + actions go on a second line */}
+                            <div className={clsx('ml-3 flex flex-wrap items-center gap-x-1 gap-y-1.5 rounded-xl px-2 py-2 sm:flex-nowrap', matched.has(b.id) && 'bg-warning-soft ring-1 ring-warning/40')}>
                               <button onClick={() => setOpenStores((s) => toggle(s, b.id))} aria-expanded={storeOpen}
-                                className="flex min-w-0 flex-1 items-center gap-2.5 text-left">
+                                className="flex min-w-0 basis-full items-center gap-2.5 text-left sm:basis-auto sm:flex-1">
                                 <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-primary-soft text-primary"><Store size={15} /></span>
                                 <div className="min-w-0 flex-1">
-                                  <div className="truncate text-sm font-medium">{b.name}{b.trade_name && <span className="font-normal text-primary"> · {b.trade_name}</span>}</div>
+                                  <div className="line-clamp-2 text-sm font-medium sm:truncate">{b.name}{b.trade_name && <span className="font-normal text-primary"> · {b.trade_name}</span>}</div>
                                   <div className="truncate text-xs text-muted">
                                     {[b.address, b.city].filter(Boolean).join(', ') || '—'} · {t('spacesCount', { count: b.spaces_count })}
                                   </div>
                                 </div>
                                 {b.open_offers > 0 && <span className="hidden shrink-0 rounded-full bg-warning-soft px-2 py-0.5 text-xs font-medium text-warning sm:inline">{t('openOffers', { count: b.open_offers })}</span>}
                                 {b.ongoing_status_name && <span className="hidden shrink-0 rounded-full bg-warning-soft px-2 py-0.5 text-xs font-medium text-warning sm:inline">{b.ongoing_status_name}</span>}
-                                <StatusBadge status={b.status} />
+                                <span className="hidden sm:inline-flex"><StatusBadge status={b.status} /></span>
                                 <ChevronDown size={16} className={clsx('shrink-0 text-muted transition-transform', storeOpen && 'rotate-180 text-primary')} />
                               </button>
+                              <div className="flex w-full items-center gap-1 pl-[42px] sm:w-auto sm:pl-0">
+                              <span className="mr-auto sm:hidden"><StatusBadge status={b.status} /></span>
                               <Link href={offerHref(c.id, c.name, b.id)} title={t('offerForStore')} aria-label={t('offerForStore')}
                                 className="grid h-8 w-8 shrink-0 place-items-center rounded-lg text-muted hover:bg-primary-soft hover:text-primary"><FilePlus2 size={16} /></Link>
                               <button onClick={() => setDialog({ customerId: c.id, branch: b })} title={tc('editBranch')} aria-label={tc('editBranch')}
@@ -299,9 +300,10 @@ export function CustomerTreeView({ filters, mode }: { filters: ListFilters; mode
                               <button onClick={() => { if (confirm(tc('confirmDeleteBranch', { name: b.name }))) del.mutate(b.id); }}
                                 title={tc('deleteBranch')} aria-label={tc('deleteBranch')}
                                 className="grid h-8 w-8 shrink-0 place-items-center rounded-lg text-muted hover:bg-danger-soft hover:text-danger"><Trash2 size={15} /></button>
+                              </div>
                             </div>
                             {storeOpen && (
-                              <div className="mb-2 ml-14 space-y-2 pb-1">
+                              <div className="mb-2 ml-5 space-y-2 pb-1 sm:ml-14">
                                 {/* Store data and its spaces are separate, labelled blocks */}
                                 <div className="rounded-xl border border-border bg-surface p-2.5">
                                   <div className="mb-1.5 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted"><Store size={12} /> {tc('storeData')}</div>
@@ -315,7 +317,7 @@ export function CustomerTreeView({ filters, mode }: { filters: ListFilters; mode
                                       <li key={s.id} className="flex items-center gap-1.5 rounded-lg border border-border bg-surface px-2 py-1 text-xs">
                                         <LayoutGrid size={12} className="text-primary" />
                                         <span className="font-medium">{s.name}</span>
-                                        <span className="text-muted">{tc(`spaceKinds.${s.kind}` as never)}{s.area_sqm && ` · ${Number(s.area_sqm)} m²`}</span>
+                                        <span className="text-muted">{[s.kind, s.area_sqm && `${Number(s.area_sqm)} m²`].filter(Boolean).join(' · ')}</span>
                                       </li>
                                     ))}
                                   </ul>
@@ -346,7 +348,7 @@ export function CustomerTreeView({ filters, mode }: { filters: ListFilters; mode
 }
 
 // ============================== Stores (flat) ==============================
-export type StoreFilters = { q: string; mine: boolean; city: string; zone: string; tour: string; ongoing: string; status: string; sort: string };
+export type StoreFilters = { q: string; sort: string; extra: string };
 
 type StoreRow = {
   id: string; name: string; trade_name: string | null; city: string | null; region: string | null; address: string | null; postal_code: string | null;
@@ -362,14 +364,8 @@ export function StoresView({ filters: f }: { filters: StoreFilters }) {
     queryFn: ({ pageParam, signal }) => {
       const p = new URLSearchParams({ limit: '40', sort: f.sort });
       if (f.q.length >= 2) p.set('q', f.q);
-      if (f.city) p.set('city', f.city);
-      if (f.zone) p.set('zone', f.zone);
-      if (f.tour) p.set('tour', f.tour);
-      if (f.ongoing) p.set('ongoing', f.ongoing);
-      if (f.status) p.set('status', f.status);
-      if (f.mine) p.set('manager', 'me');
       if (pageParam) p.set('cursor', pageParam);
-      return api<Page<StoreRow>>(`/branches?${p}`, { signal });
+      return api<Page<StoreRow>>(`/branches?${p}${f.extra ? `&${f.extra}` : ''}`, { signal });
     },
     getNextPageParam: (l) => l.nextCursor,
   });

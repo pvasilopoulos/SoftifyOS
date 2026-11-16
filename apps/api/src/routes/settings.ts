@@ -5,14 +5,15 @@ import { createHash, randomBytes } from 'node:crypto';
 import { z } from 'zod';
 import { hash, verify } from '@node-rs/argon2';
 import { decodeCursor, encodeCursor, searchKey, sql, withTenant, type Tx } from '../db.js';
-import { hasRole, invalidateMembership, issueSession, requireAuth, ROLE_RANK, type Session } from '../auth.js';
+import { can, invalidateMembership, invalidateTenantRoles, issueSession, PERMISSIONS, requireAuth, type Permission, type Session } from '../auth.js';
 import { enqueue } from '../jobs.js';
+import { DEFAULT_VISIBLE, effectiveFilters, FILTER_KEYS, INDEX_FILTERS, INDEXES } from '../filters.js';
+import { ALL_LISTS, isNameList, nameInUse, nameListUsage, renameInRecords } from '../lookups.js';
 import { env } from '../env.js';
-import { forgetApiKey } from './integration.js';
 
 const opt = (max: number) => z.string().trim().max(max).nullish().transform((v) => (v ? v : null));
 const idParam = z.object({ id: z.string().uuid() });
-const ROLES = ['viewer', 'sales', 'manager', 'admin', 'owner'] as const;
+const CUSTOMER_VIEWS = ['list', 'tree', 'stores'] as const;
 const sha256 = (s: string) => createHash('sha256').update(s).digest('hex');
 
 export async function audit(tx: Tx, s: Session, action: string, entity: string | null, details?: unknown) {
@@ -67,6 +68,24 @@ export default async function settingsRoutes(app: FastifyInstance) {
       return { ok: true };
     });
 
+    // Changing the sign-in email needs the current password
+    r.post('/me/email', async (req, reply) => {
+      const b = z.object({ email: z.string().trim().toLowerCase().email().max(200), password: z.string().min(1) }).parse(req.body);
+      const [u] = await sql`SELECT email, password_hash FROM users WHERE id = ${req.session.userId}`;
+      if (!u || !(await verify(u.password_hash, b.password))) return reply.code(400).send({ error: 'wrong_password' });
+      if (u.email.toLowerCase() === b.email) return { ok: true };
+      const [taken] = await sql`SELECT 1 FROM users WHERE lower(email) = ${b.email} AND id <> ${req.session.userId}`;
+      if (taken) return reply.code(409).send({ error: 'email_taken' });
+      try {
+        await sql`UPDATE users SET email = ${b.email} WHERE id = ${req.session.userId}`;
+      } catch (e) {
+        if ((e as { code?: string }).code === '23505') return reply.code(409).send({ error: 'email_taken' });
+        throw e;
+      }
+      await withTenant(req.session.tenantId, (tx) => audit(tx, req.session, 'profile.email', null, { from: u.email, to: b.email }));
+      return { ok: true };
+    });
+
     r.post('/me/password', async (req, reply) => {
       const b = z.object({ current: z.string().min(1), next: z.string().min(10).max(200) }).parse(req.body);
       const [u] = await sql`SELECT password_hash FROM users WHERE id = ${req.session.userId}`;
@@ -88,12 +107,12 @@ export default async function settingsRoutes(app: FastifyInstance) {
           SELECT (SELECT count(*) FROM memberships WHERE tenant_id = ${T})::int AS users,
                  (SELECT value FROM tenant_counters WHERE tenant_id = ${T} AND key = 'customers') AS customers,
                  (SELECT coalesce(sum(count), 0) FROM tenant_offer_stats WHERE tenant_id = ${T}) AS offers`;
-        return { ...t, counts, can_edit: hasRole(req.session, 'admin') };
+        return { ...t, counts, can_edit: can(req.session, 'settings.manage') };
       });
     });
 
     r.put('/settings/organization', async (req, reply) => {
-      if (!hasRole(req.session, 'admin')) return forbid(reply);
+      if (!can(req.session, 'settings.manage')) return forbid(reply);
       const b = z.object({
         name: z.string().trim().min(2).max(120), legal_name: opt(200), vat: opt(20), email: z.string().trim().email().max(200).nullish().or(z.literal('')).transform((v) => v || null),
         phone: opt(40), website: opt(200), address: opt(300), locale: z.enum(['el', 'en']),
@@ -102,12 +121,22 @@ export default async function settingsRoutes(app: FastifyInstance) {
         offer_prefix: z.string().trim().toUpperCase().regex(/^[A-Z0-9-]{1,10}$/),
         offer_validity_days: z.coerce.number().int().min(1).max(365),
         offer_terms: opt(10000),
+        // Short unique identifier (used when signing in to a specific organisation)
+        slug: z.string().trim().toLowerCase().regex(/^[a-z0-9](?:[a-z0-9-]{1,38}[a-z0-9])$/),
       }).parse(req.body);
       const s = req.session;
-      await withTenant(s.tenantId, async (tx) => {
-        await tx`UPDATE tenants SET ${tx(b)}, updated_at = now() WHERE id = ${s.tenantId}`;
-        await audit(tx, s, 'organization.update', b.name, b);
-      });
+      // Uniqueness is global, so check with the owner connection (RLS only shows this tenant)
+      const [taken] = await sql`SELECT 1 FROM tenants WHERE slug = ${b.slug} AND id <> ${s.tenantId}`;
+      if (taken) return reply.code(409).send({ error: 'slug_taken' });
+      try {
+        await withTenant(s.tenantId, async (tx) => {
+          await tx`UPDATE tenants SET ${tx(b)}, updated_at = now() WHERE id = ${s.tenantId}`;
+          await audit(tx, s, 'organization.update', b.name, b);
+        });
+      } catch (e) {
+        if ((e as { code?: string }).code === '23505') return reply.code(409).send({ error: 'slug_taken' });
+        throw e;
+      }
       return { ok: true };
     });
 
@@ -127,7 +156,7 @@ export default async function settingsRoutes(app: FastifyInstance) {
     });
 
     r.post('/settings/companies', async (req, reply) => {
-      if (!hasRole(req.session, 'admin')) return forbid(reply);
+      if (!can(req.session, 'settings.manage')) return forbid(reply);
       const b = companySchema.parse(req.body);
       const s = req.session;
       const row = await withTenant(s.tenantId, async (tx) => {
@@ -140,7 +169,7 @@ export default async function settingsRoutes(app: FastifyInstance) {
     });
 
     r.put('/settings/companies/:id', async (req, reply) => {
-      if (!hasRole(req.session, 'admin')) return forbid(reply);
+      if (!can(req.session, 'settings.manage')) return forbid(reply);
       const { id } = idParam.parse(req.params);
       const b = companySchema.parse(req.body);
       const s = req.session;
@@ -154,7 +183,7 @@ export default async function settingsRoutes(app: FastifyInstance) {
     });
 
     r.delete('/settings/companies/:id', async (req, reply) => {
-      if (!hasRole(req.session, 'admin')) return forbid(reply);
+      if (!can(req.session, 'settings.manage')) return forbid(reply);
       const { id } = idParam.parse(req.params);
       const s = req.session;
       const res = await withTenant(s.tenantId, async (tx) => {
@@ -175,11 +204,13 @@ export default async function settingsRoutes(app: FastifyInstance) {
                (SELECT max(created_at) FROM invitations i WHERE i.tenant_id = ${T} AND i.user_id = u.id AND i.accepted_at IS NULL AND i.expires_at > now()) AS pending_invite
         FROM memberships m JOIN users u ON u.id = m.user_id
         WHERE m.tenant_id = ${T}
-        ORDER BY array_position(${tx.array([...ROLES].reverse())}::text[], m.role), u.full_name`);
+        ORDER BY (SELECT sort FROM roles r WHERE r.tenant_id = m.tenant_id AND r.key = m.role), u.full_name`);
     });
 
-    /** Owners can grant any role; admins up to admin. Nobody can act on a role above their own. */
-    const canAssign = (s: Session, role: string) => (ROLE_RANK[role] ?? 99) <= (s.role === 'owner' ? ROLE_RANK.owner : ROLE_RANK.admin);
+    /** Only owners can grant the owner role or act on owners. */
+    const canAssign = (s: Session, role: string) => role !== 'owner' || s.role === 'owner';
+    const roleKey = z.string().trim().regex(/^[a-z][a-z0-9_]{1,39}$/);
+    const roleExists = async (tx: Tx, key: string) => (await tx`SELECT 1 FROM roles WHERE key = ${key}`).length > 0;
 
     async function createInvitation(tx: Tx, s: Session, userId: string, email: string, locale: string) {
       const token = randomBytes(32).toString('base64url');
@@ -199,14 +230,15 @@ export default async function settingsRoutes(app: FastifyInstance) {
     }
 
     r.post('/settings/users/invite', async (req, reply) => {
-      if (!hasRole(req.session, 'admin')) return forbid(reply);
+      if (!can(req.session, 'users.manage')) return forbid(reply);
       const b = z.object({
         email: z.string().trim().toLowerCase().email().max(200), full_name: z.string().trim().min(2).max(120),
-        role: z.enum(ROLES), title: opt(120), locale: z.enum(['el', 'en']).default('el'),
+        role: roleKey, title: opt(120), locale: z.enum(['el', 'en']).default('el'),
       }).parse(req.body);
       const s = req.session;
       if (!canAssign(s, b.role)) return forbid(reply);
       const res = await withTenant(s.tenantId, async (tx) => {
+        if (!(await roleExists(tx, b.role))) return { code: 400 as const };
         // users is a global table: read/insert through the owner connection inside the same flow
         let [u] = await sql`SELECT id, password_set FROM users WHERE lower(email) = ${b.email}`;
         if (!u) {
@@ -223,11 +255,12 @@ export default async function settingsRoutes(app: FastifyInstance) {
         return { code: 201 as const, inviteUrl, existing: u.password_set as boolean };
       });
       if (res.code === 409) return reply.code(409).send({ error: 'already_member' });
+      if (res.code === 400) return reply.code(400).send({ error: 'invalid_role' });
       return reply.code(201).send({ inviteUrl: res.inviteUrl, existing: res.existing, emailed: env.smtpConfigured });
     });
 
     r.post('/settings/users/:id/resend', async (req, reply) => {
-      if (!hasRole(req.session, 'admin')) return forbid(reply);
+      if (!can(req.session, 'users.manage')) return forbid(reply);
       const { id } = idParam.parse(req.params);
       const s = req.session;
       const [u] = await sql`SELECT email, locale, password_set FROM users WHERE id = ${id}`;
@@ -248,15 +281,16 @@ export default async function settingsRoutes(app: FastifyInstance) {
     }
 
     r.put('/settings/users/:id', async (req, reply) => {
-      if (!hasRole(req.session, 'admin')) return forbid(reply);
+      if (!can(req.session, 'users.manage')) return forbid(reply);
       const { id } = idParam.parse(req.params);
-      const b = z.object({ role: z.enum(ROLES), title: opt(120) }).parse(req.body);
+      const b = z.object({ role: roleKey, title: opt(120) }).parse(req.body);
       const s = req.session;
       if (!canAssign(s, b.role)) return forbid(reply);
       const res = await withTenant(s.tenantId, async (tx) => {
         const [m] = await tx`SELECT m.role, u.email FROM memberships m JOIN users u ON u.id = m.user_id WHERE m.tenant_id = ${s.tenantId} AND m.user_id = ${id} FOR UPDATE OF m`;
         if (!m) return { code: 404, error: 'not_found' };
         if (!canAssign(s, m.role)) return { code: 403, error: 'forbidden' };
+        if (!(await roleExists(tx, b.role))) return { code: 400, error: 'invalid_role' };
         if (m.role === 'owner' && b.role !== 'owner' && (await ownersLeft(tx, s.tenantId, id)) === 0) return { code: 409, error: 'last_owner' };
         await tx`UPDATE memberships SET role = ${b.role}, title = ${b.title} WHERE tenant_id = ${s.tenantId} AND user_id = ${id}`;
         await audit(tx, s, 'user.role', m.email, { from: m.role, to: b.role });
@@ -268,7 +302,7 @@ export default async function settingsRoutes(app: FastifyInstance) {
     });
 
     r.delete('/settings/users/:id', async (req, reply) => {
-      if (!hasRole(req.session, 'admin')) return forbid(reply);
+      if (!can(req.session, 'users.manage')) return forbid(reply);
       const { id } = idParam.parse(req.params);
       const s = req.session;
       if (id === s.userId) return reply.code(409).send({ error: 'cannot_remove_self' });
@@ -285,6 +319,89 @@ export default async function settingsRoutes(app: FastifyInstance) {
       });
       if (res.code !== 200) return reply.code(res.code).send({ error: res.error });
       invalidateMembership(id, s.tenantId); // access revoked immediately
+      return { ok: true };
+    });
+
+    // ---------- Roles (system + custom) ----------
+    const roleBody = z.object({
+      name: z.string().trim().min(2).max(60),
+      description: opt(200),
+      permissions: z.array(z.enum(PERMISSIONS)).max(PERMISSIONS.length).transform((p) => [...new Set(p)]),
+      approval_level: z.coerce.number().int().min(0).max(3), // owner level (4) only for the owner role
+    });
+
+    // Any member: role names are shown across the app (users list, approvals)
+    r.get('/settings/roles', async (req) => {
+      const T = req.session.tenantId;
+      const roles = await withTenant(T, (tx) => tx`
+        SELECT r.key, r.name, r.description, r.permissions, r.approval_level, r.is_system, r.sort,
+               (SELECT count(*)::int FROM memberships m WHERE m.tenant_id = r.tenant_id AND m.role = r.key) AS members
+        FROM roles r WHERE r.tenant_id = ${T} ORDER BY r.sort, r.name`);
+      return { roles, permissions: PERMISSIONS, can_manage: can(req.session, 'users.manage'), my_role: req.session.role };
+    });
+
+    r.post('/settings/roles', async (req, reply) => {
+      if (!can(req.session, 'users.manage')) return forbid(reply);
+      const b = roleBody.parse(req.body);
+      const s = req.session;
+      const key = `r_${randomBytes(5).toString('hex')}`;
+      const res = await withTenant(s.tenantId, async (tx) => {
+        const [dup] = await tx`SELECT 1 FROM roles WHERE lower(name) = lower(${b.name})`;
+        if (dup) return null;
+        const [{ next }] = await tx`SELECT coalesce(max(sort), 0) + 1 AS next FROM roles`;
+        await tx`INSERT INTO roles (tenant_id, key, name, description, permissions, approval_level, sort)
+                 VALUES (${s.tenantId}, ${key}, ${b.name}, ${b.description}, ${b.permissions}, ${b.approval_level}, ${next})`;
+        await audit(tx, s, 'role.create', b.name, b);
+        return key;
+      });
+      return res ? reply.code(201).send({ key: res }) : reply.code(409).send({ error: 'duplicate' });
+    });
+
+    r.put('/settings/roles/:key', async (req, reply) => {
+      if (!can(req.session, 'users.manage')) return forbid(reply);
+      const { key } = z.object({ key: roleKey }).parse(req.params);
+      const b = roleBody.parse(req.body);
+      const s = req.session;
+      if (key === 'owner') return reply.code(409).send({ error: 'owner_locked' }); // owners always have everything
+      // Do not let people remove their own access to this screen
+      if (key === s.role && !b.permissions.includes('users.manage')) return reply.code(409).send({ error: 'would_lock_out' });
+      const res = await withTenant(s.tenantId, async (tx) => {
+        const [dup] = await tx`SELECT 1 FROM roles WHERE lower(name) = lower(${b.name}) AND key <> ${key}`;
+        if (dup) return 409;
+        const [old] = await tx`
+          UPDATE roles SET name = ${b.name}, description = ${b.description}, permissions = ${b.permissions},
+                 approval_level = ${b.approval_level}, updated_at = now()
+          WHERE key = ${key} RETURNING key`;
+        if (old) await audit(tx, s, 'role.update', b.name, b);
+        return old ? 200 : 404;
+      });
+      if (res !== 200) return reply.code(res).send({ error: res === 409 ? 'duplicate' : 'not_found' });
+      invalidateTenantRoles(s.tenantId); // new permissions apply on the next request
+      return { ok: true };
+    });
+
+    // Custom roles only. Members must be moved first (or pass ?reassign_to=<role>).
+    r.delete('/settings/roles/:key', async (req, reply) => {
+      if (!can(req.session, 'users.manage')) return forbid(reply);
+      const { key } = z.object({ key: roleKey }).parse(req.params);
+      const { reassign_to } = z.object({ reassign_to: roleKey.optional() }).parse(req.query);
+      const s = req.session;
+      const res = await withTenant(s.tenantId, async (tx) => {
+        const [role] = await tx`SELECT name, is_system FROM roles WHERE key = ${key} FOR UPDATE`;
+        if (!role) return { code: 404, error: 'not_found' };
+        if (role.is_system) return { code: 409, error: 'system_role' };
+        const [{ members }] = await tx`SELECT count(*)::int AS members FROM memberships WHERE tenant_id = ${s.tenantId} AND role = ${key}`;
+        if (members) {
+          if (!reassign_to || reassign_to === key) return { code: 409, error: 'in_use' };
+          if (!canAssign(s, reassign_to) || !(await roleExists(tx, reassign_to))) return { code: 400, error: 'invalid_role' };
+          await tx`UPDATE memberships SET role = ${reassign_to} WHERE tenant_id = ${s.tenantId} AND role = ${key}`;
+        }
+        await tx`DELETE FROM roles WHERE key = ${key}`;
+        await audit(tx, s, 'role.delete', role.name, { members, reassign_to: reassign_to ?? null });
+        return { code: 200, error: null };
+      });
+      if (res.code !== 200) return reply.code(res.code).send({ error: res.error });
+      invalidateTenantRoles(s.tenantId);
       return { ok: true };
     });
 
@@ -314,7 +431,7 @@ export default async function settingsRoutes(app: FastifyInstance) {
     });
 
     r.post('/settings/products', async (req, reply) => {
-      if (!hasRole(req.session, 'admin')) return forbid(reply);
+      if (!can(req.session, 'settings.manage')) return forbid(reply);
       const b = productSchema.parse(req.body);
       const s = req.session;
       const res = await withTenant(s.tenantId, async (tx) => {
@@ -328,7 +445,7 @@ export default async function settingsRoutes(app: FastifyInstance) {
     });
 
     r.put('/settings/products/:id', async (req, reply) => {
-      if (!hasRole(req.session, 'admin')) return forbid(reply);
+      if (!can(req.session, 'settings.manage')) return forbid(reply);
       const { id } = idParam.parse(req.params);
       const b = productSchema.parse(req.body);
       const s = req.session;
@@ -343,20 +460,28 @@ export default async function settingsRoutes(app: FastifyInstance) {
     });
 
     // ---------- Value lists (zones, fee schedules, tours) ----------
-    const listParam = z.enum(['geo_zone', 'fee_schedule', 'tour', 'ongoing_status']);
+    const listParam = z.enum(ALL_LISTS);
 
     r.get('/settings/lookups', async (req) => {
       const { list } = z.object({ list: listParam }).parse(req.query);
       const T = req.session.tenantId;
-      return withTenant(T, (tx) => tx`
-        SELECT l.id, l.name, l.sort, l.active,
-               (SELECT count(*) FROM branches b WHERE b.geo_zone_id = l.id OR b.fee_schedule_id = l.id OR b.tour_id = l.id OR b.ongoing_status_id = l.id)::int
-             + (SELECT count(*) FROM customers c WHERE c.geo_zone_id = l.id)::int AS usage
-        FROM lookup_values l WHERE l.tenant_id = ${T} AND l.list = ${list} ORDER BY l.sort, l.name`);
+      return withTenant(T, async (tx) => {
+        if (isNameList(list)) {
+          // Name lists: one grouped count per storing column instead of a count per value
+          const usage = await nameListUsage(tx, T, list);
+          const rows = await tx`SELECT id, name, sort, active FROM lookup_values WHERE tenant_id = ${T} AND list = ${list} ORDER BY sort, name`;
+          return rows.map((r) => ({ ...r, usage: usage.get(r.name) ?? 0 }));
+        }
+        return tx`
+          SELECT l.id, l.name, l.sort, l.active,
+                 (SELECT count(*) FROM branches b WHERE b.geo_zone_id = l.id OR b.fee_schedule_id = l.id OR b.tour_id = l.id OR b.ongoing_status_id = l.id)::int
+               + (SELECT count(*) FROM customers c WHERE c.geo_zone_id = l.id)::int AS usage
+          FROM lookup_values l WHERE l.tenant_id = ${T} AND l.list = ${list} ORDER BY l.sort, l.name`;
+      });
     });
 
     r.put('/settings/lookups/:id', async (req, reply) => {
-      if (!hasRole(req.session, 'admin')) return forbid(reply);
+      if (!can(req.session, 'settings.manage')) return forbid(reply);
       const { id } = idParam.parse(req.params);
       const b = z.object({ name: z.string().trim().min(1).max(80), active: z.boolean(), sort: z.coerce.number().int().min(0).max(10000) }).parse(req.body);
       const s = req.session;
@@ -365,6 +490,8 @@ export default async function settingsRoutes(app: FastifyInstance) {
           SELECT 1 FROM lookup_values WHERE tenant_id = ${s.tenantId} AND id <> ${id}
             AND list = (SELECT list FROM lookup_values WHERE id = ${id}) AND search_key(name) = search_key(${b.name})`;
         if (dup) return 409;
+        const [old] = await tx`SELECT list, name FROM lookup_values WHERE id = ${id}`;
+        if (old && isNameList(old.list)) await renameInRecords(tx, s.tenantId, old.list, old.name, b.name); // records follow the rename
         const [l] = await tx`UPDATE lookup_values SET ${tx(b)} WHERE id = ${id} RETURNING list`;
         if (l) await audit(tx, s, 'lookup.update', `${l.list}: ${b.name}`, b);
         return l ? 200 : 404;
@@ -373,7 +500,7 @@ export default async function settingsRoutes(app: FastifyInstance) {
     });
 
     r.put('/settings/lookups/order', async (req, reply) => {
-      if (!hasRole(req.session, 'admin')) return forbid(reply);
+      if (!can(req.session, 'settings.manage')) return forbid(reply);
       const { ids } = z.object({ ids: z.array(z.string().uuid()).min(1).max(500) }).parse(req.body);
       await withTenant(req.session.tenantId, async (tx) => {
         await tx`UPDATE lookup_values l SET sort = x.ord FROM unnest(${tx.array(ids)}::uuid[]) WITH ORDINALITY AS x(id, ord) WHERE l.id = x.id`;
@@ -382,13 +509,14 @@ export default async function settingsRoutes(app: FastifyInstance) {
     });
 
     r.delete('/settings/lookups/:id', async (req, reply) => {
-      if (!hasRole(req.session, 'admin')) return forbid(reply);
+      if (!can(req.session, 'settings.manage')) return forbid(reply);
       const { id } = idParam.parse(req.params);
       const s = req.session;
       const res = await withTenant(s.tenantId, async (tx) => {
-        const [used] = await tx`
+        const [lv] = await tx`SELECT list, name FROM lookup_values WHERE id = ${id}`;
+        const used = lv && isNameList(lv.list) ? await nameInUse(tx, s.tenantId, lv.list, lv.name) : (await tx`
           SELECT 1 WHERE EXISTS (SELECT 1 FROM branches WHERE geo_zone_id = ${id} OR fee_schedule_id = ${id} OR tour_id = ${id} OR ongoing_status_id = ${id})
-                      OR EXISTS (SELECT 1 FROM customers WHERE geo_zone_id = ${id})`;
+                      OR EXISTS (SELECT 1 FROM customers WHERE geo_zone_id = ${id})`).length > 0;
         if (used) return 409; // in use: deactivate instead, history stays intact
         const [l] = await tx`DELETE FROM lookup_values WHERE id = ${id} RETURNING list, name`;
         if (l) await audit(tx, s, 'lookup.delete', `${l.list}: ${l.name}`);
@@ -408,13 +536,13 @@ export default async function settingsRoutes(app: FastifyInstance) {
           organization: { show_avatar: t.show_customer_avatar as boolean },
           mine: { show_avatar: mine },
           effective: { show_avatar: mine ?? (t.show_customer_avatar as boolean) },
-          can_edit_organization: hasRole(req.session, 'admin'),
+          can_edit_organization: can(req.session, 'settings.manage'),
         };
       });
     });
 
     r.put('/settings/customers/organization', async (req, reply) => {
-      if (!hasRole(req.session, 'admin')) return forbid(reply);
+      if (!can(req.session, 'settings.manage')) return forbid(reply);
       const b = z.object({ show_avatar: z.boolean() }).parse(req.body);
       const s = req.session;
       await withTenant(s.tenantId, async (tx) => {
@@ -426,72 +554,149 @@ export default async function settingsRoutes(app: FastifyInstance) {
 
     // Any user: null = follow the organisation default
     r.put('/me/preferences', async (req) => {
-      const b = z.object({ show_customer_avatar: z.boolean().nullable() }).parse(req.body);
+      const b = z.object({
+        show_customer_avatar: z.boolean().nullable().optional(),
+        customers_view: z.enum(CUSTOMER_VIEWS).nullable().optional(),
+        customers_filters: z.array(z.enum(FILTER_KEYS as [string, ...string[]])).max(40).nullable().optional(),
+        tree_filters: z.array(z.enum(FILTER_KEYS as [string, ...string[]])).max(40).nullable().optional(),
+        stores_filters: z.array(z.enum(FILTER_KEYS as [string, ...string[]])).max(40).nullable().optional(),
+      }).parse(req.body);
       const { tenantId, userId } = req.session;
-      await withTenant(tenantId, (tx) => b.show_customer_avatar === null
-        ? tx`UPDATE memberships SET prefs = prefs - 'show_customer_avatar' WHERE tenant_id = ${tenantId} AND user_id = ${userId}`
-        : tx`UPDATE memberships SET prefs = prefs || ${tx.json({ show_customer_avatar: b.show_customer_avatar })} WHERE tenant_id = ${tenantId} AND user_id = ${userId}`);
+      const set: Record<string, unknown> = {};
+      const unset: string[] = [];
+      for (const k of ['show_customer_avatar', 'customers_view', 'customers_filters', 'tree_filters', 'stores_filters'] as const) {
+        if (b[k] === null) unset.push(k);
+        else if (b[k] !== undefined) set[k] = b[k];
+      }
+      await withTenant(tenantId, (tx) => tx`
+        UPDATE memberships SET prefs = (prefs - ${unset}::text[]) || ${tx.json(set as never)}
+        WHERE tenant_id = ${tenantId} AND user_id = ${userId}`);
       return { ok: true };
     });
 
-    // ---------- Integrations: API keys ----------
-    r.get('/settings/api-keys', async (req, reply) => {
-      if (!hasRole(req.session, 'admin')) return forbid(reply);
-      const T = req.session.tenantId;
-      return withTenant(T, (tx) => tx`
-        SELECT k.id, k.name, k.prefix, k.scope, k.created_at, k.last_used_at, k.requests, k.revoked_at, u.full_name AS created_by_name
-        FROM api_keys k LEFT JOIN users u ON u.id = k.created_by
-        WHERE k.tenant_id = ${T} ORDER BY k.revoked_at NULLS FIRST, k.created_at DESC`);
+    // ---------- Index pages: default views (organisation → role → user) ----------
+    r.get('/settings/indexes', async (req) => {
+      const { tenantId, userId, role } = req.session;
+      return withTenant(tenantId, async (tx) => {
+        const [t] = await tx`SELECT index_defaults FROM tenants WHERE id = ${tenantId}`;
+        const [m] = await tx`SELECT prefs FROM memberships WHERE tenant_id = ${tenantId} AND user_id = ${userId}`;
+        const cv = (t.index_defaults?.customers_view ?? {}) as { org?: string; roles?: Record<string, string> };
+        const org = cv.org ?? 'list';
+        const roles = cv.roles ?? {};
+        const mine = (m?.prefs?.customers_view ?? null) as string | null;
+        return {
+          customers_view: {
+            organization: org, roles, mine, my_role: role,
+            effective: mine ?? roles[role] ?? org,
+            source: mine ? 'user' : roles[role] ? 'role' : 'organization',
+          },
+          // Visible filters per index: organisation / per role / mine (null = follow) + what applies to me
+          filters: Object.fromEntries(INDEXES.map((ix) => {
+            const cfg = (t.index_defaults?.[`${ix}_filters`] ?? {}) as { org?: string[]; roles?: Record<string, string[]> };
+            return [ix, {
+              available: INDEX_FILTERS[ix], defaults: DEFAULT_VISIBLE[ix],
+              organization: cfg.org ?? null, roles: cfg.roles ?? {}, mine: (m?.prefs?.[`${ix}_filters`] ?? null) as string[] | null,
+              effective: effectiveFilters(ix, t.index_defaults, m?.prefs ?? null, role),
+            }];
+          })),
+          can_edit_organization: can(req.session, 'settings.manage'),
+        };
+      });
     });
 
-    r.post('/settings/api-keys', async (req, reply) => {
-      if (!hasRole(req.session, 'admin')) return forbid(reply);
-      const b = z.object({ name: z.string().trim().min(2).max(80), scope: z.enum(['read', 'write']) }).parse(req.body);
+    r.put('/settings/indexes/organization', async (req, reply) => {
+      if (!can(req.session, 'settings.manage')) return forbid(reply);
+      const roleKeyRe = /^[a-z][a-z0-9_]{1,39}$/;
+      const filterList = z.array(z.enum(FILTER_KEYS as [string, ...string[]])).max(40);
+      // Each sent key replaces that whole setting (org default + per-role overrides); org: null = built-in default
+      const filtersCfg = z.object({ org: filterList.nullable(), roles: z.record(z.string().regex(roleKeyRe), filterList).default({}) })
+        .transform((c) => (c.org === null ? { roles: c.roles } : c));
+      const b = z.object({
+        customers_view: z.object({
+          org: z.enum(CUSTOMER_VIEWS),
+          roles: z.record(z.string().regex(roleKeyRe), z.enum(CUSTOMER_VIEWS)).default({}),
+        }).optional(),
+        customers_filters: filtersCfg.optional(),
+        tree_filters: filtersCfg.optional(),
+        stores_filters: filtersCfg.optional(),
+      }).parse(req.body);
       const s = req.session;
-      const prefix = randomBytes(6).toString('hex');
-      const secret = randomBytes(24).toString('base64url');
-      const row = await withTenant(s.tenantId, async (tx) => {
-        const [k] = await tx`
-          INSERT INTO api_keys (tenant_id, name, prefix, secret_hash, scope, created_by)
-          VALUES (${s.tenantId}, ${b.name}, ${prefix}, ${sha256(secret)}, ${b.scope}, ${s.userId}) RETURNING id`;
-        await audit(tx, s, 'apikey.create', b.name, { scope: b.scope, prefix });
-        return k;
+      await withTenant(s.tenantId, async (tx) => {
+        await tx`UPDATE tenants SET index_defaults = index_defaults || ${tx.json(b as never)}, updated_at = now() WHERE id = ${s.tenantId}`;
+        await audit(tx, s, 'indexes.update', null, b);
       });
-      // The full key is returned only once; only its hash is stored
-      return reply.code(201).send({ id: row.id, key: `sos_${prefix}_${secret}`, prefix, scope: b.scope });
-    });
-
-    r.delete('/settings/api-keys/:id', async (req, reply) => {
-      if (!hasRole(req.session, 'admin')) return forbid(reply);
-      const { id } = idParam.parse(req.params);
-      const s = req.session;
-      const k = await withTenant(s.tenantId, async (tx) => {
-        const [x] = await tx`UPDATE api_keys SET revoked_at = now() WHERE id = ${id} AND revoked_at IS NULL RETURNING name, prefix`;
-        if (x) await audit(tx, s, 'apikey.revoke', x.name, { prefix: x.prefix });
-        return x;
-      });
-      if (!k) return reply.code(404).send({ error: 'not_found' });
-      forgetApiKey(k.prefix); // stops working immediately
       return { ok: true };
     });
 
-    // ---------- Audit log ----------
+    // ---------- Audit log: filters, numbered pages, facets, CSV export ----------
+    const auditQuery = z.object({
+      q: z.string().trim().max(100).optional(),
+      actor: z.union([z.literal('api'), z.string().uuid()]).optional(),   // 'api' = changes made through API keys
+      category: z.string().trim().regex(/^[a-z_]{2,30}$/).optional(),      // first part of the action, e.g. user, apikey, api
+      action: z.string().trim().regex(/^[a-z_.]{2,60}$/).optional(),
+      from: z.coerce.date().optional(),
+      to: z.coerce.date().optional(),
+      page: z.coerce.number().int().min(1).max(100000).default(1),
+      page_size: z.coerce.number().int().refine((n) => [25, 50, 100].includes(n)).default(25),
+    });
+    type AuditQ = z.infer<typeof auditQuery>;
+    const auditWhere = (tx: Tx, T: string, q: AuditQ) => tx`
+      a.tenant_id = ${T}
+      ${q.actor === 'api' ? tx`AND a.actor_id IS NULL` : q.actor ? tx`AND a.actor_id = ${q.actor}` : tx``}
+      ${q.category ? tx`AND split_part(a.action, '.', 1) = ${q.category}` : tx``}
+      ${q.action ? tx`AND a.action = ${q.action}` : tx``}
+      ${q.from ? tx`AND a.created_at >= ${q.from}` : tx``}
+      ${q.to ? tx`AND a.created_at < ${new Date(q.to.getTime() + 86_400_000)}` : tx``}
+      ${q.q ? tx`AND (a.entity ILIKE ${'%' + q.q.replace(/[%_\\]/g, '\\$&') + '%'} OR a.action ILIKE ${'%' + q.q.replace(/[%_\\]/g, '\\$&') + '%'}
+                    OR a.details::text ILIKE ${'%' + q.q.replace(/[%_\\]/g, '\\$&') + '%'})` : tx``}`;
+
     r.get('/settings/audit', async (req, reply) => {
-      if (!hasRole(req.session, 'admin')) return forbid(reply);
-      const q = z.object({ cursor: z.string().optional() }).parse(req.query);
-      const cur = decodeCursor<[string, string]>(q.cursor);
+      if (!can(req.session, 'audit.view')) return forbid(reply);
+      const q = auditQuery.parse(req.query);
       const T = req.session.tenantId;
       return withTenant(T, async (tx) => {
-        const rows = await tx`
-          SELECT a.id, a.action, a.entity, a.details, a.created_at, u.full_name AS actor_name
+        const [{ total }] = await tx`SELECT count(*)::int AS total FROM audit_log a WHERE ${auditWhere(tx, T, q)}`;
+        const items = await tx`
+          SELECT a.id, a.action, a.entity, a.details, a.created_at, a.actor_id, u.full_name AS actor_name, u.email AS actor_email
           FROM audit_log a LEFT JOIN users u ON u.id = a.actor_id
-          WHERE a.tenant_id = ${T} ${cur ? tx`AND (a.created_at, a.id) < (${cur[0]}::timestamptz, ${cur[1]}::uuid)` : tx``}
-          ORDER BY a.created_at DESC, a.id DESC LIMIT 51`;
-        const more = rows.length > 50;
-        const items = more ? rows.slice(0, 50) : rows;
-        const l = items.at(-1);
-        return { items, nextCursor: more && l ? encodeCursor([l.created_at, l.id]) : null };
+          WHERE ${auditWhere(tx, T, q)}
+          ORDER BY a.created_at DESC, a.id DESC
+          LIMIT ${q.page_size} OFFSET ${(q.page - 1) * q.page_size}`;
+        return { items, total, page: q.page, page_size: q.page_size, pages: Math.max(1, Math.ceil(total / q.page_size)) };
       });
+    });
+
+    // Values for the filter menus (with counts)
+    r.get('/settings/audit/facets', async (req, reply) => {
+      if (!can(req.session, 'audit.view')) return forbid(reply);
+      const T = req.session.tenantId;
+      return withTenant(T, async (tx) => ({
+        actors: await tx`
+          SELECT a.actor_id AS id, coalesce(u.full_name, 'API') AS name, count(*)::int AS n
+          FROM audit_log a LEFT JOIN users u ON u.id = a.actor_id
+          WHERE a.tenant_id = ${T} GROUP BY 1, 2 ORDER BY n DESC LIMIT 100`,
+        categories: await tx`
+          SELECT split_part(action, '.', 1) AS key, count(*)::int AS n FROM audit_log
+          WHERE tenant_id = ${T} GROUP BY 1 ORDER BY n DESC`,
+        actions: await tx`
+          SELECT action AS key, count(*)::int AS n FROM audit_log WHERE tenant_id = ${T} GROUP BY 1 ORDER BY 1`,
+      }));
+    });
+
+    // CSV of the filtered rows (max 10.000), for Excel
+    r.get('/settings/audit/export.csv', async (req, reply) => {
+      if (!can(req.session, 'audit.view')) return forbid(reply);
+      const q = auditQuery.parse(req.query);
+      const T = req.session.tenantId;
+      const rows = await withTenant(T, (tx) => tx`
+        SELECT a.created_at, coalesce(u.full_name, 'API') AS actor, u.email, a.action, a.entity, a.details
+        FROM audit_log a LEFT JOIN users u ON u.id = a.actor_id
+        WHERE ${auditWhere(tx, T, q)} ORDER BY a.created_at DESC, a.id DESC LIMIT 10000`);
+      const cell = (v: unknown) => { const x = v == null ? '' : typeof v === 'string' ? v : v instanceof Date ? v.toISOString() : JSON.stringify(v); return /[";\n]/.test(x) ? `"${x.replace(/"/g, '""')}"` : x; };
+      const csv = ['date;actor;email;action;entity;details', ...rows.map((r) => [r.created_at, r.actor, r.email, r.action, r.entity, r.details].map(cell).join(';'))].join('\r\n');
+      await withTenant(T, (tx) => audit(tx, req.session, 'audit.export', null, { rows: rows.length }));
+      reply.header('Content-Disposition', `attachment; filename="audit-${new Date().toISOString().slice(0, 10)}.csv"`);
+      return reply.type('text/csv; charset=utf-8').send('\uFEFF' + csv); // BOM: Greek opens correctly in Excel
     });
   });
 }

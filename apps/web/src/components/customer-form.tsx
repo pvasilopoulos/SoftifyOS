@@ -7,8 +7,7 @@ import { AlertTriangle, ArrowLeft, Building, Check, CircleCheck, Loader2, X } fr
 import { api, ApiError } from '@/lib/api';
 import { Link, useRouter } from '@/i18n/navigation';
 import { IconButton, Segmented } from './ui';
-import { LookupSelect, PrefecturesDatalist } from './lookup-select';
-import { PREFECTURES_LIST_ID } from '@/lib/greece';
+import { LookupSelect, NameSelect } from './lookup-select';
 
 export type CustomerFormValues = {
   kind: 'group' | 'company'; code: string; geo_zone_id: string | null; name: string; trade_name: string; vat: string; tax_office: string; gemi: string; activity: string;
@@ -38,9 +37,6 @@ export function isValidAfm(v: string) {
 }
 
 const input = 'w-full min-w-0 rounded-xl border border-border bg-surface-2 px-3 py-2.5 outline-none transition focus:border-primary aria-[invalid=true]:border-danger';
-const TERMS = ['cash', '15d', '30d', '60d', '90d', 'card', 'transfer'] as const;
-const SOURCES = ['referral', 'website', 'exhibition', 'cold', 'partner', 'other'] as const;
-const CATEGORIES = ['strategic', 'key', 'regular', 'small'] as const;
 
 function useDebounced<T>(v: T, ms = 350) {
   const [d, setD] = useState(v);
@@ -187,7 +183,7 @@ export function CustomerForm({ customerId, initial }: { customerId?: string; ini
         <Field label={t('street')} wide><input className={input} value={v.address_street} onChange={(e) => set('address_street', e.target.value)} /></Field>
         <Field label={t('city')}><input className={input} value={v.address_city} onChange={(e) => set('address_city', e.target.value)} /></Field>
         <Field label={t('postal')}><input className={`${input} tabular`} inputMode="numeric" value={v.address_postal} onChange={(e) => set('address_postal', e.target.value)} /></Field>
-        <Field label={t('prefecture')}><input className={input} list={PREFECTURES_LIST_ID} value={v.address_region} onChange={(e) => set('address_region', e.target.value)} /></Field>
+        <Field label={t('prefecture')}><NameSelect list="prefecture" className={input} value={v.address_region} onChange={(x) => set('address_region', x)} /></Field>
         <Field label={t('geoZone')}><LookupSelect list="geo_zone" className={input} value={v.geo_zone_id} onChange={(id) => set('geo_zone_id', id)} /></Field>
         <Field label={t('country')}>
           <select className={input} value={v.address_country} onChange={(e) => set('address_country', e.target.value)}>
@@ -210,10 +206,7 @@ export function CustomerForm({ customerId, initial }: { customerId?: string; ini
 
       <Section title={t('sTerms')}>
         <Field label={t('paymentTerms')}>
-          <select className={input} value={v.payment_terms} onChange={(e) => set('payment_terms', e.target.value)}>
-            <option value="">—</option>
-            {TERMS.map((x) => <option key={x} value={x}>{t(`terms.${x}`)}</option>)}
-          </select>
+          <NameSelect list="payment_terms" className={input} value={v.payment_terms} onChange={(x) => set('payment_terms', x)} />
         </Field>
         <Field label={t('discount')}><input type="number" min={0} max={100} step="0.5" className={`${input} tabular`} value={v.discount} onChange={(e) => set('discount', e.target.value)} /></Field>
         <Field label={t('creditLimit')}><input type="number" min={0} step="100" className={`${input} tabular`} value={v.credit_limit} onChange={(e) => set('credit_limit', e.target.value)} /></Field>
@@ -233,14 +226,10 @@ export function CustomerForm({ customerId, initial }: { customerId?: string; ini
           </select>
         </Field>
         <Field label={t('category')}>
-          <input className={input} list="customer-categories" value={v.category} onChange={(e) => set('category', e.target.value)} />
-          <datalist id="customer-categories">{CATEGORIES.map((c) => <option key={c} value={t(`categories.${c}`)} />)}</datalist>
+          <NameSelect list="customer_category" className={input} value={v.category} onChange={(x) => set('category', x)} />
         </Field>
         <Field label={t('source')}>
-          <select className={input} value={v.source} onChange={(e) => set('source', e.target.value)}>
-            <option value="">—</option>
-            {SOURCES.map((x) => <option key={x} value={x}>{t(`sources.${x}`)}</option>)}
-          </select>
+          <NameSelect list="customer_source" className={input} value={v.source} onChange={(x) => set('source', x)} />
         </Field>
         <Field label={t('tags')} wide hint={<span className="text-muted">{t('tagsHint')}</span>}>
           <div className="flex min-h-[46px] flex-wrap items-center gap-1.5 rounded-xl border border-border bg-surface-2 px-2 py-1.5 focus-within:border-primary">
@@ -257,7 +246,6 @@ export function CustomerForm({ customerId, initial }: { customerId?: string; ini
         </Field>
       </Section>
 
-      <PrefecturesDatalist />
       <Section title={t('sNotes')}>
         <Field label={t('notes')} wide><textarea rows={4} className={input} value={v.notes} onChange={(e) => set('notes', e.target.value)} /></Field>
       </Section>
