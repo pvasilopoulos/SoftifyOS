@@ -9,7 +9,7 @@ import { api, type Customer, type Page } from '@/lib/api';
 import { money } from '@/lib/format';
 import { Link } from '@/i18n/navigation';
 import { EntityTile, PageHeader, Segmented, Skeleton, StatusBadge } from '@/components/ui';
-import { CustomerTreeView, StoresView } from '@/components/customer-views';
+import { CustomerTreeView, ExpandToggle, StoresView, type ExpandMode } from '@/components/customer-views';
 
 type View = 'list' | 'tree' | 'stores';
 
@@ -38,6 +38,7 @@ export default function CustomersPage() {
   const [mine, setMine] = usePersisted('cust.mine', false);
   const [archived, setArchived] = usePersisted('cust.archived', false);
   const [view, setView] = usePersisted<View>('cust.view', 'list');
+  const [expand, setExpand] = useState<ExpandMode>('none');
   const [q, setQ] = useState('');
   const dq = useDebounced(q.trim());
 
@@ -109,6 +110,7 @@ export default function CustomersPage() {
             ]} />
           </div>
           <div className="no-scrollbar mb-4 flex gap-2 overflow-x-auto">
+            {view === 'tree' && <><ExpandToggle mode={expand} onChange={setExpand} /><span className="mx-1 w-px shrink-0 bg-border" /></>}
             <button onClick={() => setSort('name')} className={chip(sort === 'name')}><ArrowDownAZ size={15} /> {t('sortName')}</button>
             <button onClick={() => setSort('recent')} className={chip(sort === 'recent')}><Clock size={15} /> {t('sortRecent')}</button>
             <button onClick={() => setSort('value')} className={chip(sort === 'value')}><Euro size={15} /> {t('sortValue')}</button>
@@ -119,7 +121,7 @@ export default function CustomersPage() {
         </>
       )}
 
-      {view === 'tree' ? <CustomerTreeView filters={{ status, sort, mine, archived, q: dq }} />
+      {view === 'tree' ? <CustomerTreeView filters={{ status, sort, mine, archived, q: dq }} mode={expand} />
       : view === 'stores' ? <StoresView q={dq} mine={mine} />
       : query.isLoading ? (
         <div className="space-y-3">{Array.from({ length: 6 }).map((_, i) => <Skeleton key={i} className="h-[84px]" />)}</div>

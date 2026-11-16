@@ -27,12 +27,30 @@ const offerHref = (customerId: string, customerName: string, branchId: string) =
   `/offers/new?customer=${customerId}&name=${encodeURIComponent(customerName)}&branch=${branchId}`;
 
 // ============================== Customers & stores ==============================
-export function CustomerTreeView({ filters }: { filters: ListFilters }) {
+export type ExpandMode = 'all' | 'none';
+
+/** Expand / collapse all: two labelled buttons on desktop, one toggling icon on mobile. */
+export function ExpandToggle({ mode, onChange }: { mode: ExpandMode; onChange: (m: ExpandMode) => void }) {
+  const t = useTranslations('customers');
+  const btn = 'flex shrink-0 items-center gap-1.5 rounded-full border border-border bg-surface text-sm font-medium text-muted transition hover:text-text';
+  const next = mode === 'all' ? 'none' : 'all';
+  return (
+    <>
+      <button onClick={() => onChange(next)} aria-label={next === 'all' ? t('expandAll') : t('collapseAll')} title={next === 'all' ? t('expandAll') : t('collapseAll')}
+        className={clsx(btn, 'grid h-[34px] w-[34px] place-items-center sm:hidden', mode === 'all' && 'border-primary bg-primary-soft text-primary')}>
+        {mode === 'all' ? <ChevronsDownUp size={17} /> : <ChevronsUpDown size={17} />}
+      </button>
+      <button onClick={() => onChange('all')} className={clsx(btn, 'hidden px-3 py-1.5 sm:flex')}><ChevronsUpDown size={15} /> {t('expandAll')}</button>
+      <button onClick={() => onChange('none')} className={clsx(btn, 'hidden px-3 py-1.5 sm:flex')}><ChevronsDownUp size={15} /> {t('collapseAll')}</button>
+    </>
+  );
+}
+
+export function CustomerTreeView({ filters, mode }: { filters: ListFilters; mode: ExpandMode }) {
   const t = useTranslations('customers');
   const tc = useTranslations('customer');
   const locale = useLocale();
   // Expansion = default for everyone ("all" / "none") + per-row exceptions, so "expand all" also covers pages loaded later
-  const [mode, setMode] = useState<'all' | 'none'>('none');
   const [toggled, setToggled] = useState<Set<string>>(new Set());
   const [openSpaces, setOpenSpaces] = useState<Set<string>>(new Set());
   const [addFor, setAddFor] = useState<string | null>(null);
@@ -71,14 +89,6 @@ export function CustomerTreeView({ filters }: { filters: ListFilters }) {
 
   return (
     <div>
-      <div className="mb-3 flex gap-2">
-        <button onClick={() => setMode('all')} className="flex items-center gap-1.5 rounded-full border border-border bg-surface px-3 py-1.5 text-sm font-medium text-muted hover:text-text">
-          <ChevronsUpDown size={15} /> {t('expandAll')}
-        </button>
-        <button onClick={() => setMode('none')} className="flex items-center gap-1.5 rounded-full border border-border bg-surface px-3 py-1.5 text-sm font-medium text-muted hover:text-text">
-          <ChevronsDownUp size={15} /> {t('collapseAll')}
-        </button>
-      </div>
 
       {query.isLoading ? (
         <div className="space-y-3">{Array.from({ length: 6 }).map((_, i) => <Skeleton key={i} className="h-[76px]" />)}</div>
