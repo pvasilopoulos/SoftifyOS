@@ -18,4 +18,15 @@ export const env = {
   vapidPublic: process.env.VAPID_PUBLIC_KEY ?? '',
   vapidPrivate: process.env.VAPID_PRIVATE_KEY ?? '',
   vapidSubject: process.env.VAPID_SUBJECT ?? 'mailto:admin@example.com',
+  // Public base URL of the app (used in emails and customer links)
+  appUrl: process.env.APP_URL ?? 'http://localhost:3000',
+  smtp: {
+    host: process.env.SMTP_HOST ?? '',
+    port: Number(process.env.SMTP_PORT ?? 587),
+    secure: process.env.SMTP_SECURE === 'true',
+    user: process.env.SMTP_USER ?? '',
+    pass: process.env.SMTP_PASS ?? '',
+    from: process.env.SMTP_FROM ?? 'SoftifyOS <no-reply@localhost>',
+  },
+  get smtpConfigured() { return Boolean(this.smtp.host); },
 };

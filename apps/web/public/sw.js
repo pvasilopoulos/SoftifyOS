@@ -1,5 +1,5 @@
 /* SoftifyOS service worker: app-shell caching + Web Push */
-const VERSION = 'v1';
+const VERSION = 'v2';
 const STATIC_CACHE = `softify-static-${VERSION}`;
 const PAGE_CACHE = `softify-pages-${VERSION}`;
 

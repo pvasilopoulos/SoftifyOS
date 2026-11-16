@@ -2,10 +2,27 @@
 // Run one or more instances; FOR UPDATE SKIP LOCKED guarantees each job is taken by exactly one worker.
 // Connects as the table owner (no RLS) because it works across tenants.
 import webpush from 'web-push';
+import nodemailer from 'nodemailer';
 import { env } from './env.js';
 import { sql } from './db.js';
 import { publish } from './realtime.js';
-import type { JobMap, NotifyJob } from './jobs.js';
+import type { EmailJob, JobMap, NotifyJob } from './jobs.js';
+
+// SMTP (e.g. the Plesk mail server on localhost). Without SMTP_HOST, emails are logged instead of sent.
+const mailer = env.smtpConfigured
+  ? nodemailer.createTransport({
+      host: env.smtp.host, port: env.smtp.port, secure: env.smtp.secure,
+      auth: env.smtp.user ? { user: env.smtp.user, pass: env.smtp.pass } : undefined,
+    })
+  : null;
+
+async function handleEmail(p: EmailJob) {
+  if (!mailer) {
+    console.log(`[email not configured] to=${p.to} subject="${p.subject}"\n${p.text}`);
+    return;
+  }
+  await mailer.sendMail({ from: env.smtp.from, to: p.to, subject: p.subject, text: p.text, html: p.html });
+}
 
 const BATCH = 50;
 const MAX_ATTEMPTS = 8;
@@ -50,6 +67,7 @@ async function processBatch(): Promise<number> {
   await Promise.all(jobs.map(async (j) => {
     try {
       if (j.kind === 'notify') await handleNotify(j.payload as NotifyJob);
+      else if (j.kind === 'email') await handleEmail(j.payload as EmailJob);
       await sql`DELETE FROM jobs WHERE id = ${j.id}`;
     } catch (e) {
       const msg = (e as Error).message;

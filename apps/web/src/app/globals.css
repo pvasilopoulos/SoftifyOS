@@ -95,3 +95,9 @@ body {
   animation: shimmer 1.2s infinite;
 }
 .dark .skeleton::after { background: linear-gradient(90deg, transparent, rgb(255 255 255 / 0.06), transparent); }
+
+@media print {
+  @page { size: A4; margin: 14mm; }
+  html, body { background: #fff !important; }
+  .offer-doc { color: #17142b; }
+}

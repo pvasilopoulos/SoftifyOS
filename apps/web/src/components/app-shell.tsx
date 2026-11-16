@@ -1,9 +1,9 @@
 'use client';
 import clsx from 'clsx';
 import { useQuery } from '@tanstack/react-query';
-import { useTranslations } from 'next-intl';
+import { useLocale, useTranslations } from 'next-intl';
 import {
-  Bell, Building2, CalendarDays, ChartNoAxesColumn, FileText, Home, LayoutGrid, ListChecks,
+  Bell, LogOut, Building2, CalendarDays, ChartNoAxesColumn, FileText, Home, LayoutGrid, ListChecks,
   MapPin, MoreHorizontal, Package, Settings, Sparkles, Users, FolderOpen,
 } from 'lucide-react';
 import type { ReactNode } from 'react';
@@ -11,6 +11,7 @@ import { Link, usePathname } from '@/i18n/navigation';
 import { api, type Me } from '@/lib/api';
 import { Avatar } from './ui';
 import { useLive } from './providers';
+import { QuickSettings } from './quick-settings';
 
 export function Logo({ dark = false }: { dark?: boolean }) {
   return (
@@ -52,6 +53,9 @@ export function useMe() {
 
 export function AppShell({ children }: { children: ReactNode }) {
   const t = useTranslations('nav');
+  const tm = useTranslations('more');
+  const locale = useLocale();
+  const logout = async () => { await api('/auth/logout', { method: 'POST' }).catch(() => {}); location.href = `/${locale}/login`; };
   const pathname = usePathname();
   const { data: me } = useMe();
   const live = useLive();
@@ -76,24 +80,36 @@ export function AppShell({ children }: { children: ReactNode }) {
             </Link>
           ))}
         </nav>
-        <Link href="/more" className="mt-auto flex items-center gap-3 rounded-xl bg-white/5 p-3">
-          <Avatar name={me?.user.full_name} size={38} />
-          <div className="min-w-0 flex-1">
-            <div className="truncate text-sm font-semibold">{me?.user.full_name ?? '…'}</div>
-            <div className="truncate text-xs text-white/60">{me?.tenant?.title ?? me?.tenant?.name}</div>
-          </div>
-          <span title="Live" className={clsx('h-2 w-2 rounded-full', live ? 'bg-emerald-400' : 'bg-white/30')} />
-        </Link>
+        <div className="mt-auto mb-3"><QuickSettings variant="dark" expanded /></div>
+        <div className="flex items-center gap-1 rounded-xl bg-white/5 p-2">
+          <Link href="/more" className="flex min-w-0 flex-1 items-center gap-3 rounded-lg p-1 hover:bg-white/5">
+            <span className="relative shrink-0">
+              <Avatar name={me?.user.full_name} size={38} />
+              <span title="Live" className={clsx('absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full ring-2 ring-sidebar', live ? 'bg-emerald-400' : 'bg-white/30')} />
+            </span>
+            <div className="min-w-0 flex-1">
+              <div className="text-sm font-semibold leading-tight break-words">{me?.user.full_name ?? '…'}</div>
+              <div className="mt-0.5 text-xs leading-tight text-white/60 break-words">{me?.tenant?.title ?? me?.tenant?.name}</div>
+            </div>
+          </Link>
+          <button onClick={logout} title={tm('logout')} aria-label={tm('logout')}
+            className="grid h-9 w-9 shrink-0 place-items-center rounded-lg text-white/70 transition hover:bg-white/10 hover:text-red-300">
+            <LogOut size={18} />
+          </button>
+        </div>
       </aside>
 
       <div className="min-w-0 flex-1">
         {/* Mobile top bar */}
         <div className="flex items-center justify-between px-4 pt-3 safe-top lg:hidden">
           <Logo />
-          <Link href="/more" aria-label="Notifications" className="relative grid h-10 w-10 place-items-center rounded-full">
-            <Bell size={22} />
-            {!!notif?.unread && <span className="absolute right-2 top-2 h-2.5 w-2.5 rounded-full bg-danger ring-2 ring-bg" />}
-          </Link>
+          <div className="flex items-center gap-0.5">
+            <QuickSettings />
+            <Link href="/more" aria-label="Notifications" className="relative grid h-10 w-10 place-items-center rounded-full">
+              <Bell size={22} />
+              {!!notif?.unread && <span className="absolute right-2 top-2 h-2.5 w-2.5 rounded-full bg-danger ring-2 ring-bg" />}
+            </Link>
+          </div>
         </div>
         <main className="mx-auto w-full max-w-6xl px-4 pb-28 pt-2 lg:px-8 lg:pb-10 lg:pt-8">{children}</main>
       </div>

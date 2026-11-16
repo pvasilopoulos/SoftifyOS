@@ -5,6 +5,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useLocale, useTranslations } from 'next-intl';
 import { Bell, BellOff, Download, Globe, LogOut, Moon, Send, Sun, Monitor } from 'lucide-react';
 import { api } from '@/lib/api';
+import { applyTheme as setThemeGlobal, getTheme, type Theme } from '@/lib/theme';
 import { relative } from '@/lib/format';
 import { disablePush, enablePush, getPushState, type PushState } from '@/lib/push';
 import { Link, usePathname } from '@/i18n/navigation';
@@ -29,10 +30,12 @@ export default function MorePage() {
 
   useEffect(() => {
     getPushState().then(setPush).catch(() => setPush('unsupported'));
-    try { setTheme((localStorage.getItem('theme') as typeof theme) ?? 'system'); } catch {}
+    setTheme(getTheme());
+    const onTheme = (e: Event) => setTheme((e as CustomEvent<Theme>).detail);
     const onPrompt = (e: Event) => { e.preventDefault(); setInstallEvt(e as BeforeInstallPrompt); };
+    window.addEventListener('themechange', onTheme);
     window.addEventListener('beforeinstallprompt', onPrompt);
-    return () => window.removeEventListener('beforeinstallprompt', onPrompt);
+    return () => { window.removeEventListener('themechange', onTheme); window.removeEventListener('beforeinstallprompt', onPrompt); };
   }, []);
 
   const notif = useQuery({ queryKey: ['notifications'], queryFn: () => api<Notif>('/notifications') });
@@ -41,12 +44,7 @@ export default function MorePage() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ['notifications'] }),
   });
 
-  function applyTheme(v: typeof theme) {
-    setTheme(v);
-    try { localStorage.setItem('theme', v); } catch {}
-    const dark = v === 'dark' || (v === 'system' && matchMedia('(prefers-color-scheme: dark)').matches);
-    document.documentElement.classList.toggle('dark', dark);
-  }
+  const applyTheme = (v: Theme) => { setTheme(v); setThemeGlobal(v); };
 
   async function onEnable() {
     setBusy(true);

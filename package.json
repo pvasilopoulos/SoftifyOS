@@ -6,6 +6,7 @@
     "apps/*"
   ],
   "scripts": {
+    "dev": "node scripts/dev.mjs",
     "dev:db": "npm run db:dev -w @softify/api",
     "dev:api": "npm run dev -w @softify/api",
     "dev:worker": "npm run dev:worker -w @softify/api",
@@ -14,13 +15,19 @@
     "db:seed": "npm run db:seed -w @softify/api",
     "vapid": "npm run vapid -w @softify/api",
     "build": "npm run build -w @softify/api && npm run build -w @softify/web",
-    "typecheck": "npm run typecheck --workspaces"
+    "typecheck": "npm run typecheck --workspaces",
+    "tenant:create": "npm run tenant:create -w @softify/api --",
+    "release": "node deploy/make-release.mjs"
   },
   "engines": {
-    "node": ">=22"
+    "node": ">=24"
   },
   "allowScripts": {
     "esbuild@0.28.2": true,
-    "@embedded-postgres/windows-x64@17.5.0-beta.15": true
+    "@embedded-postgres/windows-x64@17.5.0-beta.15": true,
+    "@embedded-postgres/linux-x64@17.5.0-beta.15": true
+  },
+  "overrides": {
+    "postcss": "^8.5.33"
   }
 }

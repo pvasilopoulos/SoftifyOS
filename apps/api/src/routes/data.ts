@@ -3,7 +3,6 @@ import { z } from 'zod';
 import { decodeCursor, encodeCursor, searchKey, withTenant } from '../db.js';
 import { hasRole, requireAuth } from '../auth.js';
 import { publish } from '../realtime.js';
-import { enqueue } from '../jobs.js';
 
 const limitSchema = z.coerce.number().int().min(1).max(100).default(30);
 
@@ -128,81 +127,17 @@ export default async function dataRoutes(app: FastifyInstance) {
     });
   });
 
-  // ---- Offers ----
-  app.get('/offers', async (req) => {
-    const q = z.object({
-      status: z.enum(['draft', 'in_progress', 'pending_approval', 'approved', 'sent', 'accepted', 'rejected']).optional(),
-      cursor: z.string().optional(),
-      limit: limitSchema,
-    }).parse(req.query);
-    const cur = decodeCursor<[string, string]>(q.cursor);
+  // Branches with their spaces (for pickers, e.g. new offer)
+  app.get('/customers/:id/branches', async (req) => {
+    const { id } = z.object({ id: z.string().uuid() }).parse(req.params);
     const T = req.session.tenantId;
-    return withTenant(T, async (tx) => {
-      const rows = await tx`
-        SELECT o.id, o.number, o.status, o.current_version, o.total_amount, o.valid_until, o.created_at,
-               c.name AS customer_name, b.name AS branch_name
-        FROM offers o
-        JOIN customers c ON c.id = o.customer_id
-        LEFT JOIN branches b ON b.id = o.branch_id
-        WHERE o.tenant_id = ${T}
-          ${q.status ? tx`AND o.status = ${q.status}` : tx``}
-          ${cur ? tx`AND (o.created_at, o.id) < (${cur[0]}::timestamptz, ${cur[1]}::uuid)` : tx``}
-        ORDER BY o.created_at DESC, o.id DESC
-        LIMIT ${q.limit + 1}`;
-      return page(rows, q.limit, (r) => [r.created_at, r.id]);
-    });
-  });
-
-  app.get('/offers/:id', async (req, reply) => {
-    const { id } = z.object({ id: z.string().uuid() }).parse(req.params);
-    return withTenant(req.session.tenantId, async (tx) => {
-      const [offer] = await tx`
-        SELECT o.*, c.name AS customer_name, b.name AS branch_name, co.name AS company_name, u.full_name AS owner_name
-        FROM offers o JOIN customers c ON c.id = o.customer_id
-        LEFT JOIN branches b ON b.id = o.branch_id
-        LEFT JOIN companies co ON co.id = o.company_id
-        LEFT JOIN users u ON u.id = o.owner_id
-        WHERE o.id = ${id}`;
-      if (!offer) return reply.code(404).send({ error: 'not_found' });
-      const approvals = await tx`
-        SELECT a.id, a.step, a.title, a.status, a.decided_at, u.full_name AS approver_name
-        FROM offer_approvals a LEFT JOIN users u ON u.id = a.approver_id
-        WHERE a.offer_id = ${id} ORDER BY a.step`;
-      return { offer, approvals };
-    });
-  });
-
-  // Approve the current pending step -> notifies the offer owner (live + push)
-  app.post('/offers/:id/approve', async (req, reply) => {
-    if (!hasRole(req.session, 'manager')) return reply.code(403).send({ error: 'forbidden' });
-    const { id } = z.object({ id: z.string().uuid() }).parse(req.params);
-    const { tenantId, userId } = req.session;
-    const result = await withTenant(tenantId, async (tx) => {
-      const [step] = await tx`
-        UPDATE offer_approvals SET status = 'approved', decided_at = now()
-        WHERE id = (SELECT id FROM offer_approvals WHERE offer_id = ${id} AND status = 'pending' ORDER BY step LIMIT 1 FOR UPDATE)
-        RETURNING step, title`;
-      if (!step) return null;
-      const [{ remaining }] = await tx`SELECT count(*)::int AS remaining FROM offer_approvals WHERE offer_id = ${id} AND status = 'pending'`;
-      const [offer] = await tx`
-        UPDATE offers SET status = ${remaining === 0 ? 'approved' : 'pending_approval'}, updated_at = now()
-        WHERE id = ${id} RETURNING id, number, owner_id, customer_id, status`;
-      await tx`INSERT INTO activities (tenant_id, customer_id, offer_id, actor_id, kind, title, body)
-               VALUES (${tenantId}, ${offer.customer_id}, ${id}, ${userId}, 'approval', 'Έγκριση προσφοράς', ${step.title + ' · ' + offer.number})`;
-      if (offer.owner_id) {
-        await enqueue('notify', {
-          tenantId,
-          userIds: [offer.owner_id],
-          title: `Έγκριση: ${offer.number}`,
-          body: remaining === 0 ? 'Η προσφορά εγκρίθηκε πλήρως' : `Εγκρίθηκε το βήμα: ${step.title}`,
-          url: `/offers/${id}`,
-        }, tx);
-      }
-      return offer;
-    });
-    if (!result) return reply.code(409).send({ error: 'nothing_to_approve' });
-    await publish({ tenantId, type: 'offer.updated', data: { id, status: result.status } });
-    return result;
+    return withTenant(T, (tx) => tx`
+      SELECT b.id, b.name, b.city,
+             coalesce(json_agg(json_build_object('id', s.id, 'name', s.name, 'kind', s.kind) ORDER BY s.name)
+                      FILTER (WHERE s.id IS NOT NULL), '[]') AS spaces
+      FROM branches b LEFT JOIN spaces s ON s.branch_id = b.id
+      WHERE b.tenant_id = ${T} AND b.customer_id = ${id}
+      GROUP BY b.id ORDER BY b.name LIMIT 200`);
   });
 
   // ---- Calendar ----

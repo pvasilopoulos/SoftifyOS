@@ -24,18 +24,28 @@ deploy/      PM2, nginx (Plesk), οδηγός εγκατάστασης
 
 ## Τοπική ανάπτυξη (Windows / macOS / Linux)
 
-Χρειάζεται μόνο Node.js 22+. Η PostgreSQL τρέχει τοπικά μέσω του `embedded-postgres`.
+Χρειάζεται μόνο Node.js 24+ (στον server: 26 LTS). Η PostgreSQL τρέχει τοπικά μέσω του `embedded-postgres`, χωρίς εγκατάσταση.
+
+**Κάθε μέρα:** μία εντολή σηκώνει βάση, migrations, API, worker και PWA. Με **Ctrl+C** σταματούν όλα.
+
+```bash
+npm run dev
+```
+
+Μετά άνοιξε το http://localhost:3000/el
+
+> **Windows PowerShell:** αν βγάλει *"running scripts is disabled on this system"*, γράψε `npm.cmd run dev` (ίδια εντολή, παρακάμπτει το μπλοκάρισμα χωρίς αλλαγή ρυθμίσεων ασφαλείας).
+
+**Πρώτη φορά μόνο:**
 
 ```bash
 npm install
 cp .env.example .env          # και συμπλήρωσε JWT_SECRET + VAPID (npm run vapid)
-npm run dev:db                # τερματικό 1: PostgreSQL στο localhost:5434
-npm run db:migrate
-npm run db:seed               # demo δεδομένα· SEED_SCALE=10 για ×10 όγκο
-npm run dev:api               # τερματικό 2: API στο :4000
-npm run dev:worker            # τερματικό 3: worker (push, υπενθυμίσεις)
-npm run dev:web               # τερματικό 4: PWA στο http://localhost:3000
+npm run dev                   # σηκώνει τη βάση και εφαρμόζει migrations
+npm run db:seed               # (σε 2ο τερματικό) demo δεδομένα · SEED_SCALE=10 για ×10 όγκο
 ```
+
+Μεμονωμένα, αν χρειαστεί: `npm run dev:db`, `dev:api`, `dev:worker`, `dev:web`.
 
 Demo login: `demo@softifyos.local`. Ο κωδικός ορίζεται από το `SEED_PASSWORD` (default στο [apps/api/scripts/seed.ts](apps/api/scripts/seed.ts)).
 

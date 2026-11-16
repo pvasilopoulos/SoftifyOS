@@ -66,6 +66,13 @@ export default function CustomerPage({ params }: { params: Promise<{ id: string 
         ))}
       </div>
 
+      {c && (
+        <Link href={`/offers/new?customer=${c.id}&name=${encodeURIComponent(c.name)}`}
+          className="flex items-center justify-center gap-2 rounded-2xl bg-primary py-3 font-semibold text-white shadow-lg shadow-primary/25">
+          <FileText size={18} /> {tc('newOffer')}
+        </Link>
+      )}
+
       <Tabs value={tab} onChange={setTab} options={[
         { value: 'overview', label: t('overview') }, { value: 'branches', label: t('branches') },
         { value: 'activity', label: t('activity') }, { value: 'contacts', label: t('contacts') },

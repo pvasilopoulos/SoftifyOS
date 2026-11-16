@@ -7,6 +7,7 @@ import { liveStats, startRealtime } from './realtime.js';
 import authRoutes from './routes/auth.js';
 import dataRoutes from './routes/data.js';
 import liveRoutes from './routes/live.js';
+import offerRoutes from './routes/offers.js';
 
 const app = Fastify({
   logger: { level: env.isProd ? 'info' : 'warn' },
@@ -32,6 +33,7 @@ await app.register(async (api) => {
   await api.register(authRoutes);
   await api.register(dataRoutes);
   await api.register(liveRoutes);
+  await api.register(offerRoutes);
 }, { prefix: '/api' });
 
 await startRealtime();

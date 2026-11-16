@@ -40,8 +40,12 @@ export default function OffersPage() {
   return (
     <div>
       <PageHeader title={t('title')} actions={
-        <button className="hidden items-center gap-1.5 rounded-full bg-primary px-4 py-2 text-sm font-semibold text-white lg:flex"><Plus size={18} /> {t('new')}</button>
+        <Link href="/offers/new" className="hidden items-center gap-1.5 rounded-full bg-primary px-4 py-2 text-sm font-semibold text-white lg:flex"><Plus size={18} /> {t('new')}</Link>
       } />
+      <Link href="/offers/new" aria-label={t('new')}
+        className="fixed bottom-24 right-5 z-30 flex items-center gap-2 rounded-full bg-primary px-5 py-3.5 font-semibold text-white shadow-xl shadow-primary/40 lg:hidden">
+        <Plus size={20} /> {t('new')}
+      </Link>
       <div className="mb-4">
         <Segmented value={filter} onChange={setFilter} options={[
           { value: 'all', label: t('all') }, { value: 'in_progress', label: t('inProgress') },

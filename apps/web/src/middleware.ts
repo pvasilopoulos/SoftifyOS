@@ -14,7 +14,9 @@ function preferredLocale(req: NextRequest) {
 export default function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
   const isLogin = /^\/((el|en)\/)?login\/?$/.test(pathname);
-  if (!req.cookies.has('sos_session') && !isLogin) {
+  // Customer offer link: public, the token in the URL is the access key
+  const isPublic = /^\/(el|en)\/p\/[A-Za-z0-9_-]+\/?$/.test(pathname);
+  if (!req.cookies.has('sos_session') && !isLogin && !isPublic) {
     const url = req.nextUrl.clone();
     url.pathname = `/${preferredLocale(req)}/login`;
     url.search = '';

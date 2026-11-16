@@ -1,6 +1,7 @@
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import { SignJWT, jwtVerify } from 'jose';
 import { env } from './env.js';
+import { sql } from './db.js';
 
 export const COOKIE = 'sos_session';
 const key = new TextEncoder().encode(env.jwtSecret);
@@ -28,16 +29,38 @@ export function clearSession(reply: FastifyReply) {
   reply.clearCookie(COOKIE, { path: '/' });
 }
 
+// Membership check with a short cache: removing a user (or changing their role) takes effect
+// within MEMBERSHIP_TTL, instead of when the 7-day token expires.
+const MEMBERSHIP_TTL = 60_000;
+const memberships = new Map<string, { role: string | null; at: number }>();
+
+async function currentRole(userId: string, tenantId: string): Promise<string | null> {
+  const k = `${tenantId}:${userId}`;
+  const hit = memberships.get(k);
+  if (hit && Date.now() - hit.at < MEMBERSHIP_TTL) return hit.role;
+  const [m] = await sql<{ role: string }[]>`SELECT role FROM memberships WHERE tenant_id = ${tenantId} AND user_id = ${userId}`;
+  const role = m?.role ?? null;
+  if (memberships.size > 50_000) memberships.clear();
+  memberships.set(k, { role, at: Date.now() });
+  return role;
+}
+
 export async function requireAuth(req: FastifyRequest, reply: FastifyReply) {
   const token = req.cookies[COOKIE];
   if (!token) return reply.code(401).send({ error: 'unauthorized' });
+  let userId: string, tenantId: string;
   try {
     const { payload } = await jwtVerify(token, key);
-    req.session = { userId: payload.sub!, tenantId: payload.tid as string, role: payload.role as string };
+    userId = payload.sub!;
+    tenantId = payload.tid as string;
   } catch {
     return reply.code(401).send({ error: 'unauthorized' });
   }
+  const role = await currentRole(userId, tenantId);
+  if (!role) { clearSession(reply); return reply.code(401).send({ error: 'unauthorized' }); }
+  // Role always comes from the database, so role changes apply without re-login
+  req.session = { userId, tenantId, role };
 }
 
-const RANK: Record<string, number> = { viewer: 0, sales: 1, manager: 2, admin: 3, owner: 4 };
-export const hasRole = (s: Session, min: keyof typeof RANK) => (RANK[s.role] ?? -1) >= RANK[min];
+export const ROLE_RANK: Record<string, number> = { viewer: 0, sales: 1, manager: 2, admin: 3, owner: 4 };
+export const hasRole = (s: Session, min: keyof typeof ROLE_RANK) => (ROLE_RANK[s.role] ?? -1) >= ROLE_RANK[min];

@@ -9,6 +9,14 @@ const isStandalone = () =>
 
 export async function registerSW() {
   if (!('serviceWorker' in navigator)) return null;
+  // In development, chunk URLs are not content-hashed: a caching service worker would serve stale code.
+  // Set NEXT_PUBLIC_ENABLE_SW=true to test push/PWA install locally.
+  if (process.env.NODE_ENV !== 'production' && process.env.NEXT_PUBLIC_ENABLE_SW !== 'true') {
+    const regs = await navigator.serviceWorker.getRegistrations();
+    await Promise.all(regs.map((r) => r.unregister()));
+    if ('caches' in window) await Promise.all((await caches.keys()).map((k) => caches.delete(k)));
+    return null;
+  }
   return navigator.serviceWorker.register('/sw.js', { scope: '/' });
 }
 

@@ -1,124 +1,130 @@
-# Εγκατάσταση SoftifyOS σε server με Plesk
+# Εγκατάσταση SoftifyOS στο app.softify.gr (Ubuntu + Plesk)
 
-Οδηγός για Plesk Obsidian σε Linux (Ubuntu 22.04/24.04, Debian 12 ή AlmaLinux 9) με πρόσβαση SSH ως root.
-
-## Τι θα τρέχει στον server
+Χρόνος: περίπου 20 λεπτά. Χρειάζεσαι πρόσβαση **SSH ως root** στον server.
 
 ```
-Internet ─HTTPS─► nginx (Plesk) ─┬─ /api/*  ─► softify-api    (Node, port 4000, 2 instances)
-                                  └─ /*      ─► softify-web    (Next.js PWA, port 3000)
-                                     softify-worker (push, υπενθυμίσεις, queue)
-                                     PostgreSQL 17 (localhost:5432)
+Internet ─HTTPS─► nginx (Plesk) ─┬─ /api/*  ─► softify-api     (127.0.0.1:4000, 2 instances)
+                                  └─ /*      ─► softify-web     (127.0.0.1:3000, Next.js PWA)
+                                     softify-worker  (push, email, υπενθυμίσεις)
+                                     PostgreSQL 17   (127.0.0.1, μόνο τοπικά)
 ```
 
-Το SSL είναι **υποχρεωτικό**: χωρίς HTTPS δεν δουλεύουν ούτε τα push notifications ούτε η εγκατάσταση PWA.
+Ο κώδικας μπαίνει στο `/opt/softifyos` και τρέχει με τον χρήστη συστήματος `softify` (όχι root), μέσω PM2 με αυτόματη εκκίνηση.
 
 ---
 
-## 1. Προαπαιτούμενα (μία φορά)
+## Βήμα 1 · Subdomain και SSL στο Plesk
 
-1. **Domain/subdomain** στο Plesk, π.χ. `app.example.gr`. Ενεργοποίησε **Let's Encrypt SSL** με redirect HTTP→HTTPS.
-2. **Node.js 22 ή 24**: Plesk → Extensions → *Node.js* (ή `nvm` / NodeSource μέσω SSH). Έλεγξε με `node -v`.
-3. **PM2** (process manager):
-   ```bash
-   npm install -g pm2
-   ```
-4. **PostgreSQL 17** από το επίσημο repository (το ενσωματωμένο του Plesk είναι συχνά παλιότερη έκδοση):
-   ```bash
-   # Ubuntu/Debian
-   sudo apt install -y postgresql-common && sudo /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh
-   sudo apt install -y postgresql-17 postgresql-contrib-17
-   ```
-   Δημιουργία βάσης και χρήστη:
-   ```bash
-   sudo -u postgres psql <<'SQL'
-   CREATE ROLE softify LOGIN PASSWORD 'ΒΑΛΕ-ΙΣΧΥΡΟ-ΚΩΔΙΚΟ' CREATEROLE;
-   CREATE DATABASE softifyos OWNER softify ENCODING 'UTF8' TEMPLATE template0;
-   \c softifyos
-   CREATE EXTENSION IF NOT EXISTS pg_trgm;
-   SQL
-   ```
-   > Το `CREATEROLE` χρειάζεται μόνο για το πρώτο migration, που δημιουργεί τον εσωτερικό ρόλο `softify_app` για το Row Level Security.
+1. **Websites & Domains → Add Subdomain** → `app` στο `softify.gr`.
+2. Αν το DNS του `softify.gr` δεν το διαχειρίζεται το Plesk, πρόσθεσε στον πάροχο DNS μια εγγραφή **A**: `app` → IP του server.
+3. **SSL/TLS Certificates → Let's Encrypt** για το `app.softify.gr`, και ενεργοποίησε την ανακατεύθυνση **HTTP → HTTPS**.
 
-5. **Ρύθμιση PostgreSQL για μεγάλο όγκο** (`/etc/postgresql/17/main/postgresql.conf`, ενδεικτικά για server 16GB RAM):
-   ```
-   shared_buffers = 4GB
-   effective_cache_size = 12GB
-   work_mem = 32MB
-   maintenance_work_mem = 1GB
-   max_connections = 200
-   random_page_cost = 1.1          # SSD
-   ```
-   Μετά: `sudo systemctl restart postgresql`.
+> Χωρίς HTTPS δεν δουλεύουν ούτε τα push ούτε η εγκατάσταση της εφαρμογής στο κινητό.
 
-## 2. Ανέβασμα κώδικα
-
-Με το **Git extension** του Plesk (pull από το repository σου) ή με `rsync`/SFTP, π.χ. στο
-`/var/www/vhosts/example.gr/softifyos`.
-
-## 3. Ρύθμιση `.env`
+## Βήμα 2 · Πακέτο έκδοσης (στον υπολογιστή σου)
 
 ```bash
-cd /var/www/vhosts/example.gr/softifyos
-cp .env.example .env
-nano .env
+npm run release
 ```
 
-| Μεταβλητή | Τιμή |
+Δημιουργεί το `release/softifyos-ΗΜΕΡΟΜΗΝΙΑ.tar.gz`. Δεν περιέχει `.env`, κωδικούς ή demo δεδομένα. Ανέβασέ το στον server:
+
+```bash
+scp release/softifyos-*.tar.gz root@app.softify.gr:/root/
+```
+
+(Εναλλακτικά: Plesk → File Manager → ανέβασμα στο `/root`.)
+
+## Βήμα 3 · Αρχική εγκατάσταση (SSH, μία φορά)
+
+```bash
+ssh root@app.softify.gr
+mkdir -p /opt/softifyos && tar -xzf /root/softifyos-*.tar.gz -C /opt/softifyos
+sudo bash /opt/softifyos/deploy/setup-server.sh
+```
+
+Το script:
+- εγκαθιστά **Node.js 26 (LTS)**, **PostgreSQL 17** και **PM2**,
+- δημιουργεί τον χρήστη `softify` και τη βάση `softifyos` με τυχαίο ισχυρό κωδικό,
+- παράγει το `/opt/softifyos/.env` με νέα κλειδιά (JWT, VAPID για push),
+- ρυθμίζει την PostgreSQL ανάλογα με τη RAM του server,
+- ορίζει αυτόματη εκκίνηση μετά από reboot και **καθημερινό backup** της βάσης (03:15, κρατά 14 ημέρες, στο `/var/backups/softifyos`).
+
+> Αν οι θύρες 3000/4000 είναι πιασμένες από άλλη εφαρμογή, το script σταματά και σου λέει πώς να δώσεις άλλες, π.χ. `WEB_PORT=3100 API_PORT=4100 sudo -E bash …`. Τότε άλλαξε τις ίδιες θύρες και στις nginx directives του βήματος 5.
+
+## Βήμα 4 · Build και εκκίνηση
+
+```bash
+sudo bash /opt/softifyos/deploy/deploy.sh
+```
+
+Στο τέλος πρέπει να δεις `✓ Το SoftifyOS τρέχει.`
+
+## Βήμα 5 · nginx στο Plesk
+
+Plesk → **app.softify.gr → Hosting & DNS → Apache & nginx Settings**:
+
+1. **Ξετσέκαρε** το *Serve static files directly by nginx*. Αλλιώς τα αρχεία της εφαρμογής (`/_next/static/…`) δίνουν 404.
+2. Στο **Additional nginx directives** επικόλλησε όλο το περιεχόμενο του [`nginx-additional-directives.conf`](nginx-additional-directives.conf):
+   ```bash
+   cat /opt/softifyos/deploy/nginx-additional-directives.conf
+   ```
+3. **OK**. Έλεγχος: το https://app.softify.gr/api/health πρέπει να δείχνει `{"ok":true,…}`.
+
+## Βήμα 6 · Ο οργανισμός σου και ο πρώτος διαχειριστής
+
+```bash
+sudo -u softify -H bash -c 'cd /opt/softifyos && npm run tenant:create -- \
+  --slug softify --name "Softify" --company "Softify Μ.Ι.Κ.Ε." --vat 000000000 \
+  --email admin@softify.gr --full-name "Όνομα Επώνυμο"'
+```
+
+Ο κωδικός ζητείται κρυφά (τουλάχιστον 10 χαρακτήρες) και δεν αποθηκεύεται στο ιστορικό εντολών. Μετά συνδέεσαι στο **https://app.softify.gr/el/login**.
+
+## Βήμα 7 · Email (για αποστολή προσφορών)
+
+Το SoftifyOS στέλνει μέσω του mail server του Plesk (`localhost:25`), από το `no-reply@softify.gr`.
+
+1. Βεβαιώσου ότι το **Mail** είναι ενεργό για το `softify.gr` (Plesk → Mail Settings).
+2. Ενεργοποίησε **SPF** και **DKIM** (Mail Settings → DKIM spam protection), ώστε τα email να μην πηγαίνουν στα spam.
+3. Για άλλον αποστολέα, άλλαξε το `SMTP_FROM` στο `/opt/softifyos/.env` και τρέξε `sudo -u softify pm2 reload all --update-env`.
+
+## Βήμα 8 · Push στο κινητό
+
+1. Άνοιξε το https://app.softify.gr στο κινητό.
+   - **iPhone:** Safari → Κοινοποίηση → *Προσθήκη στην οθόνη Αφετηρίας*, και μετά άνοιγμα από το εικονίδιο.
+   - **Android:** Chrome → *Εγκατάσταση εφαρμογής*.
+2. **Περισσότερα → Ενεργοποίηση push ειδοποιήσεων → Αποστολή δοκιμαστικής ειδοποίησης.**
+
+---
+
+## Ενημέρωση σε νέα έκδοση
+
+```bash
+npm run release                                            # στον υπολογιστή σου
+scp release/softifyos-*.tar.gz root@app.softify.gr:/root/
+ssh root@app.softify.gr "sudo bash /opt/softifyos/deploy/deploy.sh \$(ls -t /root/softifyos-*.tar.gz | head -1)"
+```
+
+Οι ενημερώσεις γίνονται χωρίς διακοπή λειτουργίας, και οι migrations της βάσης τρέχουν αυτόματα.
+
+## Χρήσιμες εντολές
+
+| Τι | Εντολή |
 |---|---|
-| `DATABASE_URL` | `postgres://softify:ΚΩΔΙΚΟΣ@127.0.0.1:5432/softifyos` |
-| `JWT_SECRET` | `node -e "console.log(require('crypto').randomBytes(48).toString('base64url'))"` |
-| `COOKIE_SECURE` | `true` |
-| `VAPID_*` | από `npm run vapid` (μία φορά· **μην τα αλλάξεις μετά**, αλλιώς χάνονται οι συνδρομές push) |
-| `VAPID_SUBJECT` | `mailto:` με το email του διαχειριστή |
+| Κατάσταση υπηρεσιών | `sudo -u softify pm2 ls` |
+| Logs (live) | `sudo -u softify pm2 logs` |
+| Επανεκκίνηση | `sudo -u softify pm2 reload all --update-env` |
+| Backup τώρα | `sudo -u postgres pg_dump -Fc softifyos > /root/softifyos.dump` |
+| Restore | `sudo -u postgres pg_restore -d softifyos --clean /root/softifyos.dump` |
 
-## 4. Build, migrations, εκκίνηση
-
-```bash
-npm ci
-npm run build          # API (TypeScript → dist) + Web (Next.js standalone)
-npm run db:migrate     # δημιουργεί/ενημερώνει το σχήμα
-pm2 start deploy/ecosystem.config.cjs
-pm2 save
-pm2 startup            # ξεκινά αυτόματα μετά από reboot (εκτέλεσε την εντολή που εμφανίζει)
-```
-
-## 5. nginx στο Plesk
-
-Plesk → Websites & Domains → `app.example.gr` → **Apache & nginx Settings**:
-
-1. Άφησε το **Proxy mode** όπως είναι.
-2. Στο **Additional nginx directives** επικόλλησε το περιεχόμενο του [`nginx-additional-directives.conf`](nginx-additional-directives.conf).
-3. **OK**. Έλεγξε στο `https://app.example.gr/api/health`, όπου πρέπει να δεις `{"ok":true,...}`.
-
-## 6. Ενημερώσεις (κάθε νέα έκδοση)
-
-```bash
-git pull           # ή μέσω Plesk Git
-npm ci
-npm run build
-npm run db:migrate
-pm2 reload all     # zero-downtime για web/api
-```
-
-## 7. Backups
-
-Plesk → Backup Manager για τα αρχεία, και καθημερινό dump της βάσης (cron στο Plesk → Scheduled Tasks):
-
-```bash
-pg_dump -Fc -U softify softifyos > /var/backups/softifyos-$(date +%F).dump
-```
+> Αν το Plesk είχε ήδη δική του PostgreSQL, η 17 μπαίνει σε άλλη θύρα (π.χ. 5433). Τη βλέπεις στο `DATABASE_URL` του `.env` και τη δίνεις με `-p 5433` στις εντολές backup/restore.
 
 ## Κλιμάκωση όταν μεγαλώσει ο όγκος
 
 | Σημάδι | Κίνηση |
 |---|---|
-| CPU του API > 70% | `instances` του `softify-api` = αριθμός πυρήνων |
-| Πολλές συνδέσεις στη βάση | PgBouncer (transaction mode) και `DB_PREPARE=false` |
-| Αργές αναφορές | Read replica του PostgreSQL |
-| Αργή αναζήτηση σε δεκάδες εκατομμύρια | Typesense/Meilisearch (επόμενη φάση) |
-| Ένας πολύ μεγάλος πελάτης-tenant | Δική του βάση (το σχήμα το υποστηρίζει χωρίς αλλαγές κώδικα) |
-
-## Push σε iPhone
-
-Στο iOS (16.4 και νεότερα) τα push λειτουργούν **μόνο** όταν ο χρήστης κάνει *Κοινοποίηση → Προσθήκη στην οθόνη Αφετηρίας*, ανοίξει την εφαρμογή από το εικονίδιο και πατήσει **Περισσότερα → Ενεργοποίηση push ειδοποιήσεων**. Η εφαρμογή εμφανίζει αυτή την οδηγία αυτόματα.
+| CPU του API > 70% | `instances` του `softify-api` (στο `deploy/ecosystem.config.cjs`) = αριθμός πυρήνων |
+| Πολλές συνδέσεις στη βάση | PgBouncer (transaction mode) + `DB_PREPARE=false` |
+| Αργές αναφορές | Read replica της PostgreSQL |
+| Αναζήτηση σε δεκάδες εκατομμύρια | Typesense/Meilisearch (επόμενη φάση) |
