@@ -15,7 +15,8 @@
     "db:seed": "tsx --env-file-if-exists=../../.env scripts/seed.ts",
     "vapid": "tsx scripts/vapid.ts",
     "tenant:create": "tsx --env-file-if-exists=../../.env scripts/create-tenant.ts",
-    "db:seed:branches": "tsx --env-file-if-exists=../../.env scripts/demo-branches.ts"
+    "db:seed:branches": "tsx --env-file-if-exists=../../.env scripts/demo-branches.ts",
+    "user:password": "tsx --env-file-if-exists=../../.env scripts/set-password.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^1.9.0",

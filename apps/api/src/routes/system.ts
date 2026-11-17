@@ -1,8 +1,9 @@
 // Settings → System health and Settings → Backups. Installation-wide (all organisations), so only
 // platform administrators see them: PLATFORM_ADMINS=email1,email2 in .env (in development: any owner).
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
+import { createHash } from 'node:crypto';
 import { createReadStream } from 'node:fs';
-import { readdir, readFile, rm, stat } from 'node:fs/promises';
+import { readdir, readFile, rm, stat, statfs } from 'node:fs/promises';
 import { join } from 'node:path';
 import os from 'node:os';
 import { z } from 'zod';
@@ -35,6 +36,13 @@ async function guard(req: FastifyRequest, reply: FastifyReply) {
 
 const BACKUP_NAME = /^(weekly-|monthly-)?\d{4}-\d{2}-\d{2}_\d{4}$/;
 const BACKUP_FILES = ['db.dump', 'db.dump.gpg', 'files.tar.gz', 'files.tar.gz.gpg', 'SHA256SUMS'];
+type BackupMeta = { duration_s: number; documents: number; offsite: boolean; pg_version: string; trigger: 'schedule' | 'manual' };
+/** Next occurrence of hh:mm server time (optionally on weekday dow, 0 = Sunday). */
+function nextAt(h: number, m: number, dow?: number) {
+  const d = new Date(); d.setSeconds(0, 0); d.setHours(h, m);
+  while (d.getTime() <= Date.now() || (dow !== undefined && d.getDay() !== dow)) d.setDate(d.getDate() + 1);
+  return d;
+}
 const readJson = async (p: string) => { try { return JSON.parse(await readFile(p, 'utf8')); } catch { return null; } };
 
 async function auditPlatform(s: Session, action: string, details: unknown) {
@@ -98,27 +106,73 @@ export default async function systemRoutes(app: FastifyInstance) {
       const dir = env.backupDir;
       const running = (await sql`SELECT info, beat_at FROM system_heartbeat WHERE name = 'backup'`)[0];
       const queued = (await sql`SELECT count(*)::int AS n FROM jobs WHERE kind = 'backup_run'`)[0].n > 0;
+      const keepDays = Number(process.env.BACKUP_KEEP_DAYS ?? 14);
       const base = {
         configured: !!dir, dir, encrypted: !!process.env.BACKUP_PASSPHRASE, remote: process.env.BACKUP_REMOTE ? process.env.BACKUP_REMOTE.split(':')[0] : null,
-        keep_days: Number(process.env.BACKUP_KEEP_DAYS ?? 14),
+        keep_days: keepDays, retention: { daily: keepDays, weekly: 8, monthly: 12 },
+        // Same times as the cron written by deploy/setup-server.sh (server local time)
+        schedule: { next_backup_at: nextAt(3, 15).toISOString(), next_verify_at: nextAt(5, 0, 0).toISOString() },
         running: queued || (running?.info?.running && Date.now() - new Date(running.beat_at).getTime() < 3 * 3600e3) || false,
         last_run: running?.info ?? null,
       };
-      if (!dir) return { ...base, last: null, verify: null, items: [] };
+      const empty = { disk: null, total_bytes: 0, last: null, verify: null, items: [] };
+      if (!dir) return { ...base, ...empty };
       let names: string[] = [];
-      try { names = (await readdir(dir)).filter((n) => BACKUP_NAME.test(n)); } catch { return { ...base, error: 'dir_unreadable', last: null, verify: null, items: [] }; }
+      try { names = (await readdir(dir)).filter((n) => BACKUP_NAME.test(n)); } catch { return { ...base, ...empty, error: 'dir_unreadable' }; }
+      const seen = new Set<string>(); // weekly/monthly copies are hard links: count each file once
+      let total = 0;
       const items = await Promise.all(names.map(async (name) => {
         const p = join(dir, name);
         const files = (await readdir(p).catch(() => [] as string[])).filter((f) => BACKUP_FILES.includes(f));
-        let size = 0;
-        for (const f of files) size += (await stat(join(p, f)).catch(() => ({ size: 0 }))).size;
+        let size = 0, db = 0, docs = 0;
+        for (const f of files) {
+          const st = await stat(join(p, f)).catch(() => null);
+          if (!st) continue;
+          size += st.size;
+          if (f.startsWith('db')) db = st.size; else if (f.startsWith('files')) docs = st.size;
+          const key = `${st.dev}:${st.ino}`;
+          if (!seen.has(key)) { seen.add(key); total += st.size; }
+        }
         const kind = name.startsWith('weekly-') ? 'weekly' : name.startsWith('monthly-') ? 'monthly' : 'daily';
         const m = name.match(/(\d{4}-\d{2}-\d{2})_(\d{2})(\d{2})$/)!;
-        return { name, kind, created_at: `${m[1]}T${m[2]}:${m[3]}:00`, size, files, encrypted: files.some((f) => f.endsWith('.gpg')) };
+        const meta = await readJson(join(p, 'meta.json')) as BackupMeta | null;
+        return {
+          name, kind, created_at: `${m[1]}T${m[2]}:${m[3]}:00`, size, db_bytes: db, files_bytes: docs, files,
+          encrypted: files.some((f) => f.endsWith('.gpg')), checksums: files.includes('SHA256SUMS'),
+          duration_s: meta?.duration_s ?? null, documents: meta?.documents ?? null, offsite: meta?.offsite ?? null,
+          pg_version: meta?.pg_version ?? null, trigger: meta?.trigger ?? null,
+        };
       }));
       items.sort((a, b) => b.created_at.localeCompare(a.created_at) || a.kind.localeCompare(b.kind));
+      const fsInfo = await statfs(dir).catch(() => null);
+      const disk = fsInfo ? { free: fsInfo.bavail * fsInfo.bsize, total: fsInfo.blocks * fsInfo.bsize } : null;
       // Encrypted = passphrase configured here, or the newest backup is encrypted (the cron may run with its own .env)
-      return { ...base, encrypted: base.encrypted || !!items.find((i) => i.kind === 'daily')?.encrypted, last: await readJson(join(dir, 'last.json')), verify: await readJson(join(dir, 'last-verify.json')), items };
+      return {
+        ...base, encrypted: base.encrypted || !!items.find((i) => i.kind === 'daily')?.encrypted, disk, total_bytes: total,
+        last: await readJson(join(dir, 'last.json')), verify: await readJson(join(dir, 'last-verify.json')), items,
+      };
+    });
+
+    // Integrity check: recompute the SHA-256 of every file against the SHA256SUMS written at backup time
+    r.post('/system/backups/:name/check', async (req, reply) => {
+      const { name } = z.object({ name: z.string().regex(BACKUP_NAME) }).parse(req.params);
+      if (!env.backupDir) return reply.code(404).send({ error: 'not_found' });
+      const p = join(env.backupDir, name);
+      const sums = await readFile(join(p, 'SHA256SUMS'), 'utf8').catch(() => null);
+      if (sums === null) return reply.code(409).send({ error: 'no_checksums' });
+      const files: { file: string; ok: boolean }[] = [];
+      for (const line of sums.split('\n')) {
+        const m = line.match(/^([0-9a-f]{64})\s+\*?(?:\.\/)?(.+)$/);
+        if (!m || !BACKUP_FILES.includes(m[2])) continue;
+        const h = createHash('sha256');
+        const ok = await new Promise<boolean>((done) => {
+          createReadStream(join(p, m[2])).on('data', (c) => h.update(c)).on('error', () => done(false)).on('end', () => done(h.digest('hex') === m[1]));
+        });
+        files.push({ file: m[2], ok });
+      }
+      const ok = files.length > 0 && files.every((f) => f.ok);
+      await auditPlatform(req.session, 'system.backup_check', { name, ok });
+      return { ok, files, checked_at: new Date().toISOString() };
     });
 
     r.post('/system/backups/run', async (req, reply) => {

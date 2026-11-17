@@ -104,3 +104,6 @@ body {
   html, body { background: #fff !important; }
   .offer-doc { color: #17142b; }
 }
+
+/* Settings → Backups: indeterminate progress while a backup runs */
+@keyframes backup-progress { from { transform: translateX(-100%); } to { transform: translateX(300%); } }

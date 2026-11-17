@@ -85,5 +85,12 @@ if [ -n "$REMOTE" ]; then
 fi
 
 SIZE="$(du -sh "$DEST" | cut -f1)"
+# Details for Settings → Backups (not part of SHA256SUMS: informational only)
+fsize() { if [ -f "$DEST/$1.gpg" ]; then stat -c %s "$DEST/$1.gpg"; elif [ -f "$DEST/$1" ]; then stat -c %s "$DEST/$1"; else echo 0; fi; }
+DOCS="$( [ -d "$UPLOAD_DIR" ] && find "$UPLOAD_DIR" -type f | wc -l || echo 0)"
+PGV="$(pg_dump --version | awk '{print $NF}')"
+printf '{"started_at":"%s","finished_at":"%s","duration_s":%s,"db_bytes":%s,"files_bytes":%s,"documents":%s,"encrypted":%s,"offsite":%s,"pg_version":"%s","trigger":"%s"}\n' \
+  "$START" "$(date -Iseconds)" "$(( $(date +%s) - $(date -d "$START" +%s) ))" "$(fsize db.dump)" "$(fsize files.tar.gz)" "${DOCS// /}" \
+  "$([ -n "$PASSPHRASE" ] && echo true || echo false)" "$([ -n "$REMOTE" ] && echo true || echo false)" "$PGV" "${BACKUP_TRIGGER:-schedule}" > "$DEST/meta.json"
 status ok "$SIZE${REMOTE:+ + off-site}"
 echo "Backup OK: $DEST ($SIZE)"

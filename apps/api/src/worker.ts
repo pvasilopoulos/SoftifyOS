@@ -19,7 +19,7 @@ async function runBackup() {
   const script = resolve(process.cwd(), '../../deploy/backup.sh');
   const out: string[] = [];
   const code = await new Promise<number>((done) => {
-    const p = spawn('bash', [script], { env: { ...process.env, APP_DIR: resolve(process.cwd(), '../..') }, timeout: 2 * 3600e3 });
+    const p = spawn('bash', [script], { env: { ...process.env, APP_DIR: resolve(process.cwd(), '../..'), BACKUP_TRIGGER: 'manual' }, timeout: 2 * 3600e3 });
     // Control characters (e.g. NUL from UTF-16 output) would make Postgres reject the status
     const keep = (d: Buffer) => { out.push(d.toString().replace(/[\u0000-\u0008\u000b-\u001f]/g, '')); if (out.length > 50) out.shift(); };
     p.stdout.on('data', keep); p.stderr.on('data', keep);
