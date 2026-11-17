@@ -1,6 +1,7 @@
 # Εγκατάσταση SoftifyOS στο app.softify.gr (Ubuntu + Plesk)
 
 Χρόνος: περίπου 20 λεπτά. Χρειάζεσαι πρόσβαση **SSH ως root** στον server.
+Χωρίς SSH: δες την ενότητα [Εγκατάσταση χωρίς SSH](#εγκατάσταση-χωρίς-ssh-μόνο-από-το-plesk) στο τέλος.
 
 ```
 Internet ─HTTPS─► nginx (Plesk) ─┬─ /api/*  ─► softify-api     (127.0.0.1:4000, 2 instances)
@@ -212,3 +213,83 @@ ssh root@app.softify.gr "sudo bash /opt/softifyos/deploy/deploy.sh \$(ls -t /roo
 | Πολλές συνδέσεις στη βάση | PgBouncer (transaction mode) + `DB_PREPARE=false` |
 | Αργές αναφορές | Read replica της PostgreSQL |
 | Αναζήτηση σε δεκάδες εκατομμύρια | Typesense/Meilisearch (επόμενη φάση) |
+
+---
+
+## Εγκατάσταση χωρίς SSH (μόνο από το Plesk)
+
+Οι εντολές τρέχουν από τις **Scheduled Tasks** του Plesk ως root. Τα αρχεία και τα logs τα βλέπεις από τον **File Manager**.
+
+**Απαιτείται:** λογαριασμός **διαχειριστή (admin)** του Plesk σε VPS ή server με Ubuntu 22.04 ή 24.04. Με απλό λογαριασμό hosting (subscription) δεν γίνεται.
+
+> Πιο σύντομα: αν εγκαταστήσεις το extension **«SSH Terminal»** (Extensions, δωρεάν), έχεις τερματικό root μέσα στον browser και ακολουθείς τα βήματα 1–11 όπως είναι.
+
+### Α · Subdomain, SSL και πακέτο
+1. Κάνε το **Βήμα 1** (subdomain, Let's Encrypt, HTTP → HTTPS).
+2. Στον υπολογιστή σου: `npm run release`.
+3. **softify.gr → File Manager**. Στη **ρίζα** του domain φτιάξε τον φάκελο **`softify-install`**: δίπλα στο `httpdocs`, όχι μέσα του και όχι στον φάκελο του `app.softify.gr`, ώστε να μην είναι προσβάσιμος από το web.
+4. Ανέβασε εκεί το `.tar.gz` και μετονόμασέ το σε **`softifyos.tar.gz`**.
+
+Η πλήρης διαδρομή είναι `/var/www/vhosts/softify.gr/softify-install`. Στις εντολές παρακάτω την ορίζει η μεταβλητή `D`.
+
+### Β · Η εργασία που τρέχει τις εντολές
+**Tools & Settings → Scheduled Tasks → Add Task:**
+- System user: `root`
+- Task type: Run a command
+- Run: Yearly
+- Notify: Do not notify
+
+Για κάθε βήμα: βάλε στο **Command** την εντολή του βήματος → **OK** → **Run Now**.
+
+Οι μεγάλες εντολές τρέχουν στο παρασκήνιο (`setsid nohup … &`) και γράφουν την πρόοδο σε `.log` μέσα στο `softify-install`. Το log το ανοίγεις στον File Manager και το ξανανοίγεις για ανανέωση. Τα σύμβολα του τύπου `[1;35m` στο log είναι χρώματα τερματικού και αγνοούνται.
+
+### Γ · Εγκατάσταση, build και εκκίνηση
+```bash
+D=/var/www/vhosts/softify.gr/softify-install; mkdir -p /opt/softifyos && tar -xzf $D/softifyos.tar.gz -C /opt/softifyos && setsid nohup bash -c "bash /opt/softifyos/deploy/setup-server.sh && bash /opt/softifyos/deploy/deploy.sh" > $D/install.log 2>&1 < /dev/null &
+```
+Χρειάζεται 5–15 λεπτά. Στο τέλος του `install.log` πρέπει να δεις **`✓ Το SoftifyOS τρέχει.`**
+
+Αν το log γράφει ότι η θύρα χρησιμοποιείται ήδη, άλλαξε το `bash /opt/softifyos/deploy/setup-server.sh` σε `WEB_PORT=3100 API_PORT=4100 bash /opt/softifyos/deploy/setup-server.sh` και τρέξε ξανά. Βάλε τις ίδιες θύρες και στο nginx.
+
+### Δ · nginx
+Κάνε το **Βήμα 5**. Το περιεχόμενο του `nginx-additional-directives.conf` το ανοίγεις από το repo στον υπολογιστή σου.
+
+### Ε · Πρώτος οργανισμός και διαχειριστής
+1. Στο `softify-install` φτιάξε το αρχείο **`pw.txt`** και γράψε μέσα μόνο τον κωδικό του διαχειριστή (τουλάχιστον 10 χαρακτήρες).
+2. Τρέξε την εντολή, με τα δικά σου στοιχεία στο τέλος. Το `pw.txt` σβήνεται αυτόματα. Έλεγχος: `tenant.log`.
+```bash
+D=/var/www/vhosts/softify.gr/softify-install; cd /opt/softifyos && sudo -u softify -H env SOFTIFY_PASSWORD="$(cat $D/pw.txt)" npm run tenant:create -- --slug softify --name "Softify" --company "Softify Μ.Ι.Κ.Ε." --vat 000000000 --email admin@softify.gr --full-name "Όνομα Επώνυμο" > $D/tenant.log 2>&1; rm -f $D/pw.txt
+```
+
+### ΣΤ · Αλλαγές στο `.env`
+Για παράδειγμα `PLATFORM_ADMINS`, Stripe ή `ALERT_EMAIL`.
+
+1. Αντιγραφή για επεξεργασία:
+```bash
+D=/var/www/vhosts/softify.gr/softify-install; cp /opt/softifyos/.env $D/env.txt && chown --reference=$D $D/env.txt && chmod 600 $D/env.txt
+```
+2. Επεξεργάσου το `env.txt` στον File Manager και αποθήκευσέ το.
+3. Επιστροφή και επανεκκίνηση. Η εντολή σβήνει και το `env.txt`, που περιέχει όλους τους κωδικούς:
+```bash
+D=/var/www/vhosts/softify.gr/softify-install; install -o softify -g softify -m 600 $D/env.txt /opt/softifyos/.env && rm -f $D/env.txt && sudo -u softify -H pm2 reload all --update-env
+```
+
+### Ζ · Ενημέρωση σε νέα έκδοση
+1. Στον υπολογιστή σου: `npm run release`.
+2. Ανέβασε το νέο πακέτο στη θέση του `softify-install/softifyos.tar.gz`.
+3. Τρέξε:
+```bash
+D=/var/www/vhosts/softify.gr/softify-install; setsid nohup bash /opt/softifyos/deploy/deploy.sh $D/softifyos.tar.gz > $D/update.log 2>&1 < /dev/null &
+```
+Στο `update.log` πρέπει να εμφανιστεί `✓ Το SoftifyOS τρέχει.`
+
+### Χρήσιμες εντολές
+| Τι | Command |
+|---|---|
+| Logs εφαρμογής | `sudo -u softify -H pm2 logs --lines 200 --nostream > /var/www/vhosts/softify.gr/softify-install/pm2.log 2>&1` |
+| Κατάσταση | `sudo -u softify -H pm2 ls > /var/www/vhosts/softify.gr/softify-install/status.log 2>&1` |
+| Επανεκκίνηση | `sudo -u softify -H pm2 reload all --update-env` |
+
+Η υγεία του συστήματος, το «Backup τώρα», η λήψη backup και τα σφάλματα φαίνονται στην εφαρμογή, στις **Ρυθμίσεις → Υγεία συστήματος / Backup**.
+
+Όταν τελειώσεις, άφησε την εργασία με Command `true`, ώστε να μη μείνει καμία ενεργή εντολή.
