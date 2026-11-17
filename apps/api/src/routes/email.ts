@@ -6,7 +6,7 @@ import { can, requireAuth } from '../auth.js';
 import { decryptSecret, encryptSecret } from '../registries.js';
 import { audit } from './settings.js';
 import { env } from '../env.js';
-import { DEFAULT_TEMPLATES, emailSettingsSchema, makeTransport, readSettings, smtpSchema, TEMPLATE_KEYS, transportFor, verifyMailbox, withName } from '../email.js';
+import { DEFAULT_TEMPLATES, emailSettingsSchema, makeTransport, readSettings, renderHtml, smtpSchema, TEMPLATE_KEYS, transportFor, verifyMailbox, withName } from '../email.js';
 import { authUrl, invalidateOAuthApps, oauthApp, providerConfigured, redirectUri } from '../calendar.js';
 import { SignJWT } from 'jose';
 
@@ -173,6 +173,13 @@ export default async function emailRoutes(app: FastifyInstance) {
       if (!can(s, 'settings.manage')) return reply.code(403).send({ error: 'forbidden' });
       const body = (req.body ?? {}) as Record<string, unknown>;
       const [me] = await withTenant(s.tenantId, (tx) => tx`SELECT email, full_name FROM users WHERE id = ${s.userId}`);
+      // Recipient: any address typed in "Test send", default the signed-in user
+      const toParsed = z.string().trim().toLowerCase().email().max(320).optional().safeParse(body.to || undefined);
+      if (!toParsed.success) return { ok: false, error: 'invalid_to' };
+      const to = toParsed.data ?? me.email;
+      const [org] = await sql`SELECT name, brand_name, email_settings FROM tenants WHERE id = ${s.tenantId}`;
+      const st = readSettings(org?.email_settings);
+      const brand = (org?.brand_name as string | null) ?? (org?.name as string) ?? 'SoftifyOS';
       let conf: z.infer<typeof smtpSchema> | null = null;
       if (body.host) {
         const p = smtpSchema.safeParse(body);
@@ -188,11 +195,14 @@ export default async function emailRoutes(app: FastifyInstance) {
       try {
         if (tr.kind === 'google' || tr.kind === 'microsoft') await verifyMailbox(s.tenantId);
         else await tr.transport.verify();
-        await tr.transport.sendMail({
-          from: withName(tr.from, null), to: me.email, subject: 'SoftifyOS: test email ✓',
-          text: 'Η αποστολή email από το SoftifyOS λειτουργεί. / Email sending from SoftifyOS works.',
-        });
-        return { ok: true, to: me.email };
+        const via = { google: 'Gmail API', microsoft: 'Microsoft Graph', smtp: 'SMTP', server: 'SMTP (server)' }[tr.kind];
+        const text = `Η αποστολή email από το SoftifyOS λειτουργεί.\nEmail sending from SoftifyOS works.\n\nΑποστολέας / From: ${tr.from}\nΜέσω / Via: ${via}\nΑπό / By: ${me.full_name}`;
+        const info = await tr.transport.sendMail({
+          from: withName(tr.from, st.from_name || brand), to, subject: `${brand}: δοκιμαστικό email ✓`,
+          text, html: renderHtml({ brand, body: text, signature: st.signature }),
+        }) as { messageId?: string };
+        await withTenant(s.tenantId, (tx) => audit(tx, s, 'email.test_send', null, { to, via }));
+        return { ok: true, to, from: tr.from, via, message_id: info?.messageId ?? null };
       } catch (e) {
         return { ok: false, error: 'smtp_error', detail: String((e as Error).message).slice(0, 300) };
       } finally {

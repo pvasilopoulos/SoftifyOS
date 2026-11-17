@@ -807,7 +807,8 @@
         "email_mailbox_connect": "Σύνδεση mailbox",
         "email_mailbox_disconnect": "Αποσύνδεση mailbox",
         "email_oauth_app_set": "Ορισμός κλειδιών εφαρμογής",
-        "email_oauth_app_removed": "Αφαίρεση κλειδιών εφαρμογής"
+        "email_oauth_app_removed": "Αφαίρεση κλειδιών εφαρμογής",
+        "email_test_send": "Δοκιμαστικό email"
       },
       "search": "Αναζήτηση σε εγγραφή, ενέργεια, λεπτομέρειες…",
       "export": "Εξαγωγή CSV",
@@ -2501,7 +2502,13 @@
     "appPermsMs": "App registrations → New registration → Web redirect (το παραπάνω) · API permissions (Delegated): Mail.Send, Calendars.ReadWrite, User.Read, offline_access · Certificates & secrets → New client secret.",
     "appPermsGoogle": "Ενεργοποιήστε Gmail API και Google Calendar API · OAuth consent screen με scopes gmail.send και calendar.events · Credentials → OAuth client ID (Web) με το παραπάνω redirect URI.",
     "appOpenMs": "Άνοιγμα Microsoft Entra",
-    "appOpenGoogle": "Άνοιγμα Google Cloud Console"
+    "appOpenGoogle": "Άνοιγμα Google Cloud Console",
+    "testSendTitle": "Δοκιμαστική αποστολή",
+    "testSendTo": "Email παραλήπτη",
+    "testSend": "Αποστολή δοκιμής",
+    "testSendOk": "Στάλθηκε στο {to} από {from} μέσω {via}. Ελέγξτε τα εισερχόμενα (και τα ανεπιθύμητα).",
+    "testSendNone": "Συνδέστε mailbox ή ορίστε SMTP για να γίνει δοκιμή.",
+    "testSendBadTo": "Μη έγκυρο email παραλήπτη."
   },
   "calSync": {
     "title": "Συγχρονισμός ημερολογίου",

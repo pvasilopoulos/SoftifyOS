@@ -8,7 +8,8 @@ import { ProviderLogo } from './calendar-sync';
 import clsx from 'clsx';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useLocale, useTranslations } from 'next-intl';
-import { AlertTriangle, Check, ChevronDown, Copy, ExternalLink, KeyRound, Link2, Loader2, Pencil, PlugZap, RotateCcw, Server, Trash2 } from 'lucide-react';
+import { AlertTriangle, Check, ChevronDown, Copy, ExternalLink, KeyRound, Link2, Loader2, Pencil, PlugZap, RotateCcw, Send, Server, Trash2 } from 'lucide-react';
+import { useMe } from './app-shell';
 import { api, ApiError } from '@/lib/api';
 import { appConfirm } from './confirm';
 import { Card } from './settings-sections';
@@ -291,6 +292,7 @@ function SmtpCard({ data }: { data: Data }) {
             {test.ok ? t('testOk', { to: test.to ?? '' }) : `${t('testFail')}${test.detail ? `: ${test.detail}` : test.error ? ` (${test.error})` : ''}`}
           </p>
         )}
+        <TestSend canSend={!!(mb || cur || data.server_smtp)} />
       </div>
     </Card>
   );
@@ -398,6 +400,43 @@ function OAuthAppForm({ p, data }: { p: 'google' | 'microsoft'; data: Data }) {
           {p === 'microsoft' ? t('appOpenMs') : t('appOpenGoogle')} <ExternalLink size={12} />
         </a>
       </div>
+    </div>
+  );
+}
+
+/** "Test send": a real email with whatever is in use now (mailbox → own SMTP → server SMTP). */
+function TestSend({ canSend }: { canSend: boolean }) {
+  const t = useTranslations('email');
+  const { data: me } = useMe();
+  const [to, setTo] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [res, setRes] = useState<{ ok: boolean; to?: string; from?: string; via?: string; error?: string; detail?: string } | null>(null);
+  const send = async () => {
+    setBusy(true); setRes(null);
+    try { setRes(await api('/settings/email/test', { method: 'POST', json: { to: to.trim() || undefined } })); }
+    catch { setRes({ ok: false, error: 'api_error' }); }
+    setBusy(false);
+  };
+  return (
+    <div className="rounded-xl bg-surface-2 p-3">
+      <div className="mb-2 flex items-center gap-2 text-sm font-semibold"><Send size={15} className="text-primary" /> {t('testSendTitle')}</div>
+      <form onSubmit={(e) => { e.preventDefault(); send(); }} className="flex flex-wrap gap-2">
+        <input type="email" value={to} onChange={(e) => setTo(e.target.value)} placeholder={me?.user.email ?? t('testSendTo')} aria-label={t('testSendTo')}
+          className="min-w-0 flex-1 rounded-xl border border-border bg-surface px-3 py-2 text-sm outline-none focus:border-primary" />
+        <button disabled={busy || !canSend} className="flex shrink-0 items-center gap-1.5 rounded-xl bg-primary px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">
+          {busy ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />} {t('testSend')}
+        </button>
+      </form>
+      {!canSend && <p className="mt-2 text-xs text-muted">{t('testSendNone')}</p>}
+      {res && (
+        <p className={clsx('mt-2 rounded-lg p-2.5 text-sm', res.ok ? 'bg-success-soft text-success' : 'bg-danger-soft text-danger')}>
+          {res.ok
+            ? t('testSendOk', { to: res.to ?? '', from: res.from ?? '', via: res.via ?? '' })
+            : res.error === 'invalid_to' ? t('testSendBadTo')
+            : res.error === 'not_configured' ? t('testSendNone')
+            : `${t('testFail')}${res.detail ? `: ${res.detail}` : res.error ? ` (${res.error})` : ''}`}
+        </p>
+      )}
     </div>
   );
 }

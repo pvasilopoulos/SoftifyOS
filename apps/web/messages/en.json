@@ -807,7 +807,8 @@
         "email_mailbox_connect": "Mailbox connected",
         "email_mailbox_disconnect": "Mailbox disconnected",
         "email_oauth_app_set": "App keys set",
-        "email_oauth_app_removed": "App keys removed"
+        "email_oauth_app_removed": "App keys removed",
+        "email_test_send": "Test email"
       },
       "search": "Search record, action, details…",
       "export": "Export CSV",
@@ -2501,7 +2502,13 @@
     "appPermsMs": "App registrations → New registration → Web redirect (above) · API permissions (Delegated): Mail.Send, Calendars.ReadWrite, User.Read, offline_access · Certificates & secrets → New client secret.",
     "appPermsGoogle": "Enable Gmail API and Google Calendar API · OAuth consent screen with scopes gmail.send and calendar.events · Credentials → OAuth client ID (Web) with the redirect URI above.",
     "appOpenMs": "Open Microsoft Entra",
-    "appOpenGoogle": "Open Google Cloud Console"
+    "appOpenGoogle": "Open Google Cloud Console",
+    "testSendTitle": "Test send",
+    "testSendTo": "Recipient email",
+    "testSend": "Send test",
+    "testSendOk": "Sent to {to} from {from} via {via}. Check the inbox (and spam).",
+    "testSendNone": "Connect a mailbox or set SMTP to send a test.",
+    "testSendBadTo": "Invalid recipient email."
   },
   "calSync": {
     "title": "Calendar sync",
