@@ -6,7 +6,8 @@ import { withTenant } from '../db.js';
 import { COOKIE, requireAuth } from '../auth.js';
 import { env } from '../env.js';
 import { audit } from './settings.js';
-import { authUrl, CalendarError, disconnect, exchangeCode, providerConfigured, PROVIDERS, pullBusy, queueFullPush, type Provider } from '../calendar.js';
+import { authUrl, CalendarError, disconnect, exchangeCode, oauthApp, PROVIDERS, pullBusy, queueFullPush, type Provider } from '../calendar.js';
+import { decryptSecret, encryptSecret } from '../registries.js';
 
 const key = new TextEncoder().encode(env.jwtSecret);
 const providerParam = z.object({ provider: z.enum(['google', 'microsoft']) });
@@ -18,12 +19,16 @@ export default async function calendarRoutes(app: FastifyInstance) {
     const { provider } = providerParam.parse(req.params);
     const q = req.query as { code?: string; state?: string; error?: string };
     let locale = 'el';
-    const back = (result: string) => reply.redirect(`/${locale}/calendar?sync=${encodeURIComponent(result)}`);
-    let st: { u: string; t: string; p: Provider; l: string };
+    let purpose: 'calendar' | 'mail' = 'calendar';
+    const back = (result: string) => reply.redirect(purpose === 'mail'
+      ? `/${locale}/settings?s=email&mail=${encodeURIComponent(result)}`
+      : `/${locale}/calendar?sync=${encodeURIComponent(result)}`);
+    let st: { u: string; t: string; p: Provider; l: string; k?: 'calendar' | 'mail' };
     try {
       const { payload } = await jwtVerify(q.state ?? '', key, { audience: 'calendar-oauth' });
       st = payload as typeof st;
       locale = st.l === 'en' ? 'en' : 'el';
+      purpose = st.k === 'mail' ? 'mail' : 'calendar';
     } catch { return back('invalid_state'); }
     if (st.p !== provider) return back('invalid_state');
     // The browser that comes back must be the same signed-in user who started (protects against a swapped link)
@@ -35,8 +40,27 @@ export default async function calendarRoutes(app: FastifyInstance) {
       } catch { /* expired session: the signed state is enough */ }
     }
     if (q.error || !q.code) return back(q.error === 'access_denied' ? 'denied' : 'error');
+    const app = await oauthApp(provider, st.t);
+    if (!app) return back('error');
+    if (purpose === 'mail') {
+      // Organisation mailbox: emails go out through Gmail API / Microsoft Graph from this address
+      try {
+        const tok = await exchangeCode(provider, q.code, 'mail', app);
+        if (!tok.account_email) return back('error');
+        const secret = { provider, email: tok.account_email, refresh: decryptSecret(tok.refresh_enc), access: decryptSecret(tok.access_enc), expires_at: tok.expires_at.toISOString() };
+        const meta = { provider, email: tok.account_email, status: 'active', set_by: st.u, set_at: new Date().toISOString() };
+        await withTenant(st.t, async (tx) => {
+          await tx`UPDATE tenants SET mail_oauth_enc = ${encryptSecret(JSON.stringify(secret))}, mail_oauth_meta = ${tx.json(meta as never)}, updated_at = now() WHERE id = ${st.t}`;
+          await tx`INSERT INTO audit_log (tenant_id, actor_id, action, entity, details) VALUES (${st.t}, ${st.u}, 'email.mailbox_connect', null, ${tx.json({ provider, email: tok.account_email } as never)})`;
+        });
+        return back(`connected_${provider}`);
+      } catch (e) {
+        req.log.warn({ err: (e as Error).message }, 'mailbox oauth failed');
+        return back((e as Error).message === 'no_refresh_token' ? 'no_refresh' : 'error');
+      }
+    }
     try {
-      const tok = await exchangeCode(provider, q.code);
+      const tok = await exchangeCode(provider, q.code, 'calendar', app);
       const id = await withTenant(st.t, async (tx) => {
         const [c] = await tx`
           INSERT INTO calendar_connections (tenant_id, user_id, provider, account_email, access_enc, refresh_enc, expires_at)
@@ -66,18 +90,20 @@ export default async function calendarRoutes(app: FastifyInstance) {
                (SELECT count(*)::int FROM calendar_event_links l WHERE l.connection_id = c.id) AS pushed,
                (SELECT count(*)::int FROM calendar_busy b WHERE b.connection_id = c.id) AS busy
         FROM calendar_connections c WHERE c.user_id = ${s.userId} ORDER BY c.created_at`);
-      return { providers: Object.fromEntries(PROVIDERS.map((p) => [p, providerConfigured(p)])), connections: rows, impersonating: !!s.impersonator };
+      const providers = Object.fromEntries(await Promise.all(PROVIDERS.map(async (p) => [p, !!(await oauthApp(p, s.tenantId))] as const)));
+      return { providers, connections: rows, impersonating: !!s.impersonator };
     });
 
     r.post('/calendar/oauth/:provider/start', async (req, reply) => {
       const { provider } = providerParam.parse(req.params);
       const s = req.session;
       if (s.impersonator) return reply.code(403).send({ error: 'impersonating' });   // never link someone else's calendar
-      if (!providerConfigured(provider)) return reply.code(409).send({ error: 'not_configured' });
+      const app = await oauthApp(provider, s.tenantId);
+      if (!app) return reply.code(409).send({ error: 'not_configured' });
       const { locale } = z.object({ locale: z.enum(['el', 'en']).default('el') }).parse(req.body ?? {});
       const state = await new SignJWT({ u: s.userId, t: s.tenantId, p: provider, l: locale })
         .setProtectedHeader({ alg: 'HS256' }).setAudience('calendar-oauth').setIssuedAt().setExpirationTime('15m').sign(key);
-      return { url: authUrl(provider, state) };
+      return { url: authUrl(provider, state, 'calendar', app) };
     });
 
     r.patch('/calendar/connections/:id', async (req, reply) => {

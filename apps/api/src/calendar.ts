@@ -9,38 +9,68 @@ import { decryptSecret, encryptSecret } from './registries.js';
 export type Provider = 'google' | 'microsoft';
 export const PROVIDERS: Provider[] = ['google', 'microsoft'];
 
+/** The installation's own OAuth apps (.env). */
 export const providerConfigured = (p: Provider) =>
   p === 'google' ? !!(env.google.clientId && env.google.clientSecret) : !!(env.microsoft.clientId && env.microsoft.clientSecret);
 
+export type OAuthApp = { clientId: string; clientSecret: string; msTenant: string; source: 'org' | 'env' };
+type OrgApps = { google?: { client_id: string; client_secret: string }; microsoft?: { client_id: string; client_secret: string; tenant?: string } };
+const appCache = new Map<string, { at: number; apps: OrgApps | null }>();
+export const invalidateOAuthApps = (tenantId: string) => appCache.delete(tenantId);
+
+/** OAuth app to use for an organisation: its own (Settings → Email), else the installation's .env, else null. */
+export async function oauthApp(p: Provider, tenantId: string): Promise<OAuthApp | null> {
+  let hit = appCache.get(tenantId);
+  if (!hit || Date.now() - hit.at > 60_000) {
+    const [r] = await sql<{ oauth_apps_enc: string | null }[]>`SELECT oauth_apps_enc FROM tenants WHERE id = ${tenantId}`;
+    let apps: OrgApps | null = null;
+    try { apps = r?.oauth_apps_enc ? JSON.parse(decryptSecret(r.oauth_apps_enc) ?? 'null') : null; } catch { apps = null; }
+    hit = { at: Date.now(), apps };
+    appCache.set(tenantId, hit);
+  }
+  const own = hit.apps?.[p];
+  if (own?.client_id && own.client_secret) {
+    return { clientId: own.client_id, clientSecret: own.client_secret, msTenant: (p === 'microsoft' && (own as { tenant?: string }).tenant) || 'common', source: 'org' };
+  }
+  if (!providerConfigured(p)) return null;
+  return p === 'google'
+    ? { clientId: env.google.clientId, clientSecret: env.google.clientSecret, msTenant: 'common', source: 'env' }
+    : { clientId: env.microsoft.clientId, clientSecret: env.microsoft.clientSecret, msTenant: env.microsoft.tenant, source: 'env' };
+}
+
 export const redirectUri = (p: Provider) => `${env.appUrl.replace(/\/$/, '')}/api/calendar/oauth/${p}/callback`;
 
-const MS_BASE = () => `https://login.microsoftonline.com/${env.microsoft.tenant}/oauth2/v2.0`;
-const GOOGLE_SCOPES = 'openid email https://www.googleapis.com/auth/calendar.events';
-const MS_SCOPES = 'offline_access openid email User.Read Calendars.ReadWrite';
+const MS_BASE = (app: OAuthApp) => `https://login.microsoftonline.com/${encodeURIComponent(app.msTenant)}/oauth2/v2.0`;
+/** One OAuth app per provider serves two purposes (same redirect URI): a user's calendar, or the organisation's mailbox. */
+export type Purpose = 'calendar' | 'mail';
+const SCOPES: Record<Provider, Record<Purpose, string>> = {
+  google: { calendar: 'openid email https://www.googleapis.com/auth/calendar.events', mail: 'openid email https://www.googleapis.com/auth/gmail.send' },
+  microsoft: { calendar: 'offline_access openid email User.Read Calendars.ReadWrite', mail: 'offline_access openid email User.Read Mail.Send' },
+};
 
-export function authUrl(p: Provider, state: string) {
+export function authUrl(p: Provider, state: string, purpose: Purpose, app: OAuthApp) {
   if (p === 'google') {
     const q = new URLSearchParams({
-      client_id: env.google.clientId, redirect_uri: redirectUri(p), response_type: 'code', scope: GOOGLE_SCOPES,
+      client_id: app.clientId, redirect_uri: redirectUri(p), response_type: 'code', scope: SCOPES.google[purpose],
       access_type: 'offline', prompt: 'consent', include_granted_scopes: 'true', state,
     });
     return `https://accounts.google.com/o/oauth2/v2/auth?${q}`;
   }
   const q = new URLSearchParams({
-    client_id: env.microsoft.clientId, redirect_uri: redirectUri(p), response_type: 'code', response_mode: 'query', scope: MS_SCOPES, state, prompt: 'select_account',
+    client_id: app.clientId, redirect_uri: redirectUri(p), response_type: 'code', response_mode: 'query', scope: SCOPES.microsoft[purpose], state, prompt: 'select_account',
   });
-  return `${MS_BASE()}/authorize?${q}`;
+  return `${MS_BASE(app)}/authorize?${q}`;
 }
 
 type TokenResponse = { access_token: string; refresh_token?: string; expires_in: number; id_token?: string; error?: string; error_description?: string };
 
-async function tokenRequest(p: Provider, params: Record<string, string>): Promise<TokenResponse> {
-  const url = p === 'google' ? 'https://oauth2.googleapis.com/token' : `${MS_BASE()}/token`;
+export async function tokenRequest(p: Provider, params: Record<string, string>, purpose: Purpose, app: OAuthApp): Promise<TokenResponse> {
+  const url = p === 'google' ? 'https://oauth2.googleapis.com/token' : `${MS_BASE(app)}/token`;
   const body = new URLSearchParams({
     ...params,
-    client_id: p === 'google' ? env.google.clientId : env.microsoft.clientId,
-    client_secret: p === 'google' ? env.google.clientSecret : env.microsoft.clientSecret,
-    ...(p === 'microsoft' ? { scope: MS_SCOPES } : {}),
+    client_id: app.clientId,
+    client_secret: app.clientSecret,
+    ...(p === 'microsoft' ? { scope: SCOPES.microsoft[purpose] } : {}),
   });
   const r = await fetch(url, { method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded' }, body, signal: AbortSignal.timeout(20000) });
   const j = (await r.json().catch(() => ({}))) as TokenResponse;
@@ -53,8 +83,8 @@ export class CalendarError extends Error {
 }
 
 /** Exchanges the OAuth code, finds the account email, returns what to store. */
-export async function exchangeCode(p: Provider, code: string) {
-  const t = await tokenRequest(p, { grant_type: 'authorization_code', code, redirect_uri: redirectUri(p) });
+export async function exchangeCode(p: Provider, code: string, purpose: Purpose, app: OAuthApp) {
+  const t = await tokenRequest(p, { grant_type: 'authorization_code', code, redirect_uri: redirectUri(p) }, purpose, app);
   if (!t.refresh_token) throw new CalendarError('token_error', 'no_refresh_token');
   let email: string | null = null;
   if (t.id_token) {
@@ -86,7 +116,9 @@ async function accessToken(c: Conn): Promise<string> {
   const refresh = decryptSecret(c.refresh_enc);
   if (!refresh) throw new CalendarError('revoked', 'cannot decrypt refresh token');
   try {
-    const t = await tokenRequest(c.provider, { grant_type: 'refresh_token', refresh_token: refresh });
+    const app = await oauthApp(c.provider, c.tenant_id);
+    if (!app) throw new CalendarError('revoked', 'no OAuth app configured');
+    const t = await tokenRequest(c.provider, { grant_type: 'refresh_token', refresh_token: refresh }, 'calendar', app);
     const expires = new Date(Date.now() + (t.expires_in - 60) * 1000);
     await sql`UPDATE calendar_connections SET access_enc = ${encryptSecret(t.access_token)}, expires_at = ${expires},
               refresh_enc = ${t.refresh_token ? encryptSecret(t.refresh_token) : c.refresh_enc} WHERE id = ${c.id}`;

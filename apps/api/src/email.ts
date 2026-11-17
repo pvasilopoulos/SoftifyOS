@@ -4,7 +4,8 @@ import nodemailer, { type Transporter } from 'nodemailer';
 import { z } from 'zod';
 import { env } from './env.js';
 import { sql } from './db.js';
-import { decryptSecret } from './registries.js';
+import { decryptSecret, encryptSecret } from './registries.js';
+import { CalendarError, oauthApp, tokenRequest, type Provider } from './calendar.js';
 
 export const TEMPLATE_KEYS = ['offer_send', 'offer_reminder'] as const;
 export type TemplateKey = (typeof TEMPLATE_KEYS)[number];
@@ -108,27 +109,89 @@ const serverTransport = env.smtpConfigured
   ? makeTransport({ host: env.smtp.host, port: env.smtp.port, secure: env.smtp.secure, user: env.smtp.user, pass: env.smtp.pass, from: env.smtp.from })
   : null;
 
+// ------------------------------------------------------------------ OAuth mailbox (Microsoft 365 / Google)
+type Mailbox = { provider: Provider; email: string; refresh: string; access?: string; expires_at?: string };
+
+/** Valid access token for the organisation mailbox (refreshed and saved when expired). */
+async function mailboxToken(tenantId: string): Promise<{ token: string; mb: Mailbox }> {
+  const [r] = await sql<{ mail_oauth_enc: string | null }[]>`SELECT mail_oauth_enc FROM tenants WHERE id = ${tenantId}`;
+  const mb = r?.mail_oauth_enc ? (JSON.parse(decryptSecret(r.mail_oauth_enc) ?? 'null') as Mailbox | null) : null;
+  if (!mb) throw new CalendarError('revoked', 'mailbox not connected');
+  if (mb.access && mb.expires_at && new Date(mb.expires_at).getTime() > Date.now() + 30_000) return { token: mb.access, mb };
+  try {
+    const app = await oauthApp(mb.provider, tenantId);
+    if (!app) throw new CalendarError('revoked', 'no OAuth app configured');
+    const t = await tokenRequest(mb.provider, { grant_type: 'refresh_token', refresh_token: mb.refresh }, 'mail', app);
+    const next: Mailbox = { ...mb, access: t.access_token, refresh: t.refresh_token ?? mb.refresh, expires_at: new Date(Date.now() + (t.expires_in - 60) * 1000).toISOString() };
+    await sql`UPDATE tenants SET mail_oauth_enc = ${encryptSecret(JSON.stringify(next))} WHERE id = ${tenantId}`;
+    return { token: t.access_token, mb: next };
+  } catch (e) {
+    if (e instanceof CalendarError && e.code === 'revoked') {
+      await sql`UPDATE tenants SET mail_oauth_meta = mail_oauth_meta || ${sql.json({ status: 'revoked', last_error: (e as Error).message.slice(0, 200) } as never)} WHERE id = ${tenantId}`;
+    }
+    throw e;
+  }
+}
+
+/** Nodemailer transport that builds the MIME message and sends it with Gmail API / Microsoft Graph. */
+function oauthTransport(tenantId: string): Transporter {
+  return nodemailer.createTransport({
+    name: 'softify-oauth', version: '1',
+    send(mail: { message: { keepBcc: boolean; build: () => Promise<Buffer>; getEnvelope: () => unknown; messageId: () => string } }, cb: (e: Error | null, info?: unknown) => void) {
+      (async () => {
+        mail.message.keepBcc = true;   // both APIs read the recipients from the headers
+        const raw = await mail.message.build();
+        const { token, mb } = await mailboxToken(tenantId);
+        const r = mb.provider === 'google'
+          ? await fetch('https://gmail.googleapis.com/gmail/v1/users/me/messages/send', {
+              method: 'POST', signal: AbortSignal.timeout(30000), headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+              body: JSON.stringify({ raw: raw.toString('base64url') }) })
+          : await fetch('https://graph.microsoft.com/v1.0/me/sendMail', {
+              method: 'POST', signal: AbortSignal.timeout(30000), headers: { authorization: `Bearer ${token}`, 'content-type': 'text/plain' },
+              body: raw.toString('base64') });
+        if (!r.ok) throw new Error(`${mb.provider === 'google' ? 'Gmail' : 'Microsoft Graph'} ${r.status}: ${(await r.text()).slice(0, 300)}`);
+        cb(null, { envelope: mail.message.getEnvelope(), messageId: mail.message.messageId() });
+      })().catch((e) => cb(e as Error));
+    },
+  } as never);
+}
+
+/** Checks that the mailbox is usable (token refresh works). */
+export async function verifyMailbox(tenantId: string) { await mailboxToken(tenantId); }
+
 // Organisation transports are reused (pooled per tenant) and rebuilt when the settings change
 const cache = new Map<string, { enc: string; t: Transporter; from: string }>();
 
-/** Transport + default From for a tenant: its own SMTP, else the server's, else null (log only). */
-export async function transportFor(tenantId: string | undefined) {
+export type Sender = { transport: Transporter; from: string; own: boolean; kind: 'google' | 'microsoft' | 'smtp' | 'server' };
+
+/** Transport + default From for a tenant: connected mailbox (M365 / Google), else its own SMTP, else the server's, else null (log only). */
+export async function transportFor(tenantId: string | undefined): Promise<Sender | null> {
   if (tenantId) {
-    const [r] = await sql<{ smtp_enc: string | null }[]>`SELECT smtp_enc FROM tenants WHERE id = ${tenantId}`;
+    const [r] = await sql<{ smtp_enc: string | null; mail_oauth_meta: { provider: Provider; email: string; status?: string } | null }[]>`
+      SELECT smtp_enc, mail_oauth_meta FROM tenants WHERE id = ${tenantId}`;
+    const mb = r?.mail_oauth_meta;
+    if (mb && mb.status !== 'revoked') {
+      const key = `oauth:${mb.provider}:${mb.email}`;
+      const hit = cache.get(tenantId);
+      if (hit?.enc === key) return { transport: hit.t, from: hit.from, own: true, kind: mb.provider };
+      const t = oauthTransport(tenantId);
+      cache.set(tenantId, { enc: key, t, from: mb.email });
+      return { transport: t, from: mb.email, own: true, kind: mb.provider };
+    }
     if (r?.smtp_enc) {
       const hit = cache.get(tenantId);
-      if (hit && hit.enc === r.smtp_enc) return { transport: hit.t, from: hit.from, own: true };
+      if (hit && hit.enc === r.smtp_enc) return { transport: hit.t, from: hit.from, own: true, kind: 'smtp' };
       const plain = decryptSecret(r.smtp_enc);
       const parsed = plain ? smtpSchema.safeParse(JSON.parse(plain)) : null;
       if (parsed?.success) {
         hit?.t.close();
         const t = makeTransport(parsed.data);
         cache.set(tenantId, { enc: r.smtp_enc, t, from: parsed.data.from });
-        return { transport: t, from: parsed.data.from, own: true };
+        return { transport: t, from: parsed.data.from, own: true, kind: 'smtp' };
       }
     }
   }
-  return serverTransport ? { transport: serverTransport, from: env.smtp.from, own: false } : null;
+  return serverTransport ? { transport: serverTransport, from: env.smtp.from, own: false, kind: 'server' } : null;
 }
 
 /** "Display Name <addr>" with the organisation's sender name in front of the transport's address. */

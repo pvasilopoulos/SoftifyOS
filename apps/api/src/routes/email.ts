@@ -6,7 +6,11 @@ import { can, requireAuth } from '../auth.js';
 import { decryptSecret, encryptSecret } from '../registries.js';
 import { audit } from './settings.js';
 import { env } from '../env.js';
-import { DEFAULT_TEMPLATES, emailSettingsSchema, makeTransport, readSettings, smtpSchema, TEMPLATE_KEYS, transportFor, withName } from '../email.js';
+import { DEFAULT_TEMPLATES, emailSettingsSchema, makeTransport, readSettings, smtpSchema, TEMPLATE_KEYS, transportFor, verifyMailbox, withName } from '../email.js';
+import { authUrl, invalidateOAuthApps, oauthApp, providerConfigured, redirectUri } from '../calendar.js';
+import { SignJWT } from 'jose';
+
+const jwtKey = new TextEncoder().encode(env.jwtSecret);
 
 // 1×1 transparent GIF
 const PIXEL = Buffer.from('R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7', 'base64');
@@ -31,7 +35,7 @@ export default async function emailRoutes(app: FastifyInstance) {
       const s = req.session;
       if (!can(s, 'settings.manage')) return reply.code(403).send({ error: 'forbidden' });
       return withTenant(s.tenantId, async (tx) => {
-        const [t] = await tx`SELECT email_settings, smtp_meta FROM tenants WHERE id = ${s.tenantId}`;
+        const [t] = await tx`SELECT email_settings, smtp_meta, mail_oauth_meta, oauth_apps_meta FROM tenants WHERE id = ${s.tenantId}`;
         const [stats] = await tx`
           SELECT count(*)::int AS sent, count(*) FILTER (WHERE opened_at IS NOT NULL)::int AS opened,
                  count(*) FILTER (WHERE status = 'failed')::int AS failed
@@ -41,6 +45,13 @@ export default async function emailRoutes(app: FastifyInstance) {
           defaults: DEFAULT_TEMPLATES,
           template_keys: TEMPLATE_KEYS,
           smtp: t.smtp_meta ?? null,
+          mailbox: t.mail_oauth_meta ?? null,
+          oauth: { google: !!(await oauthApp('google', s.tenantId)), microsoft: !!(await oauthApp('microsoft', s.tenantId)) },
+          oauth_apps: {
+            meta: t.oauth_apps_meta ?? {},
+            env: { google: providerConfigured('google'), microsoft: providerConfigured('microsoft') },
+            redirect: { google: redirectUri('google'), microsoft: redirectUri('microsoft') },
+          },
           server_smtp: env.smtpConfigured ? { host: env.smtp.host, from: env.smtp.from } : null,
           stats,
         };
@@ -80,6 +91,72 @@ export default async function emailRoutes(app: FastifyInstance) {
       return { ok: true, smtp: res };
     });
 
+    // ---- Microsoft 365 / Google mailbox (OAuth): sends without SMTP passwords
+    r.post('/settings/email/oauth/:provider/start', async (req, reply) => {
+      const s = req.session;
+      if (!can(s, 'settings.manage') || s.impersonator) return reply.code(403).send({ error: 'forbidden' });
+      const { provider } = z.object({ provider: z.enum(['google', 'microsoft']) }).parse(req.params);
+      const app = await oauthApp(provider, s.tenantId);
+      if (!app) return reply.code(409).send({ error: 'not_configured' });
+      const { locale } = z.object({ locale: z.enum(['el', 'en']).default('el') }).parse(req.body ?? {});
+      const state = await new SignJWT({ u: s.userId, t: s.tenantId, p: provider, l: locale, k: 'mail' })
+        .setProtectedHeader({ alg: 'HS256' }).setAudience('calendar-oauth').setIssuedAt().setExpirationTime('15m').sign(jwtKey);
+      return { url: authUrl(provider, state, 'mail', app) };
+    });
+
+    // ---- the organisation's own OAuth apps (Client ID / secret); secrets are stored encrypted and never returned
+    r.put('/settings/email/oauth-app/:provider', async (req, reply) => {
+      const s = req.session;
+      if (!can(s, 'settings.manage') || s.impersonator) return reply.code(403).send({ error: 'forbidden' });
+      const { provider } = z.object({ provider: z.enum(['google', 'microsoft']) }).parse(req.params);
+      const b = z.object({
+        client_id: z.string().trim().min(8).max(200).regex(/^[A-Za-z0-9._-]+$/),
+        client_secret: z.string().trim().max(500).optional(),            // empty = keep the stored one
+        tenant: z.string().trim().max(100).regex(/^[A-Za-z0-9.-]*$/).optional(),   // Microsoft: directory (tenant) ID, or common
+      }).parse(req.body);
+      const res = await withTenant(s.tenantId, async (tx) => {
+        const [t] = await tx`SELECT oauth_apps_enc, oauth_apps_meta FROM tenants WHERE id = ${s.tenantId}`;
+        const apps = (t.oauth_apps_enc ? JSON.parse(decryptSecret(t.oauth_apps_enc) ?? '{}') : {}) as Record<string, { client_id: string; client_secret: string; tenant?: string }>;
+        // A new Client ID needs its own secret; the same Client ID keeps the stored secret when the field is left empty
+        const secret = b.client_secret || (apps[provider]?.client_id === b.client_id ? apps[provider]?.client_secret : '');
+        if (!secret) return { code: 400 as const };
+        apps[provider] = { client_id: b.client_id, client_secret: secret, ...(provider === 'microsoft' ? { tenant: b.tenant || 'common' } : {}) };
+        const meta = { ...(t.oauth_apps_meta ?? {}), [provider]: { client_id: b.client_id, ...(provider === 'microsoft' ? { tenant: b.tenant || 'common' } : {}), set_by: s.userId, set_at: new Date().toISOString() } };
+        await tx`UPDATE tenants SET oauth_apps_enc = ${encryptSecret(JSON.stringify(apps))}, oauth_apps_meta = ${tx.json(meta as never)}, updated_at = now() WHERE id = ${s.tenantId}`;
+        await audit(tx, s, 'email.oauth_app_set', null, { provider, client_id: b.client_id });
+        return { code: 200 as const };
+      });
+      invalidateOAuthApps(s.tenantId);
+      return res.code === 400 ? reply.code(400).send({ error: 'secret_required' }) : { ok: true };
+    });
+
+    r.delete('/settings/email/oauth-app/:provider', async (req, reply) => {
+      const s = req.session;
+      if (!can(s, 'settings.manage') || s.impersonator) return reply.code(403).send({ error: 'forbidden' });
+      const { provider } = z.object({ provider: z.enum(['google', 'microsoft']) }).parse(req.params);
+      await withTenant(s.tenantId, async (tx) => {
+        const [t] = await tx`SELECT oauth_apps_enc, oauth_apps_meta FROM tenants WHERE id = ${s.tenantId}`;
+        const apps = (t.oauth_apps_enc ? JSON.parse(decryptSecret(t.oauth_apps_enc) ?? '{}') : {}) as Record<string, unknown>;
+        const meta = { ...(t.oauth_apps_meta ?? {}) } as Record<string, unknown>;
+        delete apps[provider]; delete meta[provider];
+        const empty = !Object.keys(apps).length;
+        await tx`UPDATE tenants SET oauth_apps_enc = ${empty ? null : encryptSecret(JSON.stringify(apps))}, oauth_apps_meta = ${empty ? null : tx.json(meta as never)}, updated_at = now() WHERE id = ${s.tenantId}`;
+        await audit(tx, s, 'email.oauth_app_removed', null, { provider });
+      });
+      invalidateOAuthApps(s.tenantId);
+      return { ok: true };
+    });
+
+    r.delete('/settings/email/oauth', async (req, reply) => {
+      const s = req.session;
+      if (!can(s, 'settings.manage')) return reply.code(403).send({ error: 'forbidden' });
+      await withTenant(s.tenantId, async (tx) => {
+        await tx`UPDATE tenants SET mail_oauth_enc = NULL, mail_oauth_meta = NULL, updated_at = now() WHERE id = ${s.tenantId}`;
+        await audit(tx, s, 'email.mailbox_disconnect', null);
+      });
+      return { ok: true };
+    });
+
     r.delete('/settings/email/smtp', async (req, reply) => {
       const s = req.session;
       if (!can(s, 'settings.manage')) return reply.code(403).send({ error: 'forbidden' });
@@ -106,10 +183,11 @@ export default async function emailRoutes(app: FastifyInstance) {
           conf.pass = t?.smtp_enc ? JSON.parse(decryptSecret(t.smtp_enc) ?? '{}').pass ?? null : null;
         }
       }
-      const tr = conf ? { transport: makeTransport(conf), from: conf.from } : await transportFor(s.tenantId);
+      const tr = conf ? { transport: makeTransport(conf), from: conf.from, kind: 'smtp' as const } : await transportFor(s.tenantId);
       if (!tr) return { ok: false, error: 'not_configured' };
       try {
-        await tr.transport.verify();
+        if (tr.kind === 'google' || tr.kind === 'microsoft') await verifyMailbox(s.tenantId);
+        else await tr.transport.verify();
         await tr.transport.sendMail({
           from: withName(tr.from, null), to: me.email, subject: 'SoftifyOS: test email ✓',
           text: 'Η αποστολή email από το SoftifyOS λειτουργεί. / Email sending from SoftifyOS works.',

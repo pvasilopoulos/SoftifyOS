@@ -98,13 +98,23 @@ sudo -u softify -H bash -c 'cd /opt/softifyos && npm run tenant:create -- \
    - **Android:** Chrome → *Εγκατάσταση εφαρμογής*.
 2. **Περισσότερα → Ενεργοποίηση push ειδοποιήσεων → Αποστολή δοκιμαστικής ειδοποίησης.**
 
-## Βήμα 9 · Συγχρονισμός ημερολογίου (προαιρετικό)
+## Βήμα 9 · Microsoft 365 / Google: ημερολόγιο και αποστολή email (προαιρετικό)
 
-Κάθε χρήστης συνδέει το Google Calendar ή το Outlook / Microsoft 365 από το **Ημερολόγιο → ⟳**. Για να ενεργοποιηθεί, χρειάζεται μία φορά από εσένα:
+Με τις ίδιες δύο εφαρμογές OAuth:
+- κάθε οργανισμός συνδέει το mailbox του από **Ρυθμίσεις → Email → «Σύνδεση με Microsoft 365 / Google»**, και τα email φεύγουν από εκεί χωρίς κωδικούς SMTP;
+- κάθε χρήστης συνδέει το ημερολόγιό του.
+
+Κάθε χρήστης συνδέει το Google Calendar ή το Outlook / Microsoft 365 από το **Ημερολόγιο → ⟳**.
+
+Τα κλειδιά της εφαρμογής (Client ID / secret) μπαίνουν με δύο τρόπους:
+- **ανά οργανισμό**, από **Ρυθμίσεις → Email → «Κλειδιά εφαρμογής Microsoft / Google»**, όπου εμφανίζεται και το Redirect URI για αντιγραφή;
+- **για όλη την εγκατάσταση**, στο `.env`, όπως παρακάτω. Χρησιμοποιούνται όταν ένας οργανισμός δεν έχει δικά του.
+
+Και στις δύο περιπτώσεις, η εφαρμογή δημιουργείται μία φορά:
 
 **Google**
 1. https://console.cloud.google.com → νέο project → **APIs & Services → Library** → ενεργοποίησε το **Google Calendar API**.
-2. **OAuth consent screen**: External, όνομα «SoftifyOS», scope `…/auth/calendar.events`. Για δημόσια χρήση χρειάζεται επαλήθευση από τη Google.
+2. **OAuth consent screen**: External, όνομα «SoftifyOS», scopes `…/auth/calendar.events` και `…/auth/gmail.send`, και ενεργοποίησε και το **Gmail API**. Για δημόσια χρήση χρειάζεται επαλήθευση από τη Google.
 3. **Credentials → Create credentials → OAuth client ID → Web application**, με Authorized redirect URI:
    `https://app.softify.gr/api/calendar/oauth/google/callback`
 4. Στο `.env`: `GOOGLE_CLIENT_ID=…` και `GOOGLE_CLIENT_SECRET=…`
@@ -112,7 +122,7 @@ sudo -u softify -H bash -c 'cd /opt/softifyos && npm run tenant:create -- \
 **Microsoft 365 / Outlook**
 1. https://entra.microsoft.com → **App registrations → New registration**, με «Accounts in any organizational directory and personal Microsoft accounts».
 2. Redirect URI (Web): `https://app.softify.gr/api/calendar/oauth/microsoft/callback`
-3. **API permissions → Microsoft Graph → Delegated**: `Calendars.ReadWrite`, `User.Read`, `offline_access`.
+3. **API permissions → Microsoft Graph → Delegated**: `Calendars.ReadWrite`, `Mail.Send`, `User.Read`, `offline_access`.
 4. **Certificates & secrets → New client secret**.
 5. Στο `.env`: `MS_CLIENT_ID=…` και `MS_CLIENT_SECRET=…`
 
