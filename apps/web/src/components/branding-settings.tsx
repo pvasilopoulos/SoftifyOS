@@ -159,7 +159,7 @@ export function BrandingSection() {
             {[64, 48].map((s) => (
               <div key={s} className="flex flex-col items-center gap-1">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={brandAsset(b, 'icon') ?? '/icons/192'} alt="" style={{ width: s, height: s }} className="rounded-[22%] bg-white object-cover shadow-lg" />
+                <img src={brandAsset(b, 'icon') ?? '/icons/192?v=2'} alt="" style={{ width: s, height: s }} className="rounded-[22%] bg-white object-cover shadow-lg" />
                 <span className="max-w-20 truncate text-[11px] text-white/80">{preview.name}</span>
               </div>
             ))}
@@ -172,7 +172,7 @@ export function BrandingSection() {
           <div className="flex flex-1 items-center rounded-2xl bg-surface-2 p-3">
             <div className="flex max-w-60 items-center gap-2 rounded-t-xl border border-b-0 border-border bg-surface px-3 py-2 text-sm">
               {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={brandAsset(b, 'favicon') ?? brandAsset(b, 'icon192') ?? '/icons/192'} alt="" className="h-4 w-4 object-contain" />
+              <img src={brandAsset(b, 'favicon') ?? brandAsset(b, 'icon192') ?? '/icons/192?v=2'} alt="" className="h-4 w-4 object-contain" />
               <span className="truncate">{preview.name}</span>
             </div>
           </div>

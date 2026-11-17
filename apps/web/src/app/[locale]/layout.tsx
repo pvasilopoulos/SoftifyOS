@@ -15,7 +15,7 @@ export const metadata: Metadata = {
   // Per-organisation name and icons (falls back to the SoftifyOS defaults when signed out)
   manifest: '/api/brand/manifest.webmanifest',
   appleWebApp: { capable: true, title: 'SoftifyOS', statusBarStyle: 'default' },
-  icons: { icon: '/icons/192', apple: '/icons/180' },
+  icons: { icon: [{ url: '/favicon.svg', type: 'image/svg+xml' }, { url: '/icons/192?v=2', type: 'image/png' }], apple: '/icons/180?v=2' },
 };
 
 export const viewport: Viewport = {

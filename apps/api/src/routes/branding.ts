@@ -96,14 +96,14 @@ export default async function brandingRoutes(app: FastifyInstance) {
         { src: big, sizes: '512x512', type: 'image/png', purpose: 'any' },
         { src: big, sizes: '512x512', type: 'image/png', purpose: 'maskable' },
       ] : [
-        { src: '/icons/192', sizes: '192x192', type: 'image/png', purpose: 'any' },
-        { src: '/icons/512', sizes: '512x512', type: 'image/png', purpose: 'any' },
-        { src: '/icons/512m', sizes: '512x512', type: 'image/png', purpose: 'maskable' },
+        { src: '/icons/192?v=2', sizes: '192x192', type: 'image/png', purpose: 'any' },
+        { src: '/icons/512?v=2', sizes: '512x512', type: 'image/png', purpose: 'any' },
+        { src: '/icons/512m?v=2', sizes: '512x512', type: 'image/png', purpose: 'maskable' },
       ],
       shortcuts: [
-        { name: 'Πελάτες', url: '/customers', icons: [{ src: small ?? '/icons/96', sizes: small ? '192x192' : '96x96' }] },
-        { name: 'Προσφορές', url: '/offers', icons: [{ src: small ?? '/icons/96', sizes: small ? '192x192' : '96x96' }] },
-        { name: 'Ημερολόγιο', url: '/calendar', icons: [{ src: small ?? '/icons/96', sizes: small ? '192x192' : '96x96' }] },
+        { name: 'Πελάτες', url: '/customers', icons: [{ src: small ?? '/icons/96?v=2', sizes: small ? '192x192' : '96x96' }] },
+        { name: 'Προσφορές', url: '/offers', icons: [{ src: small ?? '/icons/96?v=2', sizes: small ? '192x192' : '96x96' }] },
+        { name: 'Ημερολόγιο', url: '/calendar', icons: [{ src: small ?? '/icons/96?v=2', sizes: small ? '192x192' : '96x96' }] },
       ],
     };
   });

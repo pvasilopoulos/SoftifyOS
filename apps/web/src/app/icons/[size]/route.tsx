@@ -1,8 +1,9 @@
 import { ImageResponse } from 'next/og';
+import { MARK, markShapes } from '@/components/softify-mark';
 
 // Generated PNG app icons: /icons/96, /icons/180 (apple), /icons/192, /icons/512, /icons/512m (maskable)
-const SIZES: Record<string, { px: number; maskable?: boolean }> = {
-  '96': { px: 96 }, '180': { px: 180 }, '192': { px: 192 }, '512': { px: 512 }, '512m': { px: 512, maskable: true },
+const SIZES: Record<string, { px: number; maskable?: boolean; apple?: boolean }> = {
+  '96': { px: 96 }, '180': { px: 180, apple: true }, '192': { px: 192 }, '512': { px: 512 }, '512m': { px: 512, maskable: true },
 };
 
 export function generateStaticParams() {
@@ -13,14 +14,16 @@ export async function GET(_req: Request, { params }: { params: Promise<{ size: s
   const { size } = await params;
   const cfg = SIZES[size] ?? SIZES['192'];
   const px = cfg.px;
-  const inner = cfg.maskable ? px * 0.6 : px;
+  // Maskable: full-bleed tile, modules shrunk into the safe zone. Apple: iOS rounds the corners itself.
+  const full = cfg.maskable || cfg.apple;
+  const view = cfg.maskable ? '-8 -8 80 80' : '0 0 64 64';
   return new ImageResponse(
     (
-      <div style={{ width: px, height: px, display: 'flex', alignItems: 'center', justifyContent: 'center', background: cfg.maskable ? '#5b3df5' : 'transparent' }}>
-        <div style={{
-          width: inner, height: inner, borderRadius: cfg.maskable ? 0 : px * 0.22, display: 'flex', alignItems: 'center', justifyContent: 'center',
-          background: 'linear-gradient(135deg, #7c63ff 0%, #4a2ee0 100%)', color: 'white', fontSize: inner * 0.58, fontWeight: 900,
-        }}>S</div>
+      <div style={{ width: px, height: px, display: 'flex', background: full ? MARK.tile : 'transparent' }}>
+        <svg width={px} height={px} viewBox={view}>
+          {!full && <rect width="64" height="64" rx="15" fill={MARK.tile} />}
+          {markShapes()}
+        </svg>
       </div>
     ),
     { width: px, height: px, headers: { 'Cache-Control': 'public, max-age=31536000, immutable' } },

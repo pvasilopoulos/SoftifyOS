@@ -1,5 +1,5 @@
 /* SoftifyOS service worker: app-shell caching + Web Push */
-const VERSION = 'v2';
+const VERSION = 'v3';
 const STATIC_CACHE = `softify-static-${VERSION}`;
 const PAGE_CACHE = `softify-pages-${VERSION}`;
 
@@ -55,8 +55,8 @@ self.addEventListener('push', (event) => {
   const title = data.title || 'SoftifyOS';
   event.waitUntil(self.registration.showNotification(title, {
     body: data.body || '',
-    icon: '/icons/192',
-    badge: '/icons/96',
+    icon: '/icons/192?v=2',
+    badge: '/icons/96?v=2',
     tag: data.tag,
     data: { url: data.url || '/' },
   }));

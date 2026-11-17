@@ -46,8 +46,8 @@ export function useBrandHead(b: Brand) {
       }
       el.href = href ?? fallback;
     };
-    set('icon', brandAsset(b, 'favicon') ?? brandAsset(b, 'icon192'), '/icons/192');
-    set('apple-touch-icon', brandAsset(b, 'icon'), '/icons/180');
+    set('icon', brandAsset(b, 'favicon') ?? brandAsset(b, 'icon192'), '/favicon.svg');
+    set('apple-touch-icon', brandAsset(b, 'icon'), '/icons/180?v=2');
   }, [b]);
   // Page titles come from Next metadata ("… · SoftifyOS"): swap in the organisation name after each navigation
   useEffect(() => {
