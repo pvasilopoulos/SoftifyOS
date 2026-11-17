@@ -45,7 +45,9 @@ API_PORT="$(grep -E '^API_PORT=' "$APP_DIR/.env" | cut -d= -f2)"
 WEB_PORT="$(grep -E '^WEB_PORT=' "$APP_DIR/.env" | cut -d= -f2)"
 c "Έλεγχος λειτουργίας"
 for i in $(seq 1 20); do
-  if curl -fsS "http://127.0.0.1:${API_PORT:-4000}/api/health" >/dev/null 2>&1 \
+  # The API answers 503 when something needs attention (e.g. no backup yet): it is still up
+  API_CODE="$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:${API_PORT:-4000}/api/health" 2>/dev/null || true)"
+  if { [ "$API_CODE" = 200 ] || [ "$API_CODE" = 503 ]; } \
      && curl -fsS -o /dev/null "http://127.0.0.1:${WEB_PORT:-3000}/el/login"; then
     as_app "pm2 ls"
     echo -e "\n\033[1;32m✓ Το SoftifyOS τρέχει.\033[0m"
