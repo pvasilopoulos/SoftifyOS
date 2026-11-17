@@ -17,7 +17,8 @@
     "build": "npm run build -w @softify/api && npm run build -w @softify/web",
     "typecheck": "npm run typecheck --workspaces",
     "tenant:create": "npm run tenant:create -w @softify/api --",
-    "release": "node deploy/make-release.mjs"
+    "release": "node deploy/make-release.mjs",
+    "plesk": "node deploy/plesk/cli.mjs"
   },
   "engines": {
     "node": ">=24"

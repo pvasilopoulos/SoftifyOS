@@ -1,7 +1,8 @@
 # Εγκατάσταση SoftifyOS στο app.softify.gr (Ubuntu + Plesk)
 
 Χρόνος: περίπου 20 λεπτά. Χρειάζεσαι πρόσβαση **SSH ως root** στον server.
-Χωρίς SSH: δες την ενότητα [Εγκατάσταση χωρίς SSH](#εγκατάσταση-χωρίς-ssh-μόνο-από-το-plesk) στο τέλος.
+Χωρίς δικαιώματα root στο Plesk: δες το [PLESK-NODEJS.md](PLESK-NODEJS.md) (Node.js του Plesk + Neon).
+Με admin Plesk αλλά χωρίς SSH: δες την ενότητα [Εγκατάσταση χωρίς SSH](#εγκατάσταση-χωρίς-ssh-μόνο-από-το-plesk) στο τέλος.
 
 ```
 Internet ─HTTPS─► nginx (Plesk) ─┬─ /api/*  ─► softify-api     (127.0.0.1:4000, 2 instances)

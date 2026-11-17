@@ -11,3 +11,6 @@ dist
 next-env.d.ts
 release
 storage
+.run
+tmp/restart.txt
+admin-password.txt
