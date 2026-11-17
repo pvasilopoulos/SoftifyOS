@@ -8,7 +8,7 @@ import { env } from './env.js';
 
 type Source = 'api' | 'worker' | 'web';
 const SECRET_RE = /(password|pass|token|secret|authorization|cookie|api[_-]?key)=?[^&\s"']*/gi;
-const scrub = (s: string) => s.replace(SECRET_RE, '$1=[redacted]').replace(/sk-ant-[A-Za-z0-9_-]+|sos_[a-f0-9]{12}_[A-Za-z0-9_-]+/g, '[redacted]');
+const scrub = (s: string) => s.replace(/[\u0000-\u0008\u000b-\u001f]/g, '').replace(SECRET_RE, '$1=[redacted]').replace(/sk-ant-[A-Za-z0-9_-]+|sos_[a-f0-9]{12}_[A-Za-z0-9_-]+/g, '[redacted]');
 
 /** Records an error (never throws). Same message + first stack frame = same group. */
 export async function captureError(source: Source, err: unknown, context?: Record<string, unknown>) {

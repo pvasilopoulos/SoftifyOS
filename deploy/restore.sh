@@ -63,7 +63,7 @@ read -r -p "Type the database name to continue: " CONFIRM
 [ "$CONFIRM" = "$DB_NAME" ] || { echo "Cancelled."; exit 1; }
 
 echo "1/5 Safety backup of the current state…"
-APP_DIR="$APP_DIR" bash "$APP_DIR/deploy/backup.sh" >/dev/null && echo "    done ($(ls -1dt "$BACKUP_DIR"/[0-9]*_[0-9]* | head -1))"
+sudo -u "$APP_USER" -H APP_DIR="$APP_DIR" bash "$APP_DIR/deploy/backup.sh" >/dev/null && echo "    done ($(ls -1dt "$BACKUP_DIR"/[0-9]*_[0-9]* | head -1))"
 
 echo "2/5 Stopping the app…"
 sudo -u "$APP_USER" -H pm2 stop softify-web softify-api softify-worker >/dev/null 2>&1 || true

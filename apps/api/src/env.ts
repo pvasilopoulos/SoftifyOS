@@ -37,6 +37,8 @@ export const env = {
   // Monitoring: new errors are sent once to these (both optional); BACKUP_DIR lets /api/health report the last backup
   alert: { email: process.env.ALERT_EMAIL ?? '', webhook: process.env.ALERT_WEBHOOK_URL ?? '' },
   backupDir: process.env.BACKUP_DIR ?? '',
+  // Who sees Settings → System health / Backups (installation-wide). Empty in development = organisation owners.
+  platformAdmins: (process.env.PLATFORM_ADMINS ?? '').split(',').map((x) => x.trim().toLowerCase()).filter(Boolean),
   // SaaS billing (Stripe). Without STRIPE_SECRET_KEY there are no plans/limits (single-company installation).
   stripe: {
     secretKey: process.env.STRIPE_SECRET_KEY ?? '',

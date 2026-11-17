@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { verify } from '@node-rs/argon2';
 import { sql, withTenant } from '../db.js';
 import { billingSummary } from '../billing.js';
+import { isPlatformAdmin } from './system.js';
 import { clearSession, issueSession, notImpersonating, requireAuth } from '../auth.js';
 import { loadBrand } from './branding.js';
 import { effectiveFilters } from '../filters.js';
@@ -89,6 +90,6 @@ export default async function authRoutes(app: FastifyInstance) {
       },
       custom_filters: customFilters,
     }))(cur);
-    return { user, tenant, tenants: tenants.map(({ index_defaults: _d, prefs: _p, ...t }) => t), brand: await loadBrand(tenantId), impersonator: impersonator ?? null, billing: await billingSummary(tenantId) };
+    return { user, tenant, tenants: tenants.map(({ index_defaults: _d, prefs: _p, ...t }) => t), brand: await loadBrand(tenantId), impersonator: impersonator ?? null, billing: await billingSummary(tenantId), platform_admin: await isPlatformAdmin(req.session) };
   });
 }

@@ -143,7 +143,9 @@ sudo -u softify -H bash -c 'cd /opt/softifyos && npm run tenant:create -- \
 
 ### Backup (αυτόματο)
 Κάθε βράδυ στις 03:15 το `deploy/backup.sh` κρατά **βάση + έγγραφα** στο `/var/backups/softifyos/<ημερομηνία>/`:
-14 ημερήσια, 8 εβδομαδιαία και 12 μηνιαία, με checksums. Log: `/var/log/softifyos-backup.log`.
+14 ημερήσια, 8 εβδομαδιαία και 12 μηνιαία, με checksums. Log: `/var/log/softifyos-backup/`.
+
+Όλα αυτά φαίνονται και στο **Ρυθμίσεις → Backup** (κατάσταση, δοκιμή επαναφοράς, «Backup τώρα», λήψη, διαγραφή) και στο **Ρυθμίσεις → Υγεία συστήματος** (έλεγχοι, server, βάση, ουρά, σφάλματα). Τα βλέπουν μόνο οι διαχειριστές της πλατφόρμας: βάλε στο `.env` `PLATFORM_ADMINS=email1,email2`.
 
 Συνιστάται έντονα, στο `.env`:
 - `BACKUP_PASSPHRASE=…`: κρυπτογραφεί κάθε backup (AES-256). **Φύλαξέ τη και εκτός server**, γιατί χωρίς αυτήν το backup δεν ανοίγει.

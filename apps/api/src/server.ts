@@ -26,6 +26,7 @@ import aiRoutes from './routes/ai.js';
 import emailRoutes from './routes/email.js';
 import calendarRoutes from './routes/calendar.js';
 import billingRoutes from './routes/billing.js';
+import systemRoutes from './routes/system.js';
 
 const app = Fastify({
   logger: { level: env.isProd ? 'info' : 'warn' },
@@ -91,6 +92,7 @@ await app.register(async (api) => {
   await api.register(emailRoutes);
   await api.register(calendarRoutes);
   await api.register(billingRoutes);
+  await api.register(systemRoutes);
 }, { prefix: '/api' });
 
 await startRealtime();

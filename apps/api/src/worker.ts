@@ -9,6 +9,27 @@ import { publish } from './realtime.js';
 import type { CalendarPushJob, EmailJob, JobMap, NotifyJob, WebhookJob } from './jobs.js';
 import { pullDue, pushActivity } from './calendar.js';
 import { captureError, heartbeat } from './monitor.js';
+import { spawn } from 'node:child_process';
+import { resolve } from 'node:path';
+
+// "Backup now" from Settings → Backups: runs deploy/backup.sh as this (app) user. Never retried automatically.
+async function runBackup() {
+  const started = new Date().toISOString();
+  await heartbeat('backup', { running: true, started_at: started });
+  const script = resolve(process.cwd(), '../../deploy/backup.sh');
+  const out: string[] = [];
+  const code = await new Promise<number>((done) => {
+    const p = spawn('bash', [script], { env: { ...process.env, APP_DIR: resolve(process.cwd(), '../..') }, timeout: 2 * 3600e3 });
+    // Control characters (e.g. NUL from UTF-16 output) would make Postgres reject the status
+    const keep = (d: Buffer) => { out.push(d.toString().replace(/[\u0000-\u0008\u000b-\u001f]/g, '')); if (out.length > 50) out.shift(); };
+    p.stdout.on('data', keep); p.stderr.on('data', keep);
+    p.on('error', (e) => { out.push(e.message); done(-1); });
+    p.on('close', (c) => done(c ?? -1));
+  });
+  const tail = out.join('').trim().split('\n').slice(-5).join('\n').slice(0, 1000);
+  await heartbeat('backup', { running: false, started_at: started, finished_at: new Date().toISOString(), ok: code === 0, output: tail });
+  if (code !== 0) await captureError('worker', new Error(`backup failed (exit ${code}): ${tail.split('\n').pop()}`), { job: 'backup_run' });
+}
 import { deliver } from './webhooks.js';
 import { runNoContactRules } from './crm.js';
 import { removeFile } from './storage.js';
@@ -90,6 +111,7 @@ async function processBatch(): Promise<number> {
       else if (j.kind === 'email') await handleEmail(j.payload as EmailJob, j.attempts >= MAX_ATTEMPTS);
       else if (j.kind === 'webhook') await handleWebhook(j.payload as WebhookJob);
       else if (j.kind === 'calendar_push') { const c = j.payload as CalendarPushJob; await pushActivity(c.tenantId, c.activityId); }
+      else if (j.kind === 'backup_run') await runBackup();
       await sql`DELETE FROM jobs WHERE id = ${j.id}`;
     } catch (e) {
       const msg = (e as Error).message;

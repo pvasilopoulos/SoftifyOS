@@ -4,7 +4,7 @@ import { Suspense, useState, type ComponentType } from 'react';
 import clsx from 'clsx';
 import { useSearchParams } from 'next/navigation';
 import { useTranslations } from 'next-intl';
-import { ArrowLeft, Search, X, Building2, SlidersHorizontal, Sparkles, FolderOpen, ChevronRight, Contact, FileText, LayoutList, Palette, History, Landmark, ListChecks, Package, Plug, ShieldCheck, UserRound, Users, Bot, Mail, CreditCard } from 'lucide-react';
+import { ArrowLeft, Search, X, Building2, SlidersHorizontal, Sparkles, FolderOpen, ChevronRight, Contact, FileText, LayoutList, Palette, History, Landmark, ListChecks, Package, Plug, ShieldCheck, UserRound, Users, Bot, Mail, CreditCard, Activity, Archive } from 'lucide-react';
 import { Link, useRouter } from '@/i18n/navigation';
 import { IconButton } from '@/components/ui';
 import {
@@ -18,9 +18,11 @@ import { TasksSettingsSection } from '@/components/tasks-settings';
 import { AiSettingsSection } from '@/components/ai-settings';
 import { EmailSettingsSection } from '@/components/email-settings';
 import { BillingSection } from '@/components/billing';
+import { BackupsSection, SystemHealthSection } from '@/components/system-settings';
+import { useMe } from '@/components/app-shell';
 import { CustomersSettingsSection, IndexesSettingsSection, IntegrationsSection } from '@/components/settings-sections-2';
 
-const SECTIONS: { key: string; icon: typeof Users; Component: ComponentType }[] = [
+const SECTIONS: { key: string; icon: typeof Users; Component: ComponentType; platform?: true }[] = [
   { key: 'organization', icon: Building2, Component: OrganizationSection },
   { key: 'billing', icon: CreditCard, Component: BillingSection },
   { key: 'branding', icon: Palette, Component: BrandingSection },
@@ -41,14 +43,20 @@ const SECTIONS: { key: string; icon: typeof Users; Component: ComponentType }[] 
   { key: 'ai', icon: Bot, Component: AiSettingsSection },
   { key: 'profile', icon: UserRound, Component: ProfileSection },
   { key: 'audit', icon: History, Component: AuditSection },
+  // Installation-wide: platform administrators only
+  { key: 'system', icon: Activity, Component: SystemHealthSection, platform: true },
+  { key: 'backups', icon: Archive, Component: BackupsSection, platform: true },
 ];
 
 function SettingsInner() {
   const t = useTranslations('settings');
   const router = useRouter();
   const sp = useSearchParams();
-  const current = SECTIONS.find((s) => s.key === sp.get('s'));
-  const active = current ?? SECTIONS[0];
+  const { data: me } = useMe();
+  const sections = SECTIONS.filter((s) => !s.platform || me?.platform_admin);
+  // Until /me arrives keep the section from the URL (the API checks access anyway)
+  const current = (me ? sections : SECTIONS).find((s) => s.key === sp.get('s'));
+  const active = current ?? sections[0];
   useTabTitle(`${t('title')} · ${t(`nav.${active.key}` as never)}`);
   const Section = active.Component;
 
@@ -57,8 +65,8 @@ function SettingsInner() {
   const fold = (x: string) => x.normalize('NFD').replace(/\p{Diacritic}/gu, '').toLowerCase();
   const needle = fold(q.trim());
   const shown = needle
-    ? SECTIONS.filter(({ key }) => fold(`${t(`nav.${key}` as never)} ${t(`navHint.${key}` as never)} ${t(`navKeywords.${key}` as never)}`).includes(needle))
-    : SECTIONS;
+    ? sections.filter(({ key }) => fold(`${t(`nav.${key}` as never)} ${t(`navHint.${key}` as never)} ${t(`navKeywords.${key}` as never)}`).includes(needle))
+    : sections;
 
   const nav = (
     <nav className="card overflow-hidden">

@@ -170,12 +170,14 @@ systemctl enable "pm2-$APP_USER" >/dev/null 2>&1 || true
 c "Backups"
 apt-get install -y -qq gnupg rclone >/dev/null 2>&1 || apt-get install -y -qq gnupg >/dev/null
 BACKUP_DIR="/var/backups/softifyos"
-mkdir -p "$BACKUP_DIR"; chmod 700 "$BACKUP_DIR"
+# Owned by the app user: the worker runs the same script for "Back up now" in Settings → Backups
+mkdir -p "$BACKUP_DIR"; chown "$APP_USER":"$APP_USER" "$BACKUP_DIR"; chmod 700 "$BACKUP_DIR"
 grep -q '^BACKUP_DIR=' "$ENV_FILE" || echo "BACKUP_DIR=$BACKUP_DIR" >> "$ENV_FILE"
+mkdir -p /var/log/softifyos-backup; chown "$APP_USER":"$APP_USER" /var/log/softifyos-backup
 cat >/etc/cron.d/softifyos-backup <<EOF
 # SoftifyOS: database + documents at 03:15 (14 daily, 8 weekly, 12 monthly), restore test on Sundays at 05:00
-15 3 * * * root APP_DIR=$APP_DIR bash $APP_DIR/deploy/backup.sh >> /var/log/softifyos-backup.log 2>&1
-0 5 * * 0 root APP_DIR=$APP_DIR bash $APP_DIR/deploy/restore.sh --verify >> /var/log/softifyos-backup.log 2>&1
+15 3 * * * $APP_USER APP_DIR=$APP_DIR bash $APP_DIR/deploy/backup.sh >> /var/log/softifyos-backup/backup.log 2>&1
+0 5 * * 0 root APP_DIR=$APP_DIR bash $APP_DIR/deploy/restore.sh --verify >> /var/log/softifyos-backup/verify.log 2>&1
 EOF
 
 c "Η αρχική εγκατάσταση ολοκληρώθηκε"

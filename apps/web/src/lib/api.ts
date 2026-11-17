@@ -43,4 +43,6 @@ export type Me = {
   /** Subscription (null when the installation has no billing). */
   billing?: { plan: string; status: 'trialing' | 'active' | 'past_due' | 'canceled'; active: boolean; reason: string | null;
     trial_ends_at: string | null; past_due_since: string | null; cancel_at_period_end: boolean; current_period_end: string | null } | null;
+  /** Sees Settings → System health / Backups (installation-wide). */
+  platform_admin?: boolean;
 };
