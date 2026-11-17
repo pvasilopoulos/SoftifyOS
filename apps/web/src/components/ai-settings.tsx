@@ -4,8 +4,9 @@
 import { useEffect, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useLocale, useTranslations } from 'next-intl';
-import { AlertTriangle, Check, KeyRound, Loader2 } from 'lucide-react';
-import { api } from '@/lib/api';
+import { AlertTriangle, Check, Eye, EyeOff, KeyRound, Loader2, Pencil, PlugZap, Trash2 } from 'lucide-react';
+import { api, ApiError } from '@/lib/api';
+import { appConfirm } from './confirm';
 import type { AiFeature } from '@/lib/ai';
 import { Link } from '@/i18n/navigation';
 import { Card } from './settings-sections';
@@ -14,7 +15,8 @@ import { useToast } from './providers';
 const FEATURES: AiFeature[] = ['copilot', 'voice', 'summary', 'reports', 'offer_draft', 'import'];
 type Data = {
   settings: { enabled: boolean; consent_at: string | null; consent_by: string | null; monthly_budget_usd: number; features: Record<AiFeature, boolean> };
-  configured: boolean; model: string; consent_by_name: string | null;
+  configured: boolean; model: string; consent_by_name: string | null; env_key: boolean;
+  key: { last4: string; set_at: string; set_by_name: string | null } | null;
   month: { spent: number; by_feature: { feature: string; calls: number; usd: number }[]; by_user: { name: string; calls: number; usd: number }[] };
   history: { month: string; usd: number }[];
   roles: { key: string; name: string; ai: boolean }[];
@@ -44,16 +46,7 @@ export function AiSettingsSection() {
 
   return (
     <div className="space-y-4">
-      {!d.configured && (
-        <div className="flex gap-3 rounded-2xl border border-warning/40 bg-warning-soft p-4 text-sm">
-          <KeyRound size={18} className="mt-0.5 shrink-0 text-warning" />
-          <div>
-            <div className="font-semibold">{t('notConfiguredTitle')}</div>
-            <p className="mt-1 text-muted">{t('notConfiguredHint')}</p>
-            <code className="mt-2 block rounded-lg bg-surface px-2 py-1 text-xs">ANTHROPIC_API_KEY=sk-ant-…</code>
-          </div>
-        </div>
-      )}
+      <ApiKeyCard data={d} />
 
       <Card title={t('title')} description={t('hint', { model: d.model })}>
         <div className="space-y-4">
@@ -145,5 +138,89 @@ function UsageTable({ title, rows, usd, empty, calls }: { title: string; rows: {
         </tbody></table>
       )}
     </div>
+  );
+}
+
+// ============================================================ API key (stored encrypted on the server; only "…abcd" comes back)
+type TestResult = { ok: boolean; error?: string; detail?: string };
+function ApiKeyCard({ data }: { data: Data }) {
+  const t = useTranslations('ai');
+  const locale = useLocale();
+  const toast = useToast();
+  const qc = useQueryClient();
+  const [editing, setEditing] = useState(!data.key);
+  const [value, setValue] = useState('');
+  const [show, setShow] = useState(false);
+  const [busy, setBusy] = useState<'save' | 'test' | 'delete' | null>(null);
+  const [test, setTest] = useState<TestResult | null>(null);
+  const refresh = () => { qc.invalidateQueries({ queryKey: ['settings', 'ai'] }); qc.invalidateQueries({ queryKey: ['ai-status'] }); };
+  const runTest = async (key?: string) => {
+    setBusy('test'); setTest(null);
+    try { setTest(await api<TestResult>('/settings/ai/key/test', { method: 'POST', json: key ? { key } : {} })); }
+    catch { setTest({ ok: false, error: 'api_error' }); }
+    setBusy(null);
+  };
+  const save = async () => {
+    setBusy('save'); setTest(null);
+    try {
+      await api('/settings/ai/key', { method: 'PUT', json: { key: value.trim() } });
+      toast({ title: t('keySaved') }); setValue(''); setShow(false); setEditing(false); refresh();
+    } catch (e) { setTest({ ok: false, error: e instanceof ApiError ? e.code : 'api_error' }); }
+    setBusy(null);
+  };
+  const remove = async () => {
+    if (!(await appConfirm(t('keyConfirmDelete'), { danger: true, confirmLabel: t('keyDelete') }))) return;
+    setBusy('delete');
+    try { await api('/settings/ai/key', { method: 'DELETE' }); toast({ title: t('keyDeleted') }); setEditing(true); setTest(null); refresh(); }
+    catch { toast({ title: t('saveError') }); }
+    setBusy(null);
+  };
+  const cancel = () => { setEditing(false); setValue(''); setTest(null); };
+  const btn = 'flex items-center gap-1.5 rounded-xl border border-border px-3 py-2 text-sm font-medium disabled:opacity-50';
+
+  return (
+    <Card title={t('keyTitle')} description={data.env_key ? t('keyHintEnv') : t('keyHint')}>
+      <div className="space-y-3">
+        {data.key && !editing && (
+          <div className="flex flex-wrap items-center gap-3 rounded-xl border border-border p-3">
+            <KeyRound size={18} className="shrink-0 text-primary" />
+            <div className="min-w-0 flex-1 text-sm">
+              <div className="font-mono font-semibold">sk-ant-…{data.key.last4}</div>
+              <div className="text-xs text-muted">{t('keySetBy', { name: data.key.set_by_name ?? '—', date: new Date(data.key.set_at).toLocaleString(locale, { dateStyle: 'medium', timeStyle: 'short' }) })}</div>
+            </div>
+            <button type="button" className={btn} disabled={!!busy} onClick={() => runTest()}>{busy === 'test' ? <Loader2 size={14} className="animate-spin" /> : <PlugZap size={14} />} {t('keyTest')}</button>
+            <button type="button" className={btn} disabled={!!busy} onClick={() => { setEditing(true); setTest(null); }}><Pencil size={14} /> {t('keyChange')}</button>
+            <button type="button" className={`${btn} text-danger hover:bg-danger-soft`} disabled={!!busy} onClick={remove}>{busy === 'delete' ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />} {t('keyDelete')}</button>
+          </div>
+        )}
+        {!data.key && !editing && null}
+        {editing && (
+          <form onSubmit={(e) => { e.preventDefault(); if (value.trim()) save(); }} className="space-y-2">
+            <label className="block text-sm font-medium" htmlFor="ai-key">{data.key ? t('keyNew') : t('keyLabel')}</label>
+            <div className="flex items-center gap-1.5 rounded-xl border border-border bg-surface-2 pr-1.5 focus-within:border-primary">
+              <input id="ai-key" type={show ? 'text' : 'password'} autoComplete="off" spellCheck={false} value={value} onChange={(e) => { setValue(e.target.value); setTest(null); }}
+                placeholder="sk-ant-api03-…" className="min-w-0 flex-1 bg-transparent px-3 py-2.5 font-mono text-sm outline-none" />
+              <button type="button" onClick={() => setShow(!show)} aria-label={show ? t('keyHide') : t('keyShow')} aria-pressed={show}
+                className="grid h-8 w-8 place-items-center rounded-lg text-muted hover:text-text">{show ? <EyeOff size={16} /> : <Eye size={16} />}</button>
+            </div>
+            <div className="flex flex-wrap justify-end gap-2">
+              {data.key && <button type="button" className={btn} onClick={cancel} disabled={!!busy}>{t('cancel')}</button>}
+              <button type="button" className={btn} disabled={!!busy || value.trim().length < 20} onClick={() => runTest(value.trim())}>{busy === 'test' ? <Loader2 size={14} className="animate-spin" /> : <PlugZap size={14} />} {t('keyTest')}</button>
+              <button type="submit" disabled={!!busy || value.trim().length < 20} className="flex items-center gap-1.5 rounded-xl bg-primary px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">
+                {busy === 'save' ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />} {t('keySave')}
+              </button>
+            </div>
+          </form>
+        )}
+        {test && (
+          <p className={`flex items-start gap-1.5 rounded-xl px-3 py-2 text-sm ${test.ok ? 'bg-success-soft text-success' : 'bg-danger-soft text-danger'}`}>
+            {test.ok ? <Check size={15} className="mt-0.5 shrink-0" /> : <AlertTriangle size={15} className="mt-0.5 shrink-0" />}
+            <span>{test.ok ? t('keyOk') : t(`keyErr_${['invalid_key', 'permission', 'rate_limited', 'bad_request', 'connection', 'invalid_key_format', 'no_key'].includes(test.error ?? '') ? test.error : 'api_error'}` as never)}
+              {test.detail && <span className="mt-0.5 block text-xs opacity-80">{test.detail}</span>}</span>
+          </p>
+        )}
+        {!data.configured && !editing && <p className="text-sm text-warning">{t('notConfiguredTitle')}</p>}
+      </div>
+    </Card>
   );
 }
