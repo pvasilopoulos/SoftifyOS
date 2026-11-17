@@ -18,7 +18,9 @@ import { date, money, relative } from '@/lib/format';
 import type { Branch, Contact, CustomerDetail, Space } from '@/lib/customers';
 import { Link, useRouter } from '@/i18n/navigation';
 import { Avatar, EntityTile, IconButton, Skeleton, StatusBadge, Tabs } from '@/components/ui';
-import { ActivityDialog, BranchDialog, ContactDialog, SpaceDialog } from '@/components/customer-dialogs';
+import { BranchDialog, ContactDialog, SpaceDialog } from '@/components/customer-dialogs';
+import { ActivityEditor, CompleteDialog, TypeIcon, type EditorPreset } from '@/components/crm-editor';
+import { dueLabel, tone, type Activity as CrmActivity } from '@/lib/crm';
 import { BranchDetails } from '@/components/branch-details';
 import { useCustomRows } from '@/components/custom-values';
 
@@ -27,7 +29,7 @@ type DialogState =
   | { kind: 'branch'; branch?: Branch }
   | { kind: 'space'; branchId: string; space?: Space }
   | { kind: 'contact'; contact?: Contact }
-  | { kind: 'activity'; initial?: 'call' | 'email_sent' | 'meeting_done' | 'note' }
+  | { kind: 'activity'; preset: EditorPreset }
   | null;
 
 const activityIcon: Record<string, typeof FileText> = {
@@ -139,11 +141,13 @@ export default function CustomerPage({ params }: { params: Promise<{ id: string 
 
       {/* Quick actions */}
       <div className="grid grid-cols-4 gap-2">
-        <QuickAction icon={Phone} label={t('call')} href={phone ? `tel:${phone.replace(/\s/g, '')}` : undefined} onClick={() => setDialog({ kind: 'activity', initial: 'call' })} />
-        <QuickAction icon={Mail} label={t('email')} href={email ? `mailto:${email}` : undefined} onClick={() => setDialog({ kind: 'activity', initial: 'email_sent' })} />
-        <QuickAction icon={CalendarDays} label={t('meeting')} onClick={() => setDialog({ kind: 'activity', initial: 'meeting_done' })} />
-        <QuickAction icon={NotebookPen} label={t('kindNote')} onClick={() => setDialog({ kind: 'activity', initial: 'note' })} />
+        <QuickAction icon={Phone} label={t('call')} href={phone ? `tel:${phone.replace(/\s/g, '')}` : undefined} onClick={() => setDialog({ kind: 'activity', preset: { type: 'call', status: 'done', customer_id: c.id, customer_name: c.name } })} />
+        <QuickAction icon={Mail} label={t('email')} href={email ? `mailto:${email}` : undefined} onClick={() => setDialog({ kind: 'activity', preset: { type: 'email', status: 'done', customer_id: c.id, customer_name: c.name } })} />
+        <QuickAction icon={CalendarDays} label={t('meeting')} onClick={() => setDialog({ kind: 'activity', preset: { type: 'meeting', status: 'planned', customer_id: c.id, customer_name: c.name } })} />
+        <QuickAction icon={NotebookPen} label={t('kindNote')} onClick={() => setDialog({ kind: 'activity', preset: { type: 'note', status: 'done', customer_id: c.id, customer_name: c.name } })} />
       </div>
+
+      <UpcomingActivities customerId={c.id} customerName={c.name} />
 
       <Link href={`/offers/new?customer=${c.id}&name=${encodeURIComponent(c.name)}`}
         className="flex items-center justify-center gap-2 rounded-2xl bg-primary py-3 font-semibold text-white shadow-lg shadow-primary/25">
@@ -264,7 +268,7 @@ export default function CustomerPage({ params }: { params: Promise<{ id: string 
       {tab === 'activity' && (
         <div className="space-y-3">
           {data.can.edit && (
-            <button onClick={() => setDialog({ kind: 'activity', initial: 'note' })} className="flex w-full items-center justify-center gap-2 rounded-2xl bg-primary-soft py-3 text-sm font-semibold text-primary">
+            <button onClick={() => setDialog({ kind: 'activity', preset: { type: 'call', status: 'done', customer_id: c.id, customer_name: c.name } })} className="flex w-full items-center justify-center gap-2 rounded-2xl bg-primary-soft py-3 text-sm font-semibold text-primary">
               <Plus size={18} /> {t('logActivity')}
             </button>
           )}
@@ -275,7 +279,7 @@ export default function CustomerPage({ params }: { params: Promise<{ id: string 
       {dialog?.kind === 'branch' && <BranchDialog customerId={id} branch={dialog.branch} onClose={() => setDialog(null)} />}
       {dialog?.kind === 'space' && <SpaceDialog customerId={id} branchId={dialog.branchId} space={dialog.space} onClose={() => setDialog(null)} />}
       {dialog?.kind === 'contact' && <ContactDialog customerId={id} contact={dialog.contact} onClose={() => setDialog(null)} />}
-      {dialog?.kind === 'activity' && <ActivityDialog customerId={id} initialKind={dialog.initial} onClose={() => setDialog(null)} />}
+      {dialog?.kind === 'activity' && <ActivityEditor preset={dialog.preset} onClose={() => setDialog(null)} />}
     </div>
   );
 }
@@ -426,6 +430,46 @@ function CustomerOffers({ customerId }: { customerId: string }) {
   );
 }
 
+/** Planned activities of this customer (next steps), with quick complete. */
+function UpcomingActivities({ customerId, customerName }: { customerId: string; customerName: string }) {
+  const t = useTranslations('crm');
+  const locale = useLocale();
+  const [open, setOpen] = useState<string | null>(null);
+  const [completing, setCompleting] = useState<CrmActivity | null>(null);
+  const [adding, setAdding] = useState(false);
+  const q = useQuery({
+    queryKey: ['crm', 'customer', customerId],
+    queryFn: () => api<{ items: CrmActivity[] }>(`/crm/activities?customer_id=${customerId}&scope=all&status=open&sort=due&limit=5`),
+  });
+  const items = q.data?.items ?? [];
+  return (
+    <section className="card overflow-hidden">
+      <header className="flex items-center gap-2 border-b border-border px-4 py-2.5">
+        <span className="flex-1 text-sm font-semibold">{t('nextSteps')}</span>
+        <button onClick={() => setAdding(true)} className="flex items-center gap-1 text-sm font-medium text-primary"><Plus size={15} /> {t('schedule')}</button>
+      </header>
+      {!items.length ? <p className="px-4 py-3 text-sm text-muted">{q.isLoading ? '…' : t('noNextSteps')}</p> : (
+        <ul className="divide-y divide-border">
+          {items.map((a) => (
+            <li key={a.id} className="flex items-center gap-3 px-4 py-2.5">
+              <button onClick={() => setCompleting(a)} aria-label={t('complete')} className="grid h-7 w-7 place-items-center rounded-full text-muted hover:bg-success-soft hover:text-success"><CheckCircle2 size={19} /></button>
+              <button onClick={() => setOpen(a.id)} className="flex min-w-0 flex-1 items-center gap-2.5 text-left">
+                <TypeIcon icon={a.type_icon} color={a.type_color} size={30} />
+                <span className="min-w-0 flex-1"><span className="block truncate text-sm font-medium">{a.subject}</span>
+                  <span className="block truncate text-xs text-muted">{[a.branch_name, a.owner_name].filter(Boolean).join(' · ')}</span></span>
+                <span className={`shrink-0 text-xs font-medium ${a.overdue ? 'text-danger' : 'text-muted'}`}>{dueLabel(a.due_at, locale, (k) => t(`d_${k}`), a.all_day) || t('noDate')}</span>
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+      {open && <ActivityEditor id={open} onClose={() => setOpen(null)} />}
+      {adding && <ActivityEditor preset={{ customer_id: customerId, customer_name: customerName, type: 'call' }} onClose={() => setAdding(false)} />}
+      {completing && <CompleteDialog activity={completing} onClose={() => setCompleting(null)} onDone={() => setCompleting(null)} />}
+    </section>
+  );
+}
+
 function ActivityTimeline({ customerId }: { customerId: string }) {
   const ta = useTranslations('activity');
   const tcm = useTranslations('common');
@@ -442,12 +486,14 @@ function ActivityTimeline({ customerId }: { customerId: string }) {
       <ol className="relative space-y-5 before:absolute before:bottom-2 before:left-[19px] before:top-2 before:w-px before:bg-border">
         {rows.map((a) => {
           const Icon = activityIcon[a.kind] ?? StickyNote;
+          const crm = (a as { source?: string }).source === 'crm' ? (a as unknown as { type_icon: string | null; type_color: string | null; type_name: string | null; outcome_name: string | null; outcome_color: string | null }) : null;
           return (
             <li key={a.id} className="relative flex gap-3">
-              <span className={`z-10 grid h-10 w-10 shrink-0 place-items-center rounded-full ${a.kind === 'approval' ? 'bg-success-soft text-success' : 'bg-primary-soft text-primary'}`}><Icon size={18} /></span>
+              {crm ? <span className="z-10 rounded-full ring-4 ring-surface"><TypeIcon icon={crm.type_icon} color={crm.type_color} size={40} /></span>
+                : <span className={`z-10 grid h-10 w-10 shrink-0 place-items-center rounded-full ${a.kind === 'approval' ? 'bg-success-soft text-success' : 'bg-surface-2 text-muted'}`}><Icon size={18} /></span>}
               <div className="min-w-0 flex-1">
                 <div className="flex items-start justify-between gap-2">
-                  <span className="font-semibold">{a.title}</span>
+                  <span className="font-semibold">{a.title}{crm?.outcome_name && <span className={`ml-2 rounded px-1.5 py-0.5 text-[11px] font-semibold ${tone(crm.outcome_color)}`}>{crm.outcome_name}</span>}</span>
                   <span className="shrink-0 text-xs text-muted">{relative(a.occurred_at, locale, { today: ta('today'), yesterday: ta('yesterday') })}</span>
                 </div>
                 {a.body && <div className="whitespace-pre-line text-sm text-muted">{a.body}</div>}

@@ -9,6 +9,7 @@ import { emitEntityEvents, emitEvents } from '../webhooks.js';
 import { ALL_LISTS, canonicalName, canonicalizeFields } from '../lookups.js';
 import { filterSql, parseFilters } from '../filters.js';
 import { applyForm, loadCustom } from '../forms.js';
+import { runRules } from '../crm.js';
 
 const customSchema = z.record(z.string().max(40), z.any()).optional();
 type Row = Record<string, unknown>;
@@ -439,6 +440,7 @@ export default async function customerRoutes(app: FastifyInstance) {
           RETURNING id, name, code, parent_id`;
         await log(tx, s, row.id, 'note', 'Δημιουργία πελάτη', row.code);
         await emitEntityEvents(tx, s.tenantId, 'customer', 'created', [row.id], { type: 'user', user_id: s.userId });
+        await runRules(tx, s.tenantId, 'customer_created', { customer_id: row.id, actor_id: s.userId });
         if (row.parent_id) await refreshCounts(tx, row.parent_id);
         return { customer: row };
       }
@@ -455,6 +457,7 @@ export default async function customerRoutes(app: FastifyInstance) {
           RETURNING id, name, code, parent_id`;
         await log(tx, s, row.id, 'note', 'Δημιουργία πελάτη', row.code);
         await emitEntityEvents(tx, s.tenantId, 'customer', 'created', [row.id], { type: 'user', user_id: s.userId });
+        await runRules(tx, s.tenantId, 'customer_created', { customer_id: row.id, actor_id: s.userId });
         if (row.parent_id) await refreshCounts(tx, row.parent_id);
         return { customer: row };
       }
@@ -549,11 +552,21 @@ export default async function customerRoutes(app: FastifyInstance) {
     const T = req.session.tenantId;
     return withTenant(T, async (tx) => {
       const rows = await tx`
-        SELECT a.id, a.kind, a.title, a.body, a.custom, a.occurred_at, u.full_name AS actor_name
-        FROM activities a LEFT JOIN users u ON u.id = a.actor_id
-        WHERE a.tenant_id = ${T} AND a.customer_id = ${id}
-          ${cur ? tx`AND (a.occurred_at, a.id) < (${cur[0]}::timestamptz, ${cur[1]}::uuid)` : tx``}
-        ORDER BY a.occurred_at DESC, a.id DESC LIMIT ${q.limit + 1}`;
+        SELECT * FROM (
+          SELECT a.id, a.kind, a.title, a.body, a.occurred_at, u.full_name AS actor_name, 'log' AS source,
+                 NULL::text AS status, NULL::text AS type_name, NULL::text AS type_icon, NULL::text AS type_color, NULL::text AS outcome_name, NULL::text AS outcome_color
+          FROM activities a LEFT JOIN users u ON u.id = a.actor_id
+          WHERE a.tenant_id = ${T} AND a.customer_id = ${id}
+          UNION ALL
+          SELECT a.id, a.type, a.subject, coalesce(a.outcome_note, a.body), a.completed_at, u.full_name, 'crm',
+                 a.status, t.name, t.icon, t.color, oc.name, oc.color
+          FROM crm_activities a LEFT JOIN users u ON u.id = coalesce(a.completed_by, a.owner_id)
+          LEFT JOIN crm_activity_types t ON t.tenant_id = a.tenant_id AND t.key = a.type
+          LEFT JOIN crm_outcomes oc ON oc.tenant_id = a.tenant_id AND oc.key = a.outcome
+          WHERE a.tenant_id = ${T} AND a.customer_id = ${id} AND a.status = 'done'
+        ) x
+        WHERE TRUE ${cur ? tx`AND (x.occurred_at, x.id) < (${cur[0]}::timestamptz, ${cur[1]}::uuid)` : tx``}
+        ORDER BY x.occurred_at DESC, x.id DESC LIMIT ${q.limit + 1}`;
       const more = rows.length > q.limit;
       const items = more ? rows.slice(0, q.limit) : rows;
       const last = items.at(-1);

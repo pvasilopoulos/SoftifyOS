@@ -14,7 +14,7 @@ const forbid = (reply: FastifyReply) => reply.code(403).send({ error: 'forbidden
 const formParam = z.object({ form: z.enum(FORMS) });
 const scopeQuery = z.object({ scope: z.enum(['organization', 'role', 'user']), key: z.string().max(80).default('') });
 export const CUSTOM_TABLE: Record<(typeof CUSTOM_FORMS)[number], string> = {
-  customer: 'customers', branch: 'branches', space: 'spaces', contact: 'contacts', activity: 'activities', offer: 'offers',
+  customer: 'customers', branch: 'branches', space: 'spaces', contact: 'contacts', activity: 'crm_activities', offer: 'offers',
 };
 const l10n = z.object({ el: z.string().trim().max(120).optional(), en: z.string().trim().max(120).optional() })
   .refine((x) => !!(x.el || x.en), 'label_required');

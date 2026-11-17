@@ -22,6 +22,7 @@ import { useToast } from './providers';
 import { useMe } from './app-shell';
 import { FormFields, formInput } from './form-engine';
 import { useLookup, ID_LISTS, type LookupList } from './lookup-select';
+import { useCrmMeta } from '@/lib/crm';
 
 type Overview = {
   can_manage: boolean; me: { id: string; role: string };
@@ -187,7 +188,7 @@ export function ModuleFormsSection() {
     <div className="space-y-4">
       {/* Form picker */}
       <section className="card p-3 sm:p-4">
-        {(['customers', 'offers'] as const).map((mod) => (
+        {(['customers', 'offers', 'crm'] as const).map((mod) => (
           <div key={mod} className="mb-3 last:mb-0">
             <div className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-muted">{t(`module_${mod}`)}</div>
             <div className="no-scrollbar flex gap-2 overflow-x-auto sm:flex-wrap">
@@ -661,12 +662,15 @@ function TriState({ value, inherited, disabled, onChange }: { value: boolean | u
 /** Possible values of a choice field (for defaults, allowed values and conditions). */
 function useChoices(f: EffField | undefined) {
   const locale = useLocale();
-  const list = f && (f.type === 'list' || f.type === 'lookup') ? (f.list as LookupList) : null;
+  const list = f && (f.type === 'list' || f.type === 'lookup') && !f.list?.startsWith('crm_') ? (f.list as LookupList) : null;
   const lookup = useLookup((list ?? 'prefecture') as LookupList);
   const users = useQuery({ queryKey: ['users'], enabled: f?.type === 'user', queryFn: () => api<{ id: string; full_name: string }[]>('/users'), staleTime: 300_000 });
   const companies = useQuery({ queryKey: ['companies'], enabled: f?.key === 'company_id', queryFn: () => api<{ id: string; name: string }[]>('/companies') });
+  const crm = useCrmMeta();
   if (!f) return null;
   if (f.choices) return f.choices.map((c) => ({ value: c.value, label: l10n(c.label, locale) || c.value }));
+  if (f.list === 'crm_type') return (crm.data?.types ?? []).map((x) => ({ value: x.key, label: x.name }));
+  if (f.list === 'crm_outcome') return (crm.data?.outcomes ?? []).map((x) => ({ value: x.key, label: x.name }));
   if (list) return (lookup.data ?? []).map((v) => ({ value: (ID_LISTS as readonly string[]).includes(list) ? v.id : v.name, label: v.name }));
   if (f.type === 'user') return (users.data ?? []).map((u) => ({ value: u.id, label: u.full_name }));
   if (f.type === 'country') return COUNTRIES.map((c) => ({ value: c, label: c }));

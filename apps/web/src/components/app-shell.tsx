@@ -45,8 +45,8 @@ const primary = [
 ] as const;
 
 const secondary = [
-  { href: '/more', key: 'crm', icon: Sparkles },
-  { href: '/more', key: 'tasks', icon: ListChecks },
+  { href: '/crm', key: 'crm', icon: Sparkles },
+  { href: '/crm?view=list&type=task', key: 'tasks', icon: ListChecks },
   { href: '/more', key: 'documents', icon: FolderOpen },
   { href: '/more', key: 'reports', icon: ChartNoAxesColumn },
   { href: '/more', key: 'groups', icon: Building2 },

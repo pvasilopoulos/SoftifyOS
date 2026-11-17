@@ -117,14 +117,32 @@ export const CATALOG: Record<FormKey, CatalogForm> = {
     ],
   },
   activity: {
-    sections: [{ key: 'main', label: L('Ενέργεια', 'Activity') }],
+    sections: [
+      { key: 'main', label: L('Ενέργεια', 'Activity') }, { key: 'when', label: L('Πότε & ποιος', 'When & who') },
+      { key: 'links', label: L('Σύνδεση', 'Linked to') }, { key: 'result', label: L('Αποτέλεσμα', 'Outcome') },
+    ],
     fields: [
-      f('kind', 'select', 'main', L('Είδος', 'Kind'), {
-        width: 'full', choices: [['call', 'Κλήση', 'Call'], ['email_sent', 'Email', 'Email'], ['meeting_done', 'Συνάντηση', 'Meeting'], ['note', 'Σημείωση', 'Note']]
+      f('type', 'select', 'main', L('Είδος', 'Type'), { width: 'full', list: 'crm_type' }),
+      f('subject', 'text', 'main', L('Θέμα', 'Subject'), { core: true, width: 'full' }),
+      f('body', 'textarea', 'main', L('Περιγραφή', 'Description'), { width: 'full' }),
+      f('status', 'select', 'when', L('Κατάσταση', 'Status'), {
+        choices: [['planned', 'Προγραμματισμένη', 'Planned'], ['in_progress', 'Σε εξέλιξη', 'In progress'], ['done', 'Ολοκληρώθηκε', 'Done'], ['cancelled', 'Ακυρώθηκε', 'Cancelled']]
           .map(([value, el, en]) => ({ value, label: L(el, en) })),
       }),
-      f('title', 'text', 'main', L('Τίτλος', 'Title'), { core: true, width: 'full' }),
-      f('body', 'textarea', 'main', L('Λεπτομέρειες', 'Details'), { width: 'full' }),
+      f('priority', 'select', 'when', L('Προτεραιότητα', 'Priority'), {
+        choices: [['1', 'Υψηλή', 'High'], ['2', 'Κανονική', 'Normal'], ['3', 'Χαμηλή', 'Low']].map(([value, el, en]) => ({ value, label: L(el, en) })),
+      }),
+      f('due_at', 'date', 'when', L('Ημερομηνία & ώρα', 'Date & time')),
+      f('duration_min', 'number', 'when', L('Διάρκεια (λεπτά)', 'Duration (minutes)')),
+      f('owner_id', 'user', 'when', L('Υπεύθυνος', 'Assigned to')),
+      f('remind_before_min', 'number', 'when', L('Υπενθύμιση πριν (λεπτά)', 'Reminder before (minutes)')),
+      f('location', 'text', 'when', L('Τοποθεσία', 'Location'), { width: 'full' }),
+      f('customer_id', 'ref', 'links', L('Πελάτης', 'Customer'), { width: 'full' }),
+      f('branch_id', 'ref', 'links', L('Κατάστημα', 'Store')),
+      f('contact_id', 'ref', 'links', L('Επαφή', 'Contact')),
+      f('offer_id', 'ref', 'links', L('Προσφορά', 'Offer'), { width: 'full' }),
+      f('outcome', 'select', 'result', L('Αποτέλεσμα', 'Outcome'), { list: 'crm_outcome' }),
+      f('outcome_note', 'textarea', 'result', L('Σημείωση αποτελέσματος', 'Outcome note'), { width: 'full' }),
     ],
   },
   offer: {
@@ -154,7 +172,7 @@ export const FORM_LABELS: Record<FormKey, L10n> = {
   activity: L('Ενέργειες CRM', 'CRM activities'), offer: L('Προσφορές', 'Offers'), offer_item: L('Γραμμές προσφοράς', 'Offer lines'),
 };
 export const FORM_MODULE: Record<FormKey, string> = {
-  customer: 'customers', branch: 'customers', space: 'customers', contact: 'customers', activity: 'customers', offer: 'offers', offer_item: 'offers',
+  customer: 'customers', branch: 'customers', space: 'customers', contact: 'customers', activity: 'crm', offer: 'offers', offer_item: 'offers',
 };
 
 // ------------------------------------------------------------------ level configuration (what is stored)

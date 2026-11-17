@@ -13,11 +13,11 @@ import { LookupSelect, NameSelect } from './lookup-select';
 import { FormFields, FormLoading, scrollToError, useFormDefaults, type RendererEntry } from './form-engine';
 import { useMe } from './app-shell';
 
-export function Dialog({ title, onClose, children }: { title: string; onClose: () => void; children: ReactNode }) {
+export function Dialog({ title, onClose, children, wide }: { title: string; onClose: () => void; children: ReactNode; wide?: boolean }) {
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 sm:items-center" onClick={onClose}>
       <div onClick={(e) => e.stopPropagation()} role="dialog" aria-label={title}
-        className="max-h-[90dvh] w-full max-w-lg overflow-auto rounded-t-3xl bg-surface p-5 sheet-pb sm:rounded-3xl sm:p-6">
+        className={clsx('max-h-[90dvh] w-full overflow-auto', wide ? 'max-w-2xl' : 'max-w-lg', ' rounded-t-3xl bg-surface p-5 sheet-pb sm:rounded-3xl sm:p-6')}>
         <div className="mb-4 flex items-center justify-between">
           <h2 className="text-lg font-bold">{title}</h2>
           <IconButton label="close" onClick={onClose}><X size={20} /></IconButton>

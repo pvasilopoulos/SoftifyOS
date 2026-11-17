@@ -14,6 +14,7 @@ import { openApiSpec } from './integration-openapi.js';
 import { emitEntityEvents, hasWebhooks, emitEvents, type EventSource } from '../webhooks.js';
 import { customInput } from '../forms.js';
 import { branchOut, customerOut, spaceOut } from '../readmodels.js';
+import { activityOut, emitActivityEvents, insertActivity } from '../crm.js';
 import { ALL_LISTS, canonicalName, isNameList, nameInUse, renameInRecords, type NameList } from '../lookups.js';
 
 /** Name-list fields: unknown values are added to the list (like zones), and the list's spelling is stored. */
@@ -26,7 +27,7 @@ import type postgres from 'postgres';
 
 type Frag = postgres.PendingQuery<postgres.Row[]>;
 
-type Resource = 'customers' | 'branches' | 'spaces' | 'lists';
+type Resource = 'customers' | 'branches' | 'spaces' | 'lists' | 'activities';
 type Level = 'none' | 'read' | 'write';
 type ApiKeyCtx = { id: string; tenantId: string; name: string; permissions: Record<Resource, Level>; expiresAt: number | null; ips: BlockList | null };
 type ApiLog = { tenantId?: string; keyId?: string; items?: number; created?: number; updated?: number; failed?: number; error?: string; errors?: unknown };
@@ -238,7 +239,7 @@ async function lookupId(tx: Tx, tenantId: string, list: LookupList, name: string
 }
 
 /** Custom field values (Settings → Module Forms) of an API row: merged into the stored ones, null clears a key. */
-async function customCols(sp: Tx, T: string, form: 'customer' | 'branch' | 'space', incoming: Record<string, unknown> | undefined, cols: Record<string, unknown>) {
+async function customCols(sp: Tx, T: string, form: 'customer' | 'branch' | 'space' | 'activity', incoming: Record<string, unknown> | undefined, cols: Record<string, unknown>) {
   const c = await customInput(sp, T, form, incoming);
   if (!c) return;
   if (Object.keys(c.errors).length) throw new RowError('invalid_custom_fields', c.errors);
@@ -458,6 +459,74 @@ async function upsertSpaces(tx: Tx, key: ApiKeyCtx, items: unknown[]) {
   return results;
 }
 
+// ---------------------------------------------------------------- CRM activities
+const activityIn = z.object({
+  external_id: ext,
+  type: z.string().trim().min(1).max(40).optional(),
+  subject: z.string().trim().min(1).max(200).optional(),
+  body: str(20000),
+  status: z.enum(['planned', 'in_progress', 'done', 'cancelled']).optional(),
+  priority: z.number().int().min(1).max(3).optional(),
+  due_at: z.coerce.date().nullable().optional(),
+  duration_min: z.number().int().min(0).max(10080).optional(),
+  all_day: z.boolean().optional(),
+  location: str(300),
+  owner_email: z.string().trim().toLowerCase().email().nullable().optional(),
+  customer_external_id: ext.nullable().optional(),
+  outcome: str(40), outcome_note: str(5000),
+  remind_before_min: z.number().int().min(0).max(10080).nullable().optional(),
+  custom: z.record(z.string().max(40), z.unknown()).optional(),
+}).strict();
+
+async function upsertActivities(tx: Tx, key: ApiKeyCtx, items: unknown[]) {
+  const T = key.tenantId;
+  const types = new Set((await tx`SELECT key FROM crm_activity_types WHERE tenant_id = ${T}`).map((r) => r.key as string));
+  const outcomes = new Set((await tx`SELECT key FROM crm_outcomes WHERE tenant_id = ${T}`).map((r) => r.key as string));
+  return runBatch(tx, items, activityIn, async (a, sp) => {
+    const cols: Record<string, unknown> = pick(a, ['type', 'subject', 'body', 'status', 'priority', 'due_at', 'duration_min', 'all_day', 'location', 'outcome', 'outcome_note', 'remind_before_min']);
+    if (a.type && !types.has(a.type)) throw new RowError('invalid_type', a.type);
+    if (a.outcome && !outcomes.has(a.outcome)) throw new RowError('invalid_outcome', a.outcome);
+    if (a.owner_email !== undefined) {
+      if (a.owner_email === null) cols.owner_id = null;
+      else {
+        const [u] = await sp`SELECT m.user_id FROM memberships m JOIN users u ON u.id = m.user_id WHERE m.tenant_id = ${T} AND lower(u.email) = ${a.owner_email}`;
+        if (!u) throw new RowError('owner_not_found', a.owner_email);
+        cols.owner_id = u.user_id;
+      }
+    }
+    if (a.customer_external_id !== undefined) {
+      if (a.customer_external_id === null) cols.customer_id = null;
+      else {
+        const [c] = await sp`SELECT id FROM customers WHERE tenant_id = ${T} AND external_id = ${a.customer_external_id}`;
+        if (!c) throw new RowError('customer_not_found', a.customer_external_id);
+        cols.customer_id = c.id;
+      }
+    }
+    if (a.status === 'done') { cols.completed_at = sp`coalesce(completed_at, now())`; cols.remind_at = null; }
+    else if (a.status) { cols.completed_at = null; cols.completed_by = null; }
+    if (a.due_at !== undefined || a.remind_before_min !== undefined) {
+      cols.remind_at = sp`CASE WHEN ${a.remind_before_min ?? null}::int IS NULL AND remind_before_min IS NULL THEN NULL
+        ELSE coalesce(${a.due_at ?? null}::timestamptz, due_at) - (coalesce(${a.remind_before_min ?? null}::int, remind_before_min) * interval '1 minute') END`;
+      cols.reminded = false;
+    }
+    await customCols(sp, T, 'activity', a.custom, cols);
+    const [existing] = await sp`SELECT id FROM crm_activities WHERE tenant_id = ${T} AND external_id = ${a.external_id}`;
+    if (existing) {
+      if (Object.keys(cols).length) await sp`UPDATE crm_activities SET ${sp(cols)}, updated_at = now() WHERE id = ${existing.id}`;
+      return { status: 'updated', id: existing.id };
+    }
+    if (!a.type || !a.subject) throw new RowError('type_and_subject_required');
+    const [id] = await insertActivity(sp, T, (cols.owner_id as string) ?? null, {
+      type: a.type, subject: a.subject, body: a.body ?? null, status: a.status, priority: a.priority, due_at: a.due_at ?? null,
+      duration_min: a.duration_min, all_day: a.all_day, location: a.location ?? null, owner_id: (cols.owner_id as string) ?? null,
+      customer_id: (cols.customer_id as string) ?? null, outcome: a.outcome ?? null, outcome_note: a.outcome_note ?? null,
+      remind_before_min: a.remind_before_min ?? null, external_id: a.external_id,
+      custom: Object.fromEntries(Object.entries(a.custom ?? {}).filter(([, v]) => v !== null && v !== '')),
+    });
+    return { status: 'created', id };
+  });
+}
+
 // Read models (shared with the webhook payloads): see ../readmodels.ts
 
 const listQuery = z.object({
@@ -542,25 +611,32 @@ export default async function integrationRoutes(app: FastifyInstance) {
     getById('/v1/customers/by-id/:id', customerOut, 'c');
     getById('/v1/branches/by-id/:id', branchOut, 'b');
     getById('/v1/spaces/by-id/:id', spaceOut, 's');
+    // CRM activities
+    list('/v1/activities', activityOut, 'a', (q, tx) => tx`${q.customer_external_id ? tx`AND c.external_id = ${q.customer_external_id}` : tx``}
+      ${q.status ? tx`AND a.status = ${q.status}` : tx``}`);
+    getOne('/v1/activities/:external_id', activityOut, 'a');
+    getById('/v1/activities/by-id/:id', activityOut, 'a');
 
     // ----- writes: single (PUT, idempotent) and batch (POST)
     const writers = [
       ['customers', upsertCustomers, 'api.customers'],
       ['branches', upsertBranches, 'api.branches'],
       ['spaces', upsertSpaces, 'api.spaces'],
+      ['activities', upsertActivities, 'api.activities'],
     ] as const;
     for (const [entity, fn, action] of writers) {
       /** Webhook events for what the batch changed (same transaction → only committed changes are sent). */
       const emitFor = async (tx: Tx, key: ApiKeyCtx, out: ItemResult[], before?: Map<string, Record<string, unknown>>) => {
         for (const st of ['created', 'updated'] as const) {
           const ids = [...new Set(out.filter((x) => x.status === st && x.id).map((x) => x.id!))];
-          await emitEntityEvents(tx, key.tenantId, ENTITY[entity], st, ids, src(key), st === 'updated' ? before : undefined);
+          if (entity === 'activities') await emitActivityEvents(tx, key.tenantId, st, ids, src(key));
+          else await emitEntityEvents(tx, key.tenantId, ENTITY[entity], st, ids, src(key), st === 'updated' ? before : undefined);
         }
       };
       /** Rows as they were before the write (for changed_fields), by id. */
       const snapshot = async (tx: Tx, key: ApiKeyCtx, items: unknown[]) => {
         const ext = [...new Set(items.map((x) => (x as { external_id?: unknown })?.external_id).filter((x): x is string => typeof x === 'string'))];
-        if (!ext.length || !(await hasWebhooks(tx, key.tenantId))) return new Map<string, Record<string, unknown>>();
+        if (entity === 'activities' || !ext.length || !(await hasWebhooks(tx, key.tenantId))) return new Map<string, Record<string, unknown>>();
         const rows = await tx`SELECT * FROM ${tx(entity)} WHERE tenant_id = ${key.tenantId} AND external_id = ANY(${ext})`;
         return new Map(rows.map((r) => [r.id as string, r as Record<string, unknown>]));
       };
@@ -622,6 +698,18 @@ export default async function integrationRoutes(app: FastifyInstance) {
         return !!c;
       });
       return ok ? { ok: true, archived: true } : problem(reply, 404, 'not_found');
+    });
+
+    r.delete('/v1/activities/:external_id', async (req, reply) => {
+      if (!need(req, reply, 'activities', 'write')) return;
+      const { external_id } = z.object({ external_id: ext }).parse(req.params);
+      const key = req.apiKey!;
+      const ok = await withTenant(key.tenantId, async (tx) => {
+        const [a] = await tx`DELETE FROM crm_activities WHERE tenant_id = ${key.tenantId} AND external_id = ${external_id} RETURNING id`;
+        if (a) { await audit(tx, key, 'api.activities.delete', { external_id }); await emitActivityEvents(tx, key.tenantId, 'deleted', [a.id], src(key)); }
+        return !!a;
+      });
+      return ok ? { ok: true } : problem(reply, 404, 'not_found');
     });
 
     for (const entity of ['branches', 'spaces'] as const) {

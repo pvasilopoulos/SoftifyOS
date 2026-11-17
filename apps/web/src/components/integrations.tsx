@@ -22,8 +22,8 @@ const input = 'w-full min-w-0 rounded-xl border border-border bg-surface-2 px-3 
 const chip = 'rounded-full px-2 py-0.5 text-xs font-medium';
 
 type Level = 'none' | 'read' | 'write';
-type Resource = 'customers' | 'branches' | 'spaces' | 'lists';
-const RESOURCES: Resource[] = ['customers', 'branches', 'spaces', 'lists'];
+type Resource = 'customers' | 'branches' | 'spaces' | 'lists' | 'activities';
+const RESOURCES: Resource[] = ['customers', 'branches', 'spaces', 'lists', 'activities'];
 type Perms = Record<Resource, Level>;
 type ApiKey = {
   id: string; name: string; prefix: string; permissions: Perms; expires_at: string | null; allowed_ips: string[]; rotated_from: string | null;
@@ -358,7 +358,7 @@ function KeyDialog({ k, onClose, onSaved }: { k: ApiKey | null; onClose: () => v
   const ts = useTranslations('settings');
   const [name, setName] = useState(k?.name ?? '');
   // Older keys have no 'lists' entry: treat it as no access
-  const [perms, setPerms] = useState<Perms>(k ? { ...k.permissions, lists: k.permissions.lists ?? 'none' } : { customers: 'write', branches: 'write', spaces: 'write', lists: 'read' });
+  const [perms, setPerms] = useState<Perms>(k ? { ...k.permissions, lists: k.permissions.lists ?? 'none', activities: k.permissions.activities ?? 'none' } : { customers: 'write', branches: 'write', spaces: 'write', lists: 'read', activities: 'write' });
   const [expiry, setExpiry] = useState<(typeof EXPIRY)[number]>(k?.expires_at ? 'custom' : 'never');
   const [customDate, setCustomDate] = useState(k?.expires_at ? k.expires_at.slice(0, 10) : '');
   const [ips, setIps] = useState((k?.allowed_ips ?? []).join('\n'));
@@ -379,9 +379,9 @@ function KeyDialog({ k, onClose, onSaved }: { k: ApiKey | null; onClose: () => v
       : ts('error')),
   });
   const presets: [string, Perms][] = [
-    [t('presetFull'), { customers: 'write', branches: 'write', spaces: 'write', lists: 'write' }],
-    [t('presetRead'), { customers: 'read', branches: 'read', spaces: 'read', lists: 'read' }],
-    [t('presetCustomers'), { customers: 'write', branches: 'none', spaces: 'none', lists: 'read' }],
+    [t('presetFull'), { customers: 'write', branches: 'write', spaces: 'write', lists: 'write', activities: 'write' }],
+    [t('presetRead'), { customers: 'read', branches: 'read', spaces: 'read', lists: 'read', activities: 'read' }],
+    [t('presetCustomers'), { customers: 'write', branches: 'none', spaces: 'none', lists: 'read', activities: 'none' }],
   ];
   return (
     <Dialog title={k ? t('editKey') : t('newKey')} onClose={onClose}>

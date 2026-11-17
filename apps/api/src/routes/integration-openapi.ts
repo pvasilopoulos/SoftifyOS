@@ -45,6 +45,21 @@ const Space = {
     custom: { type: 'object', additionalProperties: true, description: 'Custom fields (Settings → Module Forms) by key. Sent keys are merged; null clears a key; unknown keys are rejected.' },
   },
 };
+const Activity = {
+  type: 'object', required: ['external_id'], additionalProperties: false,
+  properties: {
+    external_id: ext,
+    type: { type: 'string', description: 'Activity type key (Settings → CRM activities), e.g. call, meeting, visit, task. Required on create.' },
+    subject: { type: 'string', maxLength: 200, description: 'Required on create' }, body: nstr(20000),
+    status: { enum: ['planned', 'in_progress', 'done', 'cancelled'] }, priority: { type: 'integer', minimum: 1, maximum: 3, description: '1 high, 2 normal, 3 low' },
+    due_at: { type: ['string', 'null'], format: 'date-time' }, duration_min: { type: 'integer', minimum: 0 }, all_day: { type: 'boolean' }, location: nstr(300),
+    owner_email: { type: ['string', 'null'], format: 'email', description: 'Assigned user (member of the organisation)' },
+    customer_external_id: { ...nstr(100), description: 'external_id of the customer' },
+    outcome: { ...nstr(40), description: 'Outcome key, e.g. interested, no_answer' }, outcome_note: nstr(5000),
+    remind_before_min: { type: ['integer', 'null'], minimum: 0 },
+    custom: { type: 'object', additionalProperties: true, description: 'Custom fields of the activity form' },
+  },
+};
 const ItemResult = {
   type: 'object',
   properties: {
@@ -141,13 +156,14 @@ export const openApiSpec = {
   security: [{ apiKey: [] }],
   components: {
     securitySchemes: { apiKey: { type: 'http', scheme: 'bearer', bearerFormat: 'sos_<prefix>_<secret>' } },
-    schemas: { Customer, Branch, Space, ItemResult, BatchResult },
+    schemas: { Customer, Branch, Space, Activity, ItemResult, BatchResult },
   },
   paths: {
     '/api/v1/ping': { get: { summary: 'Check the key', responses: { 200: { description: 'OK' }, 401: { description: 'Invalid key' } } } },
     ...resource('customers', 'Customers', Customer),
     ...resource('branches', 'Stores', Branch, [{ name: 'customer_external_id', in: 'query', schema: { type: 'string' } }]),
     ...resource('spaces', 'Spaces', Space, [{ name: 'branch_external_id', in: 'query', schema: { type: 'string' } }]),
+    ...resource('activities', 'CRM activities', Activity, [{ name: 'customer_external_id', in: 'query', schema: { type: 'string' } }, { name: 'status', in: 'query', schema: { enum: ['planned', 'in_progress', 'done', 'cancelled'] } }]),
     ...listPaths,
   },
 };

@@ -34,6 +34,7 @@ export function canDo(me: Me | undefined, perm: string) {
 const GROUPS: { key: string; perms: string[] }[] = [
   { key: 'customers', perms: ['customers.edit', 'customers.delete'] },
   { key: 'offers', perms: ['offers.edit'] },
+  { key: 'activities', perms: ['activities.all'] },
   { key: 'views', perms: ['views.share'] },
   { key: 'forms', perms: ['forms.manage'] },
   { key: 'admin', perms: ['settings.manage', 'users.manage', 'integrations.manage', 'audit.view'] },

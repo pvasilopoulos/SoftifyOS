@@ -31,6 +31,11 @@ function LiveBridge({ onToast, onState }: { onToast: (t: Omit<Toast, 'id'>) => v
       qc.invalidateQueries({ queryKey: ['dashboard'] });
     });
     es.addEventListener('customer.created', () => qc.invalidateQueries({ queryKey: ['customers'] }));
+    es.addEventListener('crm.changed', () => {
+      qc.invalidateQueries({ queryKey: ['crm'] });
+      qc.invalidateQueries({ queryKey: ['events'] });
+      qc.invalidateQueries({ queryKey: ['activities'] });
+    });
     return () => es.close();
   }, [qc, onToast, onState]);
   return null;

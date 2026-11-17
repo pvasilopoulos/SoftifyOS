@@ -10,6 +10,7 @@ import { env } from '../env.js';
 import { audit } from './settings.js';
 import { emitEvents, type EventSource, type WebhookEvent } from '../webhooks.js';
 import { applyForm } from '../forms.js';
+import { runRules } from '../crm.js';
 
 /** Webhook event with the offer's current headline data. */
 async function offerEvent(tx: Tx, tenantId: string, id: string, event: WebhookEvent, source: EventSource) {
@@ -18,6 +19,9 @@ async function offerEvent(tx: Tx, tenantId: string, id: string, event: WebhookEv
            o.customer_id, c.external_id AS customer_external_id, c.name AS customer_name
     FROM offers o JOIN customers c ON c.id = o.customer_id WHERE o.id = ${id}`;
   if (o) await emitEvents(tx, tenantId, [{ event, data: { ...o } }], source);
+  // CRM automation (e.g. "call 3 days after sending")
+  const trigger = ({ 'offer.created': 'offer_created', 'offer.sent': 'offer_sent', 'offer.accepted': 'offer_accepted', 'offer.rejected': 'offer_rejected' } as const)[event as 'offer.created'];
+  if (o && trigger) await runRules(tx, tenantId, trigger, { customer_id: o.customer_id, offer_id: o.id, actor_id: source.type === 'user' ? source.user_id : null });
 }
 const by = (s: Session): EventSource => ({ type: 'user', user_id: s.userId });
 

@@ -7,6 +7,8 @@ import { ChevronLeft, ChevronRight, MapPin, Plus, Users } from 'lucide-react';
 import { api, type CalEvent } from '@/lib/api';
 import { date, time } from '@/lib/format';
 import { IconButton, PageHeader, Segmented } from '@/components/ui';
+import { ActivityEditor, TypeIcon } from '@/components/crm-editor';
+import { useCrmMeta } from '@/lib/crm';
 
 const kindStyle: Record<string, string> = {
   meeting: 'border-primary bg-primary-soft', visit: 'border-success bg-success-soft', internal: 'border-muted bg-surface-2',
@@ -29,9 +31,12 @@ export default function CalendarPage() {
     return [s, new Date(day.getFullYear(), day.getMonth() + 1, 1)];
   }, [view, day]);
 
+  const meta = useCrmMeta();
+  const [all, setAll] = useState(false);
+  const [editor, setEditor] = useState<{ id?: string; due?: string } | null>(null);
   const { data = [] } = useQuery({
-    queryKey: ['events', range[0].toISOString(), range[1].toISOString()],
-    queryFn: () => api<CalEvent[]>(`/events?from=${range[0].toISOString()}&to=${range[1].toISOString()}`),
+    queryKey: ['events', range[0].toISOString(), range[1].toISOString(), all],
+    queryFn: () => api<(CalEvent & { status?: string; type_icon?: string | null; type_color?: string | null; type_name?: string | null })[]>(`/events?from=${range[0].toISOString()}&to=${range[1].toISOString()}&all=${all ? 1 : 0}`),
   });
 
   const step = (n: number) => setDay((d) => view === 'month' ? new Date(d.getFullYear(), d.getMonth() + n, 1) : addDays(d, n * (view === 'week' ? 7 : 1)));
@@ -50,7 +55,12 @@ export default function CalendarPage() {
 
   return (
     <div>
-      <PageHeader title={t('title')} actions={<IconButton label="add" className="text-primary"><Plus size={24} /></IconButton>} />
+      <PageHeader title={t('title')} actions={<IconButton label="add" className="text-primary" onClick={() => { const d = new Date(day); d.setHours(10, 0, 0, 0); setEditor({ due: d.toISOString() }); }}><Plus size={24} /></IconButton>} />
+      {meta.data?.can.all && (
+        <label className="mb-3 flex items-center gap-2 text-sm text-muted">
+          <input type="checkbox" className="h-4 w-4 accent-[var(--primary)]" checked={all} onChange={(e) => setAll(e.target.checked)} /> {t('everyone')}
+        </label>
+      )}
       <Segmented value={view} onChange={setView} options={[{ value: 'day', label: t('day') }, { value: 'week', label: t('week') }, { value: 'month', label: t('month') }]} />
 
       <div className="my-4 flex items-center justify-between">
@@ -85,17 +95,21 @@ export default function CalendarPage() {
                 <div className="tabular font-semibold">{time(e.starts_at, locale)}</div>
                 {view !== 'day' && <div className="text-xs text-muted">{date(e.starts_at, locale, { day: 'numeric', month: 'short' })}</div>}
               </div>
-              <div className={clsx('flex-1 rounded-2xl border-l-4 p-3.5', kindStyle[e.kind] ?? kindStyle.meeting)}>
-                <div className="font-semibold">{e.title}</div>
+              <button type="button" onClick={() => setEditor({ id: e.id })} className={clsx('flex flex-1 gap-3 rounded-2xl border-l-4 p-3.5 text-left', kindStyle[e.kind] ?? kindStyle.meeting, e.status === 'done' && 'opacity-60')}>
+                <TypeIcon icon={e.type_icon} color={e.type_color} size={32} />
+                <div className="min-w-0 flex-1">
+                <div className={clsx('font-semibold', e.status === 'done' && 'line-through')}>{e.title}</div>
                 <div className="mt-0.5 flex items-center gap-1.5 text-sm text-muted">
                   {e.kind === 'visit' || e.kind === 'followup' ? <MapPin size={14} /> : <Users size={14} />}
-                  {e.location ?? e.customer_name} · {time(e.starts_at, locale)}–{time(e.ends_at, locale)}
+                  {[e.type_name, e.location ?? e.customer_name].filter(Boolean).join(' · ')} · {time(e.starts_at, locale)}–{time(e.ends_at, locale)}
                 </div>
-              </div>
+                </div>
+              </button>
             </li>
           ))}
         </ul>
       )}
+      {editor && <ActivityEditor id={editor.id} preset={editor.id ? undefined : { due_at: editor.due, type: 'meeting' }} onClose={() => setEditor(null)} />}
     </div>
   );
 }

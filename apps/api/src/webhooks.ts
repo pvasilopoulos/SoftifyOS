@@ -17,6 +17,7 @@ export const WEBHOOK_EVENTS = [
   'branch.created', 'branch.updated', 'branch.deleted',
   'space.created', 'space.updated', 'space.deleted',
   'offer.created', 'offer.submitted', 'offer.approved', 'offer.sent', 'offer.accepted', 'offer.rejected',
+  'activity.created', 'activity.updated', 'activity.completed', 'activity.deleted',
 ] as const;
 export type WebhookEvent = (typeof WEBHOOK_EVENTS)[number];
 
