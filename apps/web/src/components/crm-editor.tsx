@@ -274,7 +274,7 @@ function EditorBody({ a, preset, onClose, onSaved }: { a?: ActivityDetail; prese
   );
 }
 
-function RecurrenceEditor({ value, onChange }: { value: Recurrence | null; onChange: (r: Recurrence | null) => void }) {
+export function RecurrenceEditor({ value, onChange }: { value: Recurrence | null; onChange: (r: Recurrence | null) => void }) {
   const t = useTranslations('crm');
   const input = 'min-w-0 rounded-xl border border-border bg-surface-2 px-3 py-2 text-sm outline-none focus:border-primary';
   return (

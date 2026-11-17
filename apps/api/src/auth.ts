@@ -11,7 +11,7 @@ const TTL_DAYS = 7;
 export type Session = { userId: string; tenantId: string; role: string; perms?: string[]; level?: number };
 
 /** Every permission a role can have (Settings → Users & roles). */
-export const PERMISSIONS = ['customers.edit', 'customers.delete', 'offers.edit', 'activities.all', 'views.share', 'forms.manage', 'settings.manage', 'users.manage', 'integrations.manage', 'audit.view'] as const;
+export const PERMISSIONS = ['customers.edit', 'customers.delete', 'offers.edit', 'activities.all', 'tasks.all', 'views.share', 'forms.manage', 'settings.manage', 'users.manage', 'integrations.manage', 'audit.view'] as const;
 export type Permission = (typeof PERMISSIONS)[number];
 /** Owners can do everything; everyone else needs the permission in their role. */
 export const can = (s: Session, p: Permission) => s.role === 'owner' || !!s.perms?.includes(p);

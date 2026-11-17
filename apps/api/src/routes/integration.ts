@@ -15,6 +15,8 @@ import { emitEntityEvents, hasWebhooks, emitEvents, type EventSource } from '../
 import { customInput } from '../forms.js';
 import { branchOut, customerOut, spaceOut } from '../readmodels.js';
 import { activityOut, emitActivityEvents, insertActivity } from '../crm.js';
+import { docOut } from './documents.js';
+import { openFile } from '../storage.js';
 import { ALL_LISTS, canonicalName, isNameList, nameInUse, renameInRecords, type NameList } from '../lookups.js';
 
 /** Name-list fields: unknown values are added to the list (like zones), and the list's spelling is stored. */
@@ -27,7 +29,7 @@ import type postgres from 'postgres';
 
 type Frag = postgres.PendingQuery<postgres.Row[]>;
 
-type Resource = 'customers' | 'branches' | 'spaces' | 'lists' | 'activities';
+type Resource = 'customers' | 'branches' | 'spaces' | 'lists' | 'activities' | 'documents';
 type Level = 'none' | 'read' | 'write';
 type ApiKeyCtx = { id: string; tenantId: string; name: string; permissions: Record<Resource, Level>; expiresAt: number | null; ips: BlockList | null };
 type ApiLog = { tenantId?: string; keyId?: string; items?: number; created?: number; updated?: number; failed?: number; error?: string; errors?: unknown };
@@ -616,6 +618,37 @@ export default async function integrationRoutes(app: FastifyInstance) {
       ${q.status ? tx`AND a.status = ${q.status}` : tx``}`);
     getOne('/v1/activities/:external_id', activityOut, 'a');
     getById('/v1/activities/by-id/:id', activityOut, 'a');
+    // Documents: metadata (incremental by updated_at) and the file itself
+    r.get('/v1/documents', async (req, reply) => {
+      if (!need(req, reply, 'documents', 'read')) return;
+      const q = listQuery.extend({ customer_external_id: z.string().max(100).optional() }).parse(req.query);
+      const cur = decodeCursor<[string, string]>(q.cursor);
+      const T = req.apiKey!.tenantId;
+      return withTenant(T, async (tx) => {
+        const rows = await tx`${docOut(tx, T)}
+          ${q.updated_since ? tx`AND d.updated_at >= ${q.updated_since}` : tx``}
+          ${q.customer_external_id ? tx`AND c.external_id = ${q.customer_external_id}` : tx``}
+          ${cur ? tx`AND (d.updated_at, d.id) > (${cur[0]}::timestamptz, ${cur[1]}::uuid)` : tx``}
+          ORDER BY d.updated_at, d.id LIMIT ${q.limit + 1}`;
+        const more = rows.length > q.limit;
+        const items = more ? rows.slice(0, q.limit) : rows;
+        const l = items.at(-1);
+        return { items: items.map((x) => ({ ...x, file_url: `/api/v1/documents/by-id/${x.id}/file` })), next_cursor: more && l ? encodeCursor([l.updated_at, l.id]) : null };
+      });
+    });
+    r.get('/v1/documents/by-id/:id/file', async (req, reply) => {
+      if (!need(req, reply, 'documents', 'read')) return;
+      const p = z.object({ id: z.string().uuid() }).safeParse(req.params);
+      if (!p.success) return problem(reply, 404, 'not_found');
+      const T = req.apiKey!.tenantId;
+      const [d] = await withTenant(T, (tx) => tx`SELECT storage_key, name, mime FROM documents WHERE id = ${p.data.id}`);
+      if (!d) return problem(reply, 404, 'not_found');
+      const f = await openFile(d.storage_key).catch(() => null);
+      if (!f) return problem(reply, 410, 'file_missing');
+      reply.header('Content-Type', d.mime).header('Content-Length', f.size).header('X-Content-Type-Options', 'nosniff')
+        .header('Content-Disposition', `attachment; filename*=UTF-8''${encodeURIComponent(d.name)}`);
+      return reply.send(f.stream);
+    });
 
     // ----- writes: single (PUT, idempotent) and batch (POST)
     const writers = [

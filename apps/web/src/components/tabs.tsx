@@ -349,8 +349,12 @@ export function TabContent({ children }: { children: ReactNode }) {
 export function useTabTitle(title: string | null | undefined) {
   const tabs = useTabs();
   const id = useRef(getCurrentTab()).current;
-  const setTitle = tabs?.setTitle;
-  useEffect(() => { if (title && setTitle) setTitle(id, title); }, [title, id, setTitle]);
+  // The provider's functions change with every tab-state update: keep the latest in a ref so this effect
+  // runs only when the title changes (otherwise each update re-sets the title → another update → loop).
+  const setTitle = useRef(tabs?.setTitle);
+  setTitle.current = tabs?.setTitle;
+  const ready = !!tabs?.setTitle;
+  useEffect(() => { if (title && setTitle.current) setTitle.current(id, title); }, [title, id, ready]);
 }
 
 /**
@@ -369,15 +373,17 @@ export function useTabDraft<T>(key: string, value: T, setValue: (v: T) => void, 
     restored.current = true;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [storeKey]);
-  const setDirty = tabs?.setDirty;
+  const dirtyRef = useRef(tabs?.setDirty);
+  dirtyRef.current = tabs?.setDirty;
+  const setDirty = useCallback((tid: string, d: boolean) => dirtyRef.current?.(tid, d), []);
   useEffect(() => {
     if (!restored.current) return;
     const json = JSON.stringify(value);
     const dirty = json !== initialJson.current;
     if (dirty) tabStore.setItem(storeKey, json); else tabStore.removeItem(storeKey);
-    setDirty?.(id, dirty);
+    setDirty(id, dirty);
   }, [value, storeKey, id, setDirty]);
-  return useCallback(() => { tabStore.removeItem(storeKey); setDirty?.(id, false); initialJson.current = JSON.stringify(value); }, [storeKey, id, setDirty, value]);
+  return useCallback(() => { tabStore.removeItem(storeKey); setDirty(id, false); initialJson.current = JSON.stringify(value); }, [storeKey, id, setDirty, value]);
 }
 
 // ---------------------------------------------------------------- links: Ctrl/⌘/middle-click → new tab; long-press on phones

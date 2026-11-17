@@ -7,6 +7,7 @@ import { compactMoney, relative, time } from '@/lib/format';
 import { Link } from '@/i18n/navigation';
 import { useMe } from '@/components/app-shell';
 import { SectionTitle, Skeleton } from '@/components/ui';
+import { DashboardWidgets } from '@/components/reports-ui';
 
 type Dashboard = {
   stats: { status: string; count: string; amount: string }[];
@@ -73,6 +74,8 @@ export default function HomePage() {
           </div>
         ))}
       </div>
+
+      <DashboardWidgets />
 
       <div className="grid gap-5 lg:grid-cols-2">
         <section className="card p-4">

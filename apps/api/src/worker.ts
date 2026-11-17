@@ -9,6 +9,8 @@ import { publish } from './realtime.js';
 import type { EmailJob, JobMap, NotifyJob, WebhookJob } from './jobs.js';
 import { deliver } from './webhooks.js';
 import { runNoContactRules } from './crm.js';
+import { removeFile } from './storage.js';
+import { definitionSchema, nextRun, runReport } from './reports.js';
 
 // SMTP (e.g. the Plesk mail server on localhost). Without SMTP_HOST, emails are logged instead of sent.
 const mailer = env.smtpConfigured
@@ -109,6 +111,17 @@ async function scheduleReminders() {
       'body', to_char(d.due_at AT TIME ZONE t.timezone, 'DD/MM HH24:MI') || coalesce(' · ' || c.name, ''),
       'url', '/crm?open=' || d.id)
     FROM due d JOIN tenants t ON t.id = d.tenant_id LEFT JOIN customers c ON c.id = d.customer_id`;
+  // Task reminders
+  await sql`
+    WITH due AS (
+      UPDATE tasks SET reminded = true
+      WHERE id IN (SELECT id FROM tasks WHERE reminded = false AND remind_at <= now() AND owner_id IS NOT NULL
+                   AND status NOT IN ('done', 'cancelled') LIMIT 500 FOR UPDATE SKIP LOCKED)
+      RETURNING id, tenant_id, owner_id, title, due_at)
+    INSERT INTO jobs (kind, payload)
+    SELECT 'notify', jsonb_build_object('tenantId', d.tenant_id, 'userIds', jsonb_build_array(d.owner_id),
+      'title', '⏰ ' || d.title, 'body', 'Προθεσμία ' || to_char(d.due_at AT TIME ZONE t.timezone, 'DD/MM HH24:MI'), 'url', '/tasks?open=' || d.id)
+    FROM due d JOIN tenants t ON t.id = d.tenant_id`;
 }
 
 // Morning digest (from 07:00 local time, once a day): what is due today and what is overdue
@@ -119,8 +132,10 @@ async function morningDigest() {
              count(*) FILTER (WHERE a.due_at < now())::int AS overdue,
              count(*) FILTER (WHERE a.due_at >= now()
                AND a.due_at < (date_trunc('day', now() AT TIME ZONE t.timezone) + interval '1 day') AT TIME ZONE t.timezone)::int AS today
-      FROM crm_activities a JOIN tenants t ON t.id = a.tenant_id
-      WHERE a.status IN ('planned', 'in_progress') AND a.owner_id IS NOT NULL
+      FROM (SELECT tenant_id, owner_id, due_at FROM crm_activities WHERE status IN ('planned', 'in_progress')
+            UNION ALL SELECT tenant_id, owner_id, due_at FROM tasks WHERE status NOT IN ('done', 'cancelled')) a
+      JOIN tenants t ON t.id = a.tenant_id
+      WHERE a.owner_id IS NOT NULL
         AND a.due_at < (date_trunc('day', now() AT TIME ZONE t.timezone) + interval '1 day') AT TIME ZONE t.timezone
         AND extract(hour FROM now() AT TIME ZONE t.timezone) >= 7
       GROUP BY a.tenant_id, a.owner_id, t.timezone),
@@ -130,11 +145,61 @@ async function morningDigest() {
       ON CONFLICT DO NOTHING RETURNING tenant_id, user_id)
     INSERT INTO jobs (kind, payload)
     SELECT 'notify', jsonb_build_object('tenantId', f.tenant_id, 'userIds', jsonb_build_array(f.user_id),
-      'title', 'Οι ενέργειές σου σήμερα',
+      'title', 'Το πρόγραμμά σου σήμερα',
       'body', td.today || ' για σήμερα' || CASE WHEN td.overdue > 0 THEN ' · ' || td.overdue || ' καθυστερημένες' ELSE '' END,
       'url', '/crm?view=agenda')
     FROM fresh f JOIN todo td ON td.tenant_id = f.tenant_id AND td.user_id = f.user_id`;
   await sql`DELETE FROM crm_digests WHERE day < current_date - 7`;
+}
+
+// Documents that expire within 30 days (contracts, certificates…): notify whoever uploaded them, once
+async function documentExpiry() {
+  await sql`
+    WITH due AS (
+      UPDATE documents SET expiry_notified = true
+      WHERE id IN (SELECT id FROM documents WHERE expiry_notified = false AND expires_at IS NOT NULL AND expires_at <= current_date + 30
+                   AND created_by IS NOT NULL LIMIT 500 FOR UPDATE SKIP LOCKED)
+      RETURNING id, tenant_id, created_by, name, expires_at)
+    INSERT INTO jobs (kind, payload)
+    SELECT 'notify', jsonb_build_object('tenantId', tenant_id, 'userIds', jsonb_build_array(created_by),
+      'title', 'Λήγει: ' || name, 'body', 'Ημερομηνία λήξης ' || to_char(expires_at, 'DD/MM/YYYY'), 'url', '/documents?open=' || id)
+    FROM due`;
+  // Files whose removal failed earlier
+  for (const t of await sql`SELECT storage_key FROM storage_trash LIMIT 200`) {
+    try { await removeFile(t.storage_key); await sql`DELETE FROM storage_trash WHERE storage_key = ${t.storage_key}`; } catch { /* retry later */ }
+  }
+}
+
+// Scheduled reports: run as their owner and e-mail a table to the recipients
+async function scheduledReports() {
+  const due = await sql`
+    UPDATE saved_reports SET next_run_at = NULL WHERE id IN (
+      SELECT id FROM saved_reports WHERE next_run_at <= now() AND schedule IS NOT NULL LIMIT 20 FOR UPDATE SKIP LOCKED)
+    RETURNING id, tenant_id, owner_id, name, definition, schedule`;
+  for (const r of due) {
+    try {
+      const [m] = await sql`SELECT m.role, ro.permissions FROM memberships m JOIN roles ro ON ro.tenant_id = m.tenant_id AND ro.key = m.role
+                             WHERE m.tenant_id = ${r.tenant_id} AND m.user_id = ${r.owner_id}`;
+      if (!m) continue;   // owner left: the schedule stops
+      const perms = (x: string) => m.role === 'owner' || (m.permissions as string[]).includes(x);
+      const def = definitionSchema.parse(r.definition);
+      const res = await runReport(sql, { tenantId: r.tenant_id, userId: r.owner_id, perms }, def);
+      const fmt = (n: number) => res.measure.pct ? `${n.toLocaleString('el-GR')}%` : res.measure.money ? n.toLocaleString('el-GR', { style: 'currency', currency: 'EUR' }) : n.toLocaleString('el-GR');
+      const esc = (x: string) => x.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]!);
+      const rows = res.rows.map((x) => `<tr><td style="padding:4px 12px 4px 0">${esc(x.label)}</td><td style="padding:4px 0;text-align:right"><b>${fmt(x.value)}</b></td></tr>`).join('');
+      const html = `<h2 style="font-family:sans-serif">${esc(r.name)}</h2><p style="font-family:sans-serif;color:#666">Σύνολο: <b>${fmt(res.total)}</b>${res.prev_total !== undefined ? ` (προηγούμενη περίοδος: ${fmt(res.prev_total)})` : ''}</p>` +
+        (rows ? `<table style="font-family:sans-serif;font-size:14px;border-collapse:collapse">${rows}</table>` : '') +
+        `<p style="font-family:sans-serif"><a href="${env.appUrl}/el/reports?saved=${r.id}">Άνοιγμα στο SoftifyOS</a></p>`;
+      const text = `${r.name}\nΣύνολο: ${fmt(res.total)}\n\n` + res.rows.map((x) => `${x.label}: ${fmt(x.value)}`).join('\n');
+      const emails = await sql`SELECT u.email FROM users u JOIN memberships mm ON mm.user_id = u.id AND mm.tenant_id = ${r.tenant_id}
+                               WHERE u.id = ANY(${(r.schedule as { recipients: string[] }).recipients}::uuid[])`;
+      for (const e of emails) await sql`INSERT INTO jobs (kind, payload) VALUES ('email', ${sql.json({ to: e.email, subject: `Αναφορά: ${r.name}`, text, html } as never)})`;
+      await sql`UPDATE saved_reports SET last_sent_at = now(), next_run_at = ${nextRun(r.schedule as never)} WHERE id = ${r.id}`;
+    } catch (e) {
+      console.error('scheduled report failed', r.id, e);
+      await sql`UPDATE saved_reports SET next_run_at = now() + interval '1 hour' WHERE id = ${r.id}`;
+    }
+  }
 }
 
 async function maintenance() {
@@ -152,8 +217,8 @@ while (running) {
   try {
     const now = Date.now();
     if (now - lastReminder > 15_000) { await scheduleReminders(); lastReminder = now; }
-    if (now - lastMaintenance > 3_600_000) { await maintenance(); lastMaintenance = now; }
-    if (now - lastDigest > 300_000) { await morningDigest(); lastDigest = now; }
+    if (now - lastMaintenance > 3_600_000) { await maintenance(); await documentExpiry(); lastMaintenance = now; }
+    if (now - lastDigest > 300_000) { await morningDigest(); await scheduledReports(); lastDigest = now; }
     if (now - lastRules > 1_800_000) { await runNoContactRules(sql); lastRules = now; }
     const n = await processBatch();
     if (n < BATCH) await new Promise((r) => setTimeout(r, 500));

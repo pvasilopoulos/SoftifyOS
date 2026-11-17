@@ -10,6 +10,8 @@ import {
 import { api, ApiError } from '@/lib/api';
 import { date, money, relative } from '@/lib/format';
 import type { OfferDetail } from '@/lib/offers';
+import { DocumentsPanel } from '@/components/documents-ui';
+import { TasksPanel } from '@/components/task-ui';
 import { Link, useRouter } from '@/i18n/navigation';
 import { Avatar, IconButton, Skeleton, StatusBadge, Tabs } from '@/components/ui';
 import { useToast } from '@/components/providers';
@@ -20,13 +22,15 @@ const stepIndex: Record<string, number> = { draft: 0, in_progress: 0, pending_ap
 export default function OfferPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
   const t = useTranslations('offers');
+  const td = useTranslations('docs');
+  const tt = useTranslations('tasks');
   const tr = useTranslations('role');
   const ta = useTranslations('activity');
   const locale = useLocale();
   const router = useRouter();
   const qc = useQueryClient();
   const toast = useToast();
-  const [tab, setTab] = useState<'summary' | 'items' | 'versions' | 'approvals'>('summary');
+  const [tab, setTab] = useState<'summary' | 'items' | 'versions' | 'approvals' | 'tasks' | 'documents'>('summary');
   const [viewVersion, setViewVersion] = useState<number | null>(null);
   const [rejecting, setRejecting] = useState(false);
   const [sending, setSending] = useState(false);
@@ -117,7 +121,7 @@ export default function OfferPage({ params }: { params: Promise<{ id: string }> 
 
       <Tabs value={tab} onChange={setTab} options={[
         { value: 'summary', label: t('summary') }, { value: 'items', label: `${t('items')} (${data.items.length})` },
-        { value: 'versions', label: `${t('versions')} (${data.versions.length})` }, { value: 'approvals', label: t('approvals') },
+        { value: 'versions', label: `${t('versions')} (${data.versions.length})` }, { value: 'approvals', label: t('approvals') }, { value: 'tasks', label: tt('title') }, { value: 'documents', label: td('title') },
       ]} />
 
       {tab === 'summary' && (
@@ -160,6 +164,8 @@ export default function OfferPage({ params }: { params: Promise<{ id: string }> 
         </section>
       )}
 
+      {tab === 'documents' && <DocumentsPanel links={{ offer_id: o.id, customer_id: o.customer_id }} />}
+      {tab === 'tasks' && <TasksPanel offerId={o.id} customerId={o.customer_id} customerName={o.customer_name} />}
       {tab === 'versions' && (
         <ul className="space-y-2">
           {data.versions.map((v) => (

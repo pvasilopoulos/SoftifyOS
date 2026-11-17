@@ -20,6 +20,8 @@ export const env = {
   vapidSubject: process.env.VAPID_SUBJECT ?? 'mailto:admin@example.com',
   // Public base URL of the app (used in emails and customer links)
   appUrl: process.env.APP_URL ?? 'http://localhost:3000',
+  // Uploaded documents (outside the web root; back it up with the database)
+  uploadDir: process.env.UPLOAD_DIR ?? 'storage',
   smtp: {
     host: process.env.SMTP_HOST ?? '',
     port: Number(process.env.SMTP_PORT ?? 587),

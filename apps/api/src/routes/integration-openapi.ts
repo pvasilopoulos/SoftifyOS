@@ -159,6 +159,8 @@ export const openApiSpec = {
     schemas: { Customer, Branch, Space, Activity, ItemResult, BatchResult },
   },
   paths: {
+    '/api/v1/documents': { get: { tags: ['Documents'], summary: 'List documents (metadata, ordered by updated_at)', parameters: [...listParams, { name: 'customer_external_id', in: 'query', schema: { type: 'string' } }], responses: { 200: { description: 'Page with items (id, name, mime, size, category, customer…, file_url) and next_cursor' } } } },
+    '/api/v1/documents/by-id/{id}/file': { get: { tags: ['Documents'], summary: 'Download the current file', parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } }], responses: { 200: { description: 'File' }, 404: { description: 'Not found' } } } },
     '/api/v1/ping': { get: { summary: 'Check the key', responses: { 200: { description: 'OK' }, 401: { description: 'Invalid key' } } } },
     ...resource('customers', 'Customers', Customer),
     ...resource('branches', 'Stores', Branch, [{ name: 'customer_external_id', in: 'query', schema: { type: 'string' } }]),

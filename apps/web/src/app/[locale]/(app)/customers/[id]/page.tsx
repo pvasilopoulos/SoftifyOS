@@ -23,8 +23,10 @@ import { ActivityEditor, CompleteDialog, TypeIcon, type EditorPreset } from '@/c
 import { dueLabel, tone, type Activity as CrmActivity } from '@/lib/crm';
 import { BranchDetails } from '@/components/branch-details';
 import { useCustomRows } from '@/components/custom-values';
+import { DocumentsPanel } from '@/components/documents-ui';
+import { TasksPanel } from '@/components/task-ui';
 
-type Tab = 'overview' | 'subsidiaries' | 'branches' | 'contacts' | 'offers' | 'activity';
+type Tab = 'overview' | 'subsidiaries' | 'branches' | 'contacts' | 'offers' | 'activity' | 'tasks' | 'documents';
 type DialogState =
   | { kind: 'branch'; branch?: Branch }
   | { kind: 'space'; branchId: string; space?: Space }
@@ -42,6 +44,8 @@ export default function CustomerPage({ params }: { params: Promise<{ id: string 
   const tc = useTranslations('customers');
   const tf = useTranslations('cform');
   const ta = useTranslations('activity');
+  const td = useTranslations('docs');
+  const tt = useTranslations('tasks');
   const locale = useLocale();
   const router = useRouter();
   const qc = useQueryClient();
@@ -76,6 +80,8 @@ export default function CustomerPage({ params }: { params: Promise<{ id: string 
     { value: 'contacts', label: `${t('contacts')} (${data.contacts.length})` },
     { value: 'offers', label: t('offers') },
     { value: 'activity', label: t('activity') },
+    { value: 'tasks', label: tt('title') },
+    { value: 'documents', label: td('title') },
   ];
 
   return (
@@ -264,6 +270,8 @@ export default function CustomerPage({ params }: { params: Promise<{ id: string 
       )}
 
       {tab === 'offers' && <CustomerOffers customerId={id} />}
+      {tab === 'documents' && <DocumentsPanel links={{ customer_id: id }} />}
+      {tab === 'tasks' && <TasksPanel customerId={id} customerName={c.name} />}
 
       {tab === 'activity' && (
         <div className="space-y-3">

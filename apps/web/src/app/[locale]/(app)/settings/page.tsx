@@ -4,7 +4,7 @@ import { Suspense, useState, type ComponentType } from 'react';
 import clsx from 'clsx';
 import { useSearchParams } from 'next/navigation';
 import { useTranslations } from 'next-intl';
-import { ArrowLeft, Search, X, Building2, SlidersHorizontal, Sparkles, ChevronRight, Contact, FileText, LayoutList, Palette, History, Landmark, ListChecks, Package, Plug, ShieldCheck, UserRound, Users } from 'lucide-react';
+import { ArrowLeft, Search, X, Building2, SlidersHorizontal, Sparkles, FolderOpen, ChevronRight, Contact, FileText, LayoutList, Palette, History, Landmark, ListChecks, Package, Plug, ShieldCheck, UserRound, Users } from 'lucide-react';
 import { Link, useRouter } from '@/i18n/navigation';
 import { IconButton } from '@/components/ui';
 import {
@@ -13,6 +13,8 @@ import {
 import { BrandingSection } from '@/components/branding-settings';
 import { ModuleFormsSection } from '@/components/forms-settings';
 import { CrmSettingsSection } from '@/components/crm-settings';
+import { DocumentsSettingsSection } from '@/components/documents-settings';
+import { TasksSettingsSection } from '@/components/tasks-settings';
 import { CustomersSettingsSection, IndexesSettingsSection, IntegrationsSection } from '@/components/settings-sections-2';
 
 const SECTIONS: { key: string; icon: typeof Users; Component: ComponentType }[] = [
@@ -26,6 +28,8 @@ const SECTIONS: { key: string; icon: typeof Users; Component: ComponentType }[] 
   { key: 'indexes', icon: LayoutList, Component: IndexesSettingsSection },
   { key: 'forms', icon: SlidersHorizontal, Component: ModuleFormsSection },
   { key: 'crm', icon: Sparkles, Component: CrmSettingsSection },
+  { key: 'tasks', icon: ListChecks, Component: TasksSettingsSection },
+  { key: 'documents', icon: FolderOpen, Component: DocumentsSettingsSection },
   { key: 'products', icon: Package, Component: ProductsSection },
   { key: 'lists', icon: ListChecks, Component: ListsSection },
   { key: 'integrations', icon: Plug, Component: IntegrationsSection },
