@@ -73,6 +73,11 @@ if ! dpkg -s "postgresql-$PG_MAJOR" >/dev/null 2>&1; then
   apt-get install -y -qq "postgresql-$PG_MAJOR" >/dev/null
 fi
 # If Plesk already runs another PostgreSQL, Ubuntu gives this cluster the next free port
+if ! pg_lsclusters -h | awk -v v="$PG_MAJOR" '$1==v {f=1} END {exit !f}'; then
+  # Some servers (e.g. with Plesk) set create_main_cluster = false: create it ourselves
+  c "Δημιουργία cluster PostgreSQL $PG_MAJOR"
+  pg_createcluster "$PG_MAJOR" main --start >/dev/null
+fi
 PG_PORT="$(pg_lsclusters -h | awk -v v="$PG_MAJOR" '$1==v {print $3; exit}')"
 [ -n "$PG_PORT" ] || die "Δεν βρέθηκε cluster PostgreSQL $PG_MAJOR (pg_lsclusters)."
 systemctl enable --now "postgresql@${PG_MAJOR}-main" >/dev/null
