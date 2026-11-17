@@ -1,6 +1,6 @@
 // Documents on the client: types, meta, upload with progress, file icons and sizes.
 import { useQuery } from '@tanstack/react-query';
-import { FileArchive, FileImage, FileSpreadsheet, FileText, FileType2, FileVideo, Mail, Presentation, type LucideIcon } from 'lucide-react';
+import { FileArchive, FileAudio, FileImage, FileSpreadsheet, FileText, FileType2, FileVideo, Mail, Presentation, type LucideIcon } from 'lucide-react';
 import { api, ApiError } from './api';
 
 export type Doc = {
@@ -36,12 +36,14 @@ export function formatBytes(n: number, locale = 'el') {
 
 export const isImage = (ext: string) => ['png', 'jpg', 'jpeg', 'webp', 'gif'].includes(ext);
 export const isPdf = (ext: string) => ext === 'pdf';
+export const isAudio = (ext: string) => ['webm', 'm4a', 'ogg', 'mp3', 'wav'].includes(ext);
 export function fileIcon(ext: string): LucideIcon {
   if (isImage(ext) || ext === 'heic') return FileImage;
   if (['xls', 'xlsx', 'ods', 'csv'].includes(ext)) return FileSpreadsheet;
   if (['ppt', 'pptx', 'odp'].includes(ext)) return Presentation;
   if (ext === 'zip') return FileArchive;
   if (ext === 'mp4') return FileVideo;
+  if (isAudio(ext)) return FileAudio;
   if (['eml', 'msg'].includes(ext)) return Mail;
   if (ext === 'pdf') return FileType2;
   return FileText;

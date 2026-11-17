@@ -44,6 +44,12 @@ const TYPES: Record<string, Kind> = {
   xml: { mime: 'application/xml', text: true },
   eml: { mime: 'message/rfc822', text: true },
   mp4: { mime: 'video/mp4', sig: (h) => h.subarray(4, 8).toString('latin1') === 'ftyp' },
+  // Voice recordings (in-app recorder: webm on Chrome/Android, m4a on iPhone) and common audio files
+  webm: { mime: 'audio/webm', sig: (h) => h.subarray(0, 4).toString('hex') === '1a45dfa3', inline: true },
+  m4a: { mime: 'audio/mp4', sig: (h) => h.subarray(4, 8).toString('latin1') === 'ftyp', inline: true },
+  ogg: { mime: 'audio/ogg', sig: (h) => h.subarray(0, 4).toString('latin1') === 'OggS', inline: true },
+  mp3: { mime: 'audio/mpeg', sig: (h) => h.subarray(0, 3).toString('latin1') === 'ID3' || (h[0] === 0xff && (h[1] & 0xe0) === 0xe0), inline: true },
+  wav: { mime: 'audio/wav', sig: (h) => h.subarray(0, 4).toString('latin1') === 'RIFF' && h.subarray(8, 12).toString('latin1') === 'WAVE', inline: true },
 };
 export const ALLOWED_EXT = Object.keys(TYPES);
 export const extOf = (name: string) => (path.extname(name).slice(1) || '').toLowerCase();

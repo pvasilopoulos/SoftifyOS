@@ -1,4 +1,5 @@
 'use client';
+import { VoiceVisitButton } from '@/components/ai-features';
 // CRM activities: agenda / list / kanban, counters, filters, bulk actions, export, reports.
 import { Suspense, useEffect, useMemo, useState } from 'react';
 import clsx from 'clsx';
@@ -83,6 +84,7 @@ function CrmInner() {
       <header className="flex flex-wrap items-center gap-2">
         <h1 className="flex-1 text-2xl font-bold tracking-tight">{t('title')}</h1>
         <IcalButton />
+        <VoiceVisitButton />
         <button onClick={exportCsv} className="hidden h-10 items-center gap-1.5 rounded-xl border border-border bg-surface px-3 text-sm font-medium sm:flex"><Download size={16} /> CSV</button>
         {meta.data?.can.edit && (
           <>

@@ -1,4 +1,5 @@
 'use client';
+import { ReportPromptBar } from '@/components/ai-features';
 // Reports: ready-made (sales, customers, activity, stores), saved / shared, and new ones from the builder.
 import { Suspense, useEffect, useState } from 'react';
 import clsx from 'clsx';
@@ -19,6 +20,7 @@ function ReportsInner() {
   const [sel, setSel] = useState<{ kind: 'preset' | 'saved' | 'new'; key: string } | null>(null);
   const [def, setDef] = useState<Definition | null>(null);
   const [newOpen, setNewOpen] = useState(false);
+  const [aiName, setAiName] = useState<string | null>(null);
   // Open from the URL (?preset= / ?saved=) or the first preset
   useEffect(() => {
     if (!meta.data || sel) return;
@@ -31,8 +33,8 @@ function ReportsInner() {
   const m = meta.data;
   const preset = sel?.kind === 'preset' ? m.presets.find((x) => x.key === sel.key) : undefined;
   const saved = sel?.kind === 'saved' ? m.saved.find((x) => x.id === sel.key) : undefined;
-  const title = preset ? pick(preset.name, locale) : saved?.name ?? t('newReport');
-  const choose = (kind: 'preset' | 'saved', key: string, d: Definition) => { setSel({ kind, key }); setDef(d); };
+  const title = preset ? pick(preset.name, locale) : saved?.name ?? aiName ?? t('newReport');
+  const choose = (kind: 'preset' | 'saved', key: string, d: Definition) => { setSel({ kind, key }); setDef(d); setAiName(null); };
   const item = (active: boolean) => clsx('flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-sm', active ? 'bg-primary-soft font-semibold text-primary' : 'hover:bg-surface-2');
 
   return (
@@ -41,6 +43,7 @@ function ReportsInner() {
         <h1 className="flex-1 text-2xl font-bold tracking-tight">{t('title')}</h1>
         <button onClick={() => setNewOpen(true)} className="flex h-10 items-center gap-1.5 rounded-xl bg-primary px-4 text-sm font-semibold text-white shadow-sm"><Plus size={17} /> {t('newReport')}</button>
       </header>
+      <ReportPromptBar<Definition> onDefinition={(name, d) => { setAiName(name); setSel({ kind: 'new', key: String(Date.now()) }); setDef(d); }} />
       <div className="grid items-start gap-4 lg:grid-cols-[260px_1fr]">
         <nav className="card max-h-[80dvh] space-y-3 overflow-auto p-2 print:hidden">
           {m.saved.length > 0 && (

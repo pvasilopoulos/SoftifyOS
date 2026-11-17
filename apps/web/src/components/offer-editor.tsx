@@ -1,4 +1,5 @@
 'use client';
+import { OfferFromTextButton } from './ai-features';
 import { useTabDraft } from './tabs';
 import { CustomerAvatar } from './customer-avatar';
 import { useEffect, useMemo, useState } from 'react';
@@ -201,6 +202,7 @@ export function OfferEditor({ initial }: { initial: EditorInitial }) {
       <header className="flex items-center gap-1">
         <IconButton label="back" onClick={() => router.back()}><ArrowLeft size={22} /></IconButton>
         <h1 className="flex-1 text-xl font-bold">{isEdit ? t('editTitle', { v: String(initial.nextVersion).padStart(2, '0') }) : t('newTitle')}</h1>
+        {!isEdit && <OfferFromTextButton customerId={customer?.id} customerName={customer?.name} branchId={branchId || null} />}
       </header>
 
       {/* Customer & placement */}

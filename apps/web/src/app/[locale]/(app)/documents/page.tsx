@@ -14,6 +14,7 @@ import { useTabTitle } from '@/components/tabs';
 import { DocRow, DocumentDialog, DropZone, FileTile, UploadQueue, useDocsRefresh, useUploader } from '@/components/documents-ui';
 import { appConfirm, appPrompt } from '@/components/confirm';
 import { useToast } from '@/components/providers';
+import { CaptureButtons } from '@/components/voice-recorder';
 
 function useDebounced<T>(v: T, ms = 300) {
   const [d, setD] = useState(v);
@@ -92,6 +93,7 @@ function DocsInner() {
       <header className="flex flex-wrap items-center gap-2">
         <h1 className="flex-1 text-2xl font-bold tracking-tight">{t('title')}</h1>
         {canEdit && <button onClick={newFolder} className="flex h-10 items-center gap-1.5 rounded-xl border border-border bg-surface px-3 text-sm font-medium"><FolderPlus size={16} /> <span className="hidden sm:inline">{t('newFolder')}</span></button>}
+        {canEdit && <CaptureButtons onFiles={up.add} maxBytes={meta.data?.max_file ?? 25 * 1024 * 1024} compact />}
         {canEdit && (
           <label className="flex h-10 cursor-pointer items-center gap-1.5 rounded-xl bg-primary px-4 text-sm font-semibold text-white shadow-sm">
             <Upload size={16} /> {t('upload')}

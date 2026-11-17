@@ -4,7 +4,7 @@ import { Suspense, useState, type ComponentType } from 'react';
 import clsx from 'clsx';
 import { useSearchParams } from 'next/navigation';
 import { useTranslations } from 'next-intl';
-import { ArrowLeft, Search, X, Building2, SlidersHorizontal, Sparkles, FolderOpen, ChevronRight, Contact, FileText, LayoutList, Palette, History, Landmark, ListChecks, Package, Plug, ShieldCheck, UserRound, Users } from 'lucide-react';
+import { ArrowLeft, Search, X, Building2, SlidersHorizontal, Sparkles, FolderOpen, ChevronRight, Contact, FileText, LayoutList, Palette, History, Landmark, ListChecks, Package, Plug, ShieldCheck, UserRound, Users, Bot } from 'lucide-react';
 import { Link, useRouter } from '@/i18n/navigation';
 import { IconButton } from '@/components/ui';
 import {
@@ -15,6 +15,7 @@ import { ModuleFormsSection } from '@/components/forms-settings';
 import { CrmSettingsSection } from '@/components/crm-settings';
 import { DocumentsSettingsSection } from '@/components/documents-settings';
 import { TasksSettingsSection } from '@/components/tasks-settings';
+import { AiSettingsSection } from '@/components/ai-settings';
 import { CustomersSettingsSection, IndexesSettingsSection, IntegrationsSection } from '@/components/settings-sections-2';
 
 const SECTIONS: { key: string; icon: typeof Users; Component: ComponentType }[] = [
@@ -33,6 +34,7 @@ const SECTIONS: { key: string; icon: typeof Users; Component: ComponentType }[] 
   { key: 'products', icon: Package, Component: ProductsSection },
   { key: 'lists', icon: ListChecks, Component: ListsSection },
   { key: 'integrations', icon: Plug, Component: IntegrationsSection },
+  { key: 'ai', icon: Bot, Component: AiSettingsSection },
   { key: 'profile', icon: UserRound, Component: ProfileSection },
   { key: 'audit', icon: History, Component: AuditSection },
 ];

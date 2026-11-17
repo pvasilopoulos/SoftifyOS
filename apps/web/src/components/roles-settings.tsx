@@ -38,6 +38,7 @@ const GROUPS: { key: string; perms: string[] }[] = [
   { key: 'tasks', perms: ['tasks.all'] },
   { key: 'views', perms: ['views.share'] },
   { key: 'forms', perms: ['forms.manage'] },
+  { key: 'ai', perms: ['ai.use'] },
   { key: 'admin', perms: ['settings.manage', 'users.manage', 'integrations.manage', 'audit.view'] },
 ];
 const permKey = (p: string) => p.replace('.', '_');

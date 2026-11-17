@@ -1,4 +1,5 @@
 'use client';
+import { CustomerSummaryCard, VoiceVisitButton } from '@/components/ai-features';
 import { RegistryRefreshButton } from '@/components/registry';
 import { useTabTitle } from '@/components/tabs';
 import { appConfirm } from '@/components/confirm';
@@ -89,6 +90,7 @@ export default function CustomerPage({ params }: { params: Promise<{ id: string 
       <header className="flex items-center gap-1">
         <IconButton label="back" onClick={() => router.push('/customers')}><ArrowLeft size={22} /></IconButton>
         <span className="flex-1 text-lg font-semibold">{t('back')}</span>
+        <VoiceVisitButton customerId={c.id} compact />
         {data.can.archive && (
           <IconButton label={c.archived_at ? t('restore') : t('archive')}
             onClick={async () => { if (c.archived_at || await appConfirm(t('confirmArchive'))) archive.mutate(!c.archived_at); }}>
@@ -171,6 +173,7 @@ export default function CustomerPage({ params }: { params: Promise<{ id: string 
 
       <Tabs value={tab} onChange={setTab} options={tabs} />
 
+      {tab === 'overview' && <CustomerSummaryCard customerId={c.id} />}
       {tab === 'overview' && (
         <CustomerCard c={c as unknown as Record<string, unknown>}
           primary={primary ? `${primary.full_name}${primary.role_title ? ` · ${primary.role_title}` : ''}` : null}

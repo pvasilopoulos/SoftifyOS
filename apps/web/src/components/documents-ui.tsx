@@ -6,14 +6,15 @@ import clsx from 'clsx';
 import { useInfiniteQuery, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useLocale, useTranslations } from 'next-intl';
 import {
-  Camera, CheckCircle2, Copy, Download, ExternalLink, History, Link2, Loader2, Share2, Trash2, Upload, X, XCircle,
+  CheckCircle2, Copy, Download, ExternalLink, History, Link2, Loader2, Share2, Trash2, Upload, X, XCircle,
 } from 'lucide-react';
 import { api, ApiError } from '@/lib/api';
 import { tone } from '@/lib/crm';
 import {
-  docsApi, fileIcon, fileUrl, formatBytes, isImage, isPdf, uploadFile, useDocsMeta, type Doc, type DocDetail, type DocLinks,
+  docsApi, fileIcon, fileUrl, formatBytes, isImage, isAudio, isPdf, uploadFile, useDocsMeta, type Doc, type DocDetail, type DocLinks,
 } from '@/lib/documents';
 import { Dialog } from './customer-dialogs';
+import { CaptureButtons } from './voice-recorder';
 import { appConfirm } from './confirm';
 import { useToast } from './providers';
 import { CustomerPicker } from './crm-editor';
@@ -74,12 +75,12 @@ export function UploadQueue({ items, onClear }: { items: Item[]; onClear: () => 
   );
 }
 
-/** Drop zone + "Upload" and (on phones) "Camera" buttons. */
-export function DropZone({ onFiles, children, disabled, className }: { onFiles: (f: FileList) => void; children?: ReactNode; disabled?: boolean; className?: string }) {
+/** Drop zone + "Choose", "Photo" (camera on phones) and "Record" (voice note) buttons. */
+export function DropZone({ onFiles, children, disabled, className }: { onFiles: (f: FileList | File[]) => void; children?: ReactNode; disabled?: boolean; className?: string }) {
   const t = useTranslations('docs');
+  const meta = useDocsMeta();
   const [over, setOver] = useState(false);
   const ref = useRef<HTMLInputElement>(null);
-  const cam = useRef<HTMLInputElement>(null);
   return (
     <div onDragOver={(e) => { if (disabled) return; e.preventDefault(); setOver(true); }} onDragLeave={() => setOver(false)}
       onDrop={(e) => { e.preventDefault(); setOver(false); if (!disabled && e.dataTransfer.files.length) onFiles(e.dataTransfer.files); }}
@@ -88,14 +89,13 @@ export function DropZone({ onFiles, children, disabled, className }: { onFiles: 
         <div className="flex flex-col items-center gap-2 rounded-2xl border-2 border-dashed border-border p-5 text-center text-sm text-muted">
           <Upload size={22} />
           <span>{t('dropHint')}</span>
-          <div className="flex gap-2">
-            <button type="button" disabled={disabled} onClick={() => ref.current?.click()} className="rounded-xl bg-primary px-3 py-1.5 font-semibold text-white disabled:opacity-60">{t('choose')}</button>
-            <button type="button" disabled={disabled} onClick={() => cam.current?.click()} className="flex items-center gap-1 rounded-xl border border-border px-3 py-1.5 font-medium sm:hidden"><Camera size={15} /> {t('camera')}</button>
+          <div className="flex flex-wrap justify-center gap-2">
+            <button type="button" disabled={disabled} onClick={() => ref.current?.click()} className="h-10 rounded-xl bg-primary px-3 font-semibold text-white disabled:opacity-60">{t('choose')}</button>
+            <CaptureButtons onFiles={onFiles} disabled={disabled} maxBytes={meta.data?.max_file ?? 25 * 1024 * 1024} />
           </div>
         </div>
       )}
       <input ref={ref} type="file" multiple hidden onChange={(e) => { if (e.target.files?.length) onFiles(e.target.files); e.target.value = ''; }} />
-      <input ref={cam} type="file" accept="image/*" capture="environment" hidden onChange={(e) => { if (e.target.files?.length) onFiles(e.target.files); e.target.value = ''; }} />
       {over && <div className="pointer-events-none absolute inset-0 grid place-items-center rounded-2xl bg-primary-soft/80 font-semibold text-primary">{t('dropNow')}</div>}
     </div>
   );
@@ -219,16 +219,17 @@ export function DocumentDialog({ id, onClose }: { id: string; onClose: () => voi
   return (
     <Dialog title={doc.name} onClose={onClose} wide>
       <div className="mb-3 flex flex-wrap items-center gap-2">
-        <div className="grid grid-cols-3 gap-1 rounded-xl bg-surface-2 p-1">
+        <div role="tablist" className="flex w-full gap-1 rounded-xl bg-surface-2 p-1 sm:w-auto">
           {(['preview', 'details', 'versions'] as const).map((x) => (
-            <button key={x} onClick={() => setTab(x)} className={clsx('rounded-lg px-3 py-1.5 text-sm font-medium', tab === x ? 'bg-surface text-primary shadow-sm' : 'text-muted')}>
+            <button key={x} role="tab" aria-selected={tab === x} onClick={() => setTab(x)}
+              className={clsx('min-w-0 flex-auto truncate whitespace-nowrap rounded-lg px-2 py-1.5 text-[13px] font-medium sm:px-3 sm:text-sm', tab === x ? 'bg-surface text-primary shadow-sm' : 'text-muted')}>
               {t(`tab_${x}`)}{x === 'versions' && doc.versions.length > 1 ? ` (${doc.versions.length})` : ''}
             </button>
           ))}
         </div>
-        <span className="flex-1" />
-        <a href={fileUrl(id)} className="flex items-center gap-1.5 rounded-xl border border-border px-3 py-2 text-sm font-medium"><Download size={15} /> {t('download')}</a>
-        {(isImage(doc.ext) || isPdf(doc.ext)) && <a href={fileUrl(id, { inline: true })} target="_blank" rel="noopener" className="grid h-9 w-9 place-items-center rounded-xl border border-border" aria-label={t('openNew')}><ExternalLink size={15} /></a>}
+        <span className="hidden flex-1 sm:block" />
+        <a href={fileUrl(id)} className="flex h-9 flex-1 items-center justify-center gap-1.5 rounded-xl border border-border px-3 text-sm font-medium sm:flex-none"><Download size={15} /> {t('download')}</a>
+        {(isImage(doc.ext) || isPdf(doc.ext)) && <a href={fileUrl(id, { inline: true })} target="_blank" rel="noopener" className="grid h-9 w-9 shrink-0 place-items-center rounded-xl border border-border" aria-label={t('openNew')}><ExternalLink size={15} /></a>}
       </div>
 
       {tab === 'preview' && (
@@ -236,6 +237,7 @@ export function DocumentDialog({ id, onClose }: { id: string; onClose: () => voi
           {isImage(doc.ext)
             // eslint-disable-next-line @next/next/no-img-element
             ? <img src={`${fileUrl(id, { inline: true })}&r=${doc.version}`} alt={doc.name} className="mx-auto max-h-[60dvh] object-contain" />
+            : isAudio(doc.ext) ? <div className="p-6"><audio controls preload="metadata" src={`${fileUrl(id, { inline: true })}&r=${doc.version}`} className="w-full" /></div>
             : isPdf(doc.ext) ? <iframe title={doc.name} src={`${fileUrl(id, { inline: true })}&r=${doc.version}`} className="h-[60dvh] w-full bg-white" />
               : <div className="grid place-items-center gap-2 p-10 text-center text-sm text-muted"><FileTile doc={doc} size={64} />{t('noPreview')}</div>}
           <div className="flex flex-wrap gap-x-4 gap-y-1 border-t border-border bg-surface px-3 py-2 text-xs text-muted">
@@ -298,7 +300,7 @@ export function DocumentDialog({ id, onClose }: { id: string; onClose: () => voi
         </div>
       )}
 
-      <div className="mt-4 flex items-center gap-2 border-t border-border pt-4">
+      <div className="sticky bottom-0 z-10 -mx-5 mt-4 flex items-center gap-2 border-t border-border bg-surface px-5 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-3 sm:-mx-6 sm:px-6 sm:pb-3">
         {canEdit && <button onClick={remove} className="grid h-10 w-10 place-items-center rounded-xl text-danger hover:bg-danger-soft" aria-label={t('delete')}><Trash2 size={18} /></button>}
         <span className="flex-1" />
         <button onClick={onClose} className="rounded-xl border border-border px-4 py-2.5 font-medium">{t('close')}</button>

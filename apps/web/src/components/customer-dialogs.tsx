@@ -18,9 +18,9 @@ export function Dialog({ title, onClose, children, wide }: { title: string; onCl
     <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 sm:items-center" onClick={onClose}>
       <div onClick={(e) => e.stopPropagation()} role="dialog" aria-label={title}
         className={clsx('max-h-[90dvh] w-full overflow-auto', wide ? 'max-w-2xl' : 'max-w-lg', ' rounded-t-3xl bg-surface p-5 sheet-pb sm:rounded-3xl sm:p-6')}>
-        <div className="mb-4 flex items-center justify-between">
-          <h2 className="text-lg font-bold">{title}</h2>
-          <IconButton label="close" onClick={onClose}><X size={20} /></IconButton>
+        <div className="mb-4 flex items-start justify-between gap-3">
+          <h2 className="line-clamp-3 min-w-0 pt-1.5 text-lg font-bold leading-snug [overflow-wrap:anywhere]">{title}</h2>
+          <span className="shrink-0"><IconButton label="close" onClick={onClose}><X size={20} /></IconButton></span>
         </div>
         {children}
       </div>

@@ -21,6 +21,7 @@ import crmRoutes from './routes/crm.js';
 import documentRoutes from './routes/documents.js';
 import taskRoutes from './routes/tasks.js';
 import reportRoutes from './routes/reports.js';
+import aiRoutes from './routes/ai.js';
 
 const app = Fastify({
   logger: { level: env.isProd ? 'info' : 'warn' },
@@ -60,6 +61,7 @@ await app.register(async (api) => {
   await api.register(documentRoutes);
   await api.register(taskRoutes);
   await api.register(reportRoutes);
+  await api.register(aiRoutes);
 }, { prefix: '/api' });
 
 await startRealtime();

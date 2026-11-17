@@ -16,6 +16,7 @@ import { QuickSettings } from './quick-settings';
 import { brandAsset, useBrand, useBrandHead } from '@/lib/brand';
 import { TabContent, TabsProvider, useEmbedded } from './tabs';
 import { ImpersonationBar } from './impersonation';
+import { CopilotButton, CopilotProvider } from './copilot';
 import { LongPressSheet, QuickOpen, SplitPane, TabBar, TabsCountButton, TabSwitcher, useTabSwipe, useTabSync } from './tabs-ui';
 
 /** Organisation logo + name (Settings → Branding). Public pages pass signedIn={false}. */
@@ -70,7 +71,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   const { data: me } = useMe();
   return (
     <TabsProvider userId={me?.user.id}>
-      {embedded ? <main className="mx-auto w-full max-w-6xl px-4 py-4"><TabContent>{children}</TabContent></main> : <Shell>{children}</Shell>}
+      {embedded ? <main className="mx-auto w-full max-w-6xl px-4 py-4"><TabContent>{children}</TabContent></main> : <CopilotProvider><Shell>{children}</Shell></CopilotProvider>}
     </TabsProvider>
   );
 }
@@ -109,7 +110,8 @@ function Shell({ children }: { children: ReactNode }) {
             </Link>
           ))}
         </nav>
-        <div className="mt-auto mb-3"><QuickSettings variant="dark" expanded /></div>
+        <div className="mt-auto mb-1"><CopilotButton variant="dark" /></div>
+        <div className="mb-3"><QuickSettings variant="dark" expanded /></div>
         <div className="flex items-center gap-1 rounded-xl bg-white/5 p-2">
           <Link href="/more" className="flex min-w-0 flex-1 items-center gap-3 rounded-lg p-1 hover:bg-white/5">
             <span className="relative shrink-0">
@@ -135,6 +137,7 @@ function Shell({ children }: { children: ReactNode }) {
           <Logo />
           <div className="flex items-center gap-0.5">
             <TabsCountButton />
+            <CopilotButton variant="light" />
             <QuickSettings />
             <Link href="/more" aria-label="Notifications" className="relative grid h-10 w-10 place-items-center rounded-full">
               <Bell size={22} />
