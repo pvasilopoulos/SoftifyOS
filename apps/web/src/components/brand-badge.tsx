@@ -4,7 +4,7 @@ import clsx from 'clsx';
 import type { Brand, BrandBadge as Badge } from '@/lib/brand';
 import { SoftifyMark } from './softify-mark';
 
-export const BADGE_DEFAULT: Required<Omit<Badge, 'text'>> = { from: '#7c63ff', to: '#4a2ee0', fg: '#ffffff', shape: 'rounded' };
+export const BADGE_DEFAULT: Required<Omit<Badge, 'text' | 'kind'>> = { from: '#7c63ff', to: '#4a2ee0', fg: '#ffffff', shape: 'rounded' };
 
 export function badgeText(brand: Brand, badge?: Badge) {
   const text = (badge ?? brand.badge)?.text?.trim();
@@ -14,9 +14,9 @@ export function badgeText(brand: Brand, badge?: Badge) {
 export function BrandBadge({ brand, badge, size = 36, className }: { brand: Brand; badge?: Badge; size?: number; className?: string }) {
   const b = { ...BADGE_DEFAULT, ...(badge ?? brand.badge ?? {}) };
   const text = badgeText(brand, badge);
-  // No organisation branding at all → the SoftifyOS mark instead of a letter
+  // "SoftifyOS logo" chosen in Settings → Branding, or no organisation branding at all → the mark instead of a letter
   const own = badge ?? brand.badge ?? {};
-  if (!brand.custom_name && !own.text?.trim() && !own.from && !own.to && !own.fg) {
+  if (own.kind === 'mark' || (own.kind !== 'text' && !brand.custom_name && !own.text?.trim() && !own.from && !own.to && !own.fg)) {
     const radius = b.shape === 'circle' ? 32 : b.shape === 'square' ? 6 : 15;
     return <SoftifyMark size={size} radius={radius} className={clsx('shrink-0 drop-shadow-md', className)} />;
   }

@@ -216,8 +216,20 @@ function BadgeCard({ brand, ro, onSaved }: { brand: Brand; ro: boolean; onSaved:
             {[56, 36, 24].map((s) => <BrandBadge key={s} brand={shown} size={s} />)}
           </div>
         </div>
+        <div>
+          <span className="mb-1 block text-xs font-medium text-muted">{t('badgeKind')}</span>
+          <div className="grid grid-cols-2 gap-1 rounded-2xl bg-surface-2 p-1 sm:max-w-md">
+            {(['mark', 'text'] as const).map((k) => {
+              const cur = b.kind ?? (b.text || b.from || b.to || b.fg || brand.custom_name ? 'text' : 'mark');
+              return (
+                <button key={k} type="button" disabled={ro} onClick={() => setB((x) => ({ ...x, kind: k }))} aria-pressed={cur === k}
+                  className={clsx('rounded-xl px-2 py-2 text-sm font-medium', cur === k ? 'bg-surface text-primary shadow-sm' : 'text-muted')}>{t(`badgeKind_${k}`)}</button>
+              );
+            })}
+          </div>
+        </div>
         <div className="grid gap-3 sm:grid-cols-2">
-          <label className="block min-w-0">
+          <label className={clsx('block min-w-0', b.kind === 'mark' && 'hidden')}>
             <span className="mb-1 block text-xs font-medium text-muted">{t('badgeText')}</span>
             <input disabled={ro} maxLength={3} className={input} placeholder={(brand.name.trim()[0] ?? 'S').toUpperCase()} value={b.text ?? ''}
               onChange={(e) => setB((x) => ({ ...x, text: e.target.value || undefined }))} />
@@ -233,7 +245,7 @@ function BadgeCard({ brand, ro, onSaved }: { brand: Brand; ro: boolean; onSaved:
             </div>
           </div>
         </div>
-        <div>
+        <div className={clsx(b.kind === 'mark' && 'hidden')}>
           <span className="mb-1 block text-xs font-medium text-muted">{t('badgePresets')}</span>
           <div className="flex flex-wrap gap-2">
             {PRESETS.map((p) => (
@@ -243,7 +255,7 @@ function BadgeCard({ brand, ro, onSaved }: { brand: Brand; ro: boolean; onSaved:
             ))}
           </div>
         </div>
-        <div className="flex flex-wrap gap-4">
+        <div className={clsx('flex flex-wrap gap-4', b.kind === 'mark' && 'hidden')}>
           {(['from', 'to', 'fg'] as const).map((k) => (
             <label key={k} className="flex items-center gap-2 text-sm">
               <input type="color" disabled={ro} value={v[k]} onChange={(e) => setB((x) => ({ ...x, [k]: e.target.value }))} className="h-8 w-12 cursor-pointer rounded-lg border border-border bg-surface" />

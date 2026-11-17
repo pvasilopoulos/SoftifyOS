@@ -6,6 +6,7 @@ import Anthropic from '@anthropic-ai/sdk';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { sql, withTenant, type Tx } from './db.js';
+import { planBlocks } from './billing.js';
 import type { Session } from './auth.js';
 import { FILTERS } from './filters.js';
 import { catalogue } from './reports.js';
@@ -66,6 +67,8 @@ export async function monthSpend(tx: Tx, tenantId: string) {
 
 /** Why the user cannot use a feature right now, or null. */
 export async function gate(s: Session, feature: Feature): Promise<string | null> {
+  const pb = await planBlocks(s.tenantId, 'ai');
+  if (pb) return pb;
   if (!(await aiFor(s.tenantId))) return 'ai_not_configured';
   if (!(s.role === 'owner' || s.perms?.includes('ai.use'))) return 'forbidden';
   const st = await loadSettings(s.tenantId);

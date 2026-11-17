@@ -21,6 +21,7 @@ const hex = z.string().regex(/^#[0-9a-fA-F]{6}$/);
 const badgeSchema = z.object({
   text: z.string().trim().max(3).nullish().transform((v) => v || null),
   from: hex.optional(), to: hex.optional(), fg: hex.optional(), shape: z.enum(['rounded', 'circle', 'square']).optional(),
+  kind: z.enum(['mark', 'text']).optional(),   // mark = SoftifyOS logo, text = letters on the gradient
 });
 
 /** Effective branding of a tenant (asset values are version numbers for cache busting). */

@@ -1,14 +1,18 @@
 'use client';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import { useSearchParams } from 'next/navigation';
 import clsx from 'clsx';
 import { useQuery } from '@tanstack/react-query';
 import { useLocale, useTranslations } from 'next-intl';
-import { ChevronLeft, ChevronRight, MapPin, Plus, Users } from 'lucide-react';
+import { ChevronLeft, ChevronRight, MapPin, Plus, RefreshCw, Users } from 'lucide-react';
 import { api, type CalEvent } from '@/lib/api';
 import { date, time } from '@/lib/format';
 import { IconButton, PageHeader, Segmented } from '@/components/ui';
 import { ActivityEditor, TypeIcon } from '@/components/crm-editor';
 import { useCrmMeta } from '@/lib/crm';
+import { CalendarSyncDialog, ProviderLogo, type BusyBlock } from '@/components/calendar-sync';
+import { useToast } from '@/components/providers';
+import { useRouter } from '@/i18n/navigation';
 
 const kindStyle: Record<string, string> = {
   meeting: 'border-primary bg-primary-soft', visit: 'border-success bg-success-soft', internal: 'border-muted bg-surface-2',
@@ -33,6 +37,24 @@ export default function CalendarPage() {
 
   const meta = useCrmMeta();
   const [all, setAll] = useState(false);
+  const ts = useTranslations('calSync');
+  const toast = useToast();
+  const router = useRouter();
+  const sp = useSearchParams();
+  const [syncOpen, setSyncOpen] = useState(false);
+  // Back from Google / Microsoft: show the result and the sync settings
+  useEffect(() => {
+    const r = sp.get('sync');
+    if (!r) return;
+    toast({ title: r.startsWith('connected_') ? ts('connectedOk', { provider: ts(`p_${r.slice(10)}` as never) }) : ts(`r_${r}` as never) });
+    setSyncOpen(true);
+    router.replace('/calendar');
+  }, [sp]); // eslint-disable-line react-hooks/exhaustive-deps
+  const busyQ = useQuery({
+    queryKey: ['calendar-busy', range[0].toISOString(), range[1].toISOString()], enabled: !all,
+    queryFn: () => api<BusyBlock[]>(`/calendar/busy?from=${range[0].toISOString()}&to=${range[1].toISOString()}`),
+  });
+  const busyBlocks = all ? [] : busyQ.data ?? [];
   const [editor, setEditor] = useState<{ id?: string; due?: string } | null>(null);
   const { data = [] } = useQuery({
     queryKey: ['events', range[0].toISOString(), range[1].toISOString(), all],
@@ -51,11 +73,16 @@ export default function CalendarPage() {
     return Array.from({ length: 42 }, (_, i) => addDays(start, i));
   }, [day]);
   const hasEvent = (d: Date) => data.some((e) => startOfDay(new Date(e.starts_at)).getTime() === d.getTime());
+  const hasBusy = (d: Date) => busyBlocks.some((b) => startOfDay(new Date(b.starts_at)).getTime() === d.getTime());
   const listed = view === 'month' ? data.filter((e) => startOfDay(new Date(e.starts_at)).getTime() === day.getTime()) : data;
+  const listedBusy = view === 'month' ? busyBlocks.filter((b) => startOfDay(new Date(b.starts_at)).getTime() === day.getTime()) : busyBlocks;
+  // One timeline: our activities and the external "busy" blocks, by start time
+  const timeline = [...listed.map((e) => ({ k: 'e' as const, at: e.starts_at, e })), ...listedBusy.map((b) => ({ k: 'b' as const, at: b.starts_at, b }))]
+    .sort((x, y) => new Date(x.at).getTime() - new Date(y.at).getTime());
 
   return (
     <div>
-      <PageHeader title={t('title')} actions={<IconButton label="add" className="text-primary" onClick={() => { const d = new Date(day); d.setHours(10, 0, 0, 0); setEditor({ due: d.toISOString() }); }}><Plus size={24} /></IconButton>} />
+      <PageHeader title={t('title')} actions={<><IconButton label={ts('title')} onClick={() => setSyncOpen(true)}><RefreshCw size={21} /></IconButton><IconButton label="add" className="text-primary" onClick={() => { const d = new Date(day); d.setHours(10, 0, 0, 0); setEditor({ due: d.toISOString() }); }}><Plus size={24} /></IconButton></>} />
       {meta.data?.can.all && (
         <label className="mb-3 flex items-center gap-2 text-sm text-muted">
           <input type="checkbox" className="h-4 w-4 accent-[var(--primary)]" checked={all} onChange={(e) => setAll(e.target.checked)} /> {t('everyone')}
@@ -80,16 +107,30 @@ export default function CalendarPage() {
             return (
               <button key={d.toISOString()} onClick={() => setDay(d)} className="flex flex-col items-center py-1">
                 <span className={clsx('grid h-9 w-9 place-items-center rounded-full', selected ? 'bg-primary font-semibold text-white' : inMonth ? '' : 'text-muted/50')}>{d.getDate()}</span>
-                <span className={clsx('mt-0.5 h-1.5 w-1.5 rounded-full', hasEvent(d) ? 'bg-primary' : 'bg-transparent')} />
+                <span className={clsx('mt-0.5 h-1.5 w-1.5 rounded-full', hasEvent(d) ? 'bg-primary' : hasBusy(d) ? 'bg-muted/50' : 'bg-transparent')} />
               </button>
             );
           })}
         </div>
       )}
 
-      {listed.length === 0 ? <p className="py-12 text-center text-muted">{t('empty')}</p> : (
+      {timeline.length === 0 ? <p className="py-12 text-center text-muted">{t('empty')}</p> : (
         <ul className="space-y-3">
-          {listed.map((e) => (
+          {timeline.map((x) => x.k === 'b' ? (
+            <li key={`b-${x.b.id}`} className="flex gap-3">
+              <div className="w-14 shrink-0 pt-2 text-right text-sm text-muted">
+                <div className="tabular">{x.b.all_day ? '—' : time(x.b.starts_at, locale)}</div>
+                {view !== 'day' && <div className="text-xs">{date(x.b.starts_at, locale, { day: 'numeric', month: 'short' })}</div>}
+              </div>
+              <div className="flex flex-1 items-center gap-3 rounded-2xl border border-dashed border-border bg-[repeating-linear-gradient(135deg,transparent,transparent_6px,var(--surface-2)_6px,var(--surface-2)_12px)] p-3 text-sm text-muted">
+                <ProviderLogo p={x.b.provider} size={18} />
+                <div className="min-w-0 flex-1">
+                  <div className="truncate font-medium text-text">{x.b.title || ts('busy')}</div>
+                  <div className="text-xs">{ts('busy')}{x.b.all_day ? ` · ${ts('allDay')}` : ` · ${time(x.b.starts_at, locale)}–${time(x.b.ends_at, locale)}`}</div>
+                </div>
+              </div>
+            </li>
+          ) : (() => { const e = x.e; return (
             <li key={e.id} className="flex gap-3">
               <div className="w-14 shrink-0 pt-2 text-right text-sm">
                 <div className="tabular font-semibold">{time(e.starts_at, locale)}</div>
@@ -106,9 +147,10 @@ export default function CalendarPage() {
                 </div>
               </button>
             </li>
-          ))}
+          ); })())}
         </ul>
       )}
+      {syncOpen && <CalendarSyncDialog onClose={() => setSyncOpen(false)} />}
       {editor && <ActivityEditor id={editor.id} preset={editor.id ? undefined : { due_at: editor.due, type: 'meeting' }} onClose={() => setEditor(null)} />}
     </div>
   );

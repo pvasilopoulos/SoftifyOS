@@ -10,7 +10,7 @@ import clsx from 'clsx';
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useLocale, useTranslations } from 'next-intl';
 import {
-  Archive, ArchiveRestore, ArrowLeft, CalendarDays, CheckCircle2, ChevronDown, ChevronRight, FileText, Mail,
+  Archive, ArchiveRestore, ArrowLeft, CalendarDays, CheckCircle2, ChevronDown, ChevronRight, Eye, FileText, Mail,
   NotebookPen, Pencil, Phone, Plus, Star, StickyNote, Store, Trash2,
 } from 'lucide-react';
 import { api, ApiError, type Activity, type Offer, type Page } from '@/lib/api';
@@ -36,7 +36,7 @@ type DialogState =
   | null;
 
 const activityIcon: Record<string, typeof FileText> = {
-  offer_updated: FileText, meeting_done: CalendarDays, email_sent: Mail, approval: CheckCircle2, call: Phone, note: StickyNote,
+  offer_updated: FileText, offer_viewed: Eye, meeting_done: CalendarDays, email_sent: Mail, approval: CheckCircle2, call: Phone, note: StickyNote,
 };
 
 export default function CustomerPage({ params }: { params: Promise<{ id: string }> }) {

@@ -8,6 +8,7 @@ import { z } from 'zod';
 import { sql, withTenant } from '../db.js';
 import { can, requireAuth, type Session } from '../auth.js';
 import { audit } from './settings.js';
+import { planBlocks } from '../billing.js';
 import { encryptSecret } from '../registries.js';
 import {
   aiFor, BETAS, callerFor, clientWithKey, hasEnvKey, contextLine, DEFAULT_SETTINGS, executeAction, FEATURES, gate, loadSettings, meter, monthSpend, MODEL,
@@ -55,9 +56,10 @@ export default async function aiRoutes(app: FastifyInstance) {
       const st = await loadSettings(s.tenantId);
       const spent = await withTenant(s.tenantId, (tx) => monthSpend(tx, s.tenantId));
       const configured = !!(await aiFor(s.tenantId));
-      const allowed = s.role === 'owner' || !!s.perms?.includes('ai.use');
+      const plan = await planBlocks(s.tenantId, 'ai');   // not in the plan / subscription lapsed
+      const allowed = !plan && (s.role === 'owner' || !!s.perms?.includes('ai.use'));
       return {
-        configured, enabled: st.enabled && !!st.consent_at, allowed,
+        configured, enabled: st.enabled && !!st.consent_at, allowed, plan_block: plan,
         features: Object.fromEntries(FEATURES.map((f) => [f, configured && allowed && st.enabled && !!st.consent_at && st.features[f]])),
         budget_left: Math.max(0, st.monthly_budget_usd - spent) > 0,
       };

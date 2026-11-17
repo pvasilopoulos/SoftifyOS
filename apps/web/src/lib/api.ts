@@ -40,4 +40,7 @@ export type Me = {
   brand?: import('./brand').Brand;
   /** Set while an admin is signed in as this user (Settings → Users → Sign in as). */
   impersonator?: { id: string; email: string; full_name: string } | null;
+  /** Subscription (null when the installation has no billing). */
+  billing?: { plan: string; status: 'trialing' | 'active' | 'past_due' | 'canceled'; active: boolean; reason: string | null;
+    trial_ends_at: string | null; past_due_since: string | null; cancel_at_period_end: boolean; current_period_end: string | null } | null;
 };

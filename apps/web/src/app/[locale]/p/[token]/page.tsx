@@ -8,6 +8,7 @@ import type { PublicOffer } from '@/lib/offers';
 import { date } from '@/lib/format';
 import { OfferDocument } from '@/components/offer-document';
 import { useLocale } from 'next-intl';
+import { SignaturePad } from '@/components/offer-email';
 
 // Public page the customer opens from the email/link. No login: the unguessable token is the key.
 export default function PublicOfferPage({ params }: { params: Promise<{ token: string }> }) {
@@ -18,12 +19,15 @@ export default function PublicOfferPage({ params }: { params: Promise<{ token: s
   const [mode, setMode] = useState<'accept' | 'reject' | null>(null);
   const [name, setName] = useState('');
   const [note, setNote] = useState('');
+  const [email, setEmail] = useState('');
+  const [signature, setSignature] = useState<string | null>(null);
+  const [agree, setAgree] = useState(false);
   const { data, error, isLoading } = useQuery({
     queryKey: ['public-offer', token], retry: false,
     queryFn: () => api<PublicOffer>(`/public/offers/${token}`),
   });
   const respond = useMutation({
-    mutationFn: () => api(`/public/offers/${token}/respond`, { method: 'POST', json: { decision: mode, name, note: note || null } }),
+    mutationFn: () => api(`/public/offers/${token}/respond`, { method: 'POST', json: { decision: mode, name, note: note || null, email: email.trim() || null, signature: mode === 'accept' ? signature : null, agree: mode === 'accept' ? agree : undefined } }),
     onSuccess: () => { setMode(null); qc.invalidateQueries({ queryKey: ['public-offer', token] }); },
   });
 
@@ -45,6 +49,8 @@ export default function PublicOfferPage({ params }: { params: Promise<{ token: s
         <div className="font-semibold">{o.status === 'accepted' ? t('accepted') : t('rejected')}</div>
         <div className="text-sm opacity-80">{o.responder_name && t('by', { name: o.responder_name })}{o.responded_at && ` · ${date(o.responded_at, locale)}`}</div>
       </div>
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      {o.signature && <img src={o.signature} alt={t('signature')} className="ml-auto h-14 rounded-lg bg-white object-contain p-1" />}
     </div>
   ) : data.expired ? (
     <div className="mt-6 flex items-center gap-3 rounded-2xl bg-[#fff1dc] p-4 text-[#ea8a0c]"><Clock /> {t('expired')}</div>
@@ -68,13 +74,30 @@ export default function PublicOfferPage({ params }: { params: Promise<{ token: s
         <div className="fixed inset-x-0 bottom-0 z-40 border-t border-[#e9e6f5] bg-white/95 p-4 backdrop-blur sheet-pb print:hidden">
           {mode ? (
             <form className="mx-auto max-w-xl space-y-2" onSubmit={(e) => { e.preventDefault(); respond.mutate(); }}>
-              <input required minLength={2} autoFocus placeholder={t('yourName')} value={name} onChange={(e) => setName(e.target.value)}
-                className="w-full rounded-xl border border-[#e9e6f5] bg-[#f5f4fb] px-3.5 py-3 text-[#17142b] outline-none focus:border-[#5b3df5]" />
-              <input placeholder={t('note')} value={note} onChange={(e) => setNote(e.target.value)}
-                className="w-full rounded-xl border border-[#e9e6f5] bg-[#f5f4fb] px-3.5 py-3 text-[#17142b] outline-none focus:border-[#5b3df5]" />
+              <div className="max-h-[60dvh] space-y-2 overflow-y-auto">
+                <input required minLength={2} autoFocus placeholder={t('yourName')} value={name} onChange={(e) => setName(e.target.value)} autoComplete="name"
+                  className="w-full rounded-xl border border-[#e9e6f5] bg-[#f5f4fb] px-3.5 py-3 text-[#17142b] outline-none focus:border-[#5b3df5]" />
+                {mode === 'accept' && (
+                  <input type="email" placeholder={t('yourEmail')} value={email} onChange={(e) => setEmail(e.target.value)} autoComplete="email"
+                    className="w-full rounded-xl border border-[#e9e6f5] bg-[#f5f4fb] px-3.5 py-3 text-[#17142b] outline-none focus:border-[#5b3df5]" />
+                )}
+                <input placeholder={t('note')} value={note} onChange={(e) => setNote(e.target.value)}
+                  className="w-full rounded-xl border border-[#e9e6f5] bg-[#f5f4fb] px-3.5 py-3 text-[#17142b] outline-none focus:border-[#5b3df5]" />
+                {mode === 'accept' && (
+                  <>
+                    <div className="pt-1 text-sm font-medium text-[#17142b]">{t('signHere')}</div>
+                    <SignaturePad onChange={setSignature} clearLabel={t('clearSignature')} hint={t('signHint')} />
+                    <label className="flex items-start gap-2.5 text-sm text-[#17142b]">
+                      <input type="checkbox" required checked={agree} onChange={(e) => setAgree(e.target.checked)} className="mt-0.5 h-4 w-4 accent-[#5b3df5]" />
+                      <span>{t('agree', { number: o.number })}</span>
+                    </label>
+                  </>
+                )}
+                {respond.error && <p className="text-sm text-[#dc2626]">{respond.error instanceof ApiError && respond.error.code === 'signature_required' ? t('needSignature') : 'Error'}</p>}
+              </div>
               <div className="flex gap-2">
                 <button type="button" onClick={() => setMode(null)} className="flex-1 rounded-xl border border-[#e9e6f5] py-3 font-medium text-[#17142b]">✕</button>
-                <button disabled={respond.isPending} className={`flex flex-[3] items-center justify-center gap-2 rounded-xl py-3 font-semibold text-white disabled:opacity-60 ${mode === 'accept' ? 'bg-[#16a34a]' : 'bg-[#dc2626]'}`}>
+                <button disabled={respond.isPending || (mode === 'accept' && (!signature || !agree))} className={`flex flex-[3] items-center justify-center gap-2 rounded-xl py-3 font-semibold text-white disabled:opacity-60 ${mode === 'accept' ? 'bg-[#16a34a]' : 'bg-[#dc2626]'}`}>
                   {respond.isPending && <Loader2 size={18} className="animate-spin" />}
                   {mode === 'accept' ? t('confirmAccept') : t('confirmReject')}
                 </button>

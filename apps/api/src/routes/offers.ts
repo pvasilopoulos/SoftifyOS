@@ -3,7 +3,7 @@ import type { FastifyInstance } from 'fastify';
 import { randomBytes } from 'node:crypto';
 import { z } from 'zod';
 import { decodeCursor, encodeCursor, searchKey, sql, withTenant, type Tx } from '../db.js';
-import { APPROVAL_LEVEL, can, requireAuth, type Session } from '../auth.js';
+import { APPROVAL_LEVEL, can, COOKIE, requireAuth, type Session } from '../auth.js';
 import { publish } from '../realtime.js';
 import { enqueue } from '../jobs.js';
 import { env } from '../env.js';
@@ -11,6 +11,7 @@ import { audit } from './settings.js';
 import { emitEvents, type EventSource, type WebhookEvent } from '../webhooks.js';
 import { applyForm } from '../forms.js';
 import { runRules } from '../crm.js';
+import { fill, readSettings, renderHtml, template, TEMPLATE_KEYS, type EmailSettings } from '../email.js';
 
 /** Webhook event with the offer's current headline data. */
 async function offerEvent(tx: Tx, tenantId: string, id: string, event: WebhookEvent, source: EventSource) {
@@ -113,6 +114,37 @@ async function logActivity(tx: Tx, s: Session, offer: Record<string, any>, kind:
 }
 
 const appUrl = (path: string) => `${env.appUrl.replace(/\/$/, '')}${path}`;
+
+/** Everything an offer email needs: offer, customer, sender, organisation branding and email settings. */
+async function emailContext(tx: Tx, s: Session, id: string) {
+  const [d] = await tx`
+    SELECT o.number, o.total_amount, o.valid_until, c.name AS customer_name, c.email AS customer_email,
+           co.name AS company_name, co.vat AS company_vat, ow.email AS owner_email, ow.full_name AS owner_name,
+           me.full_name AS sender_name, me.email AS sender_email,
+           t.id AS tenant_id, t.name AS tenant_name, t.brand_name, t.brand_badge, t.currency, t.email_settings, t.smtp_enc IS NOT NULL AS own_smtp,
+           (SELECT (extract(epoch FROM a.updated_at) * 1000)::bigint FROM tenant_assets a WHERE a.tenant_id = t.id AND a.kind = 'logo') AS logo_v
+    FROM offers o JOIN customers c ON c.id = o.customer_id JOIN tenants t ON t.id = o.tenant_id
+    LEFT JOIN companies co ON co.id = o.company_id LEFT JOIN users ow ON ow.id = o.owner_id
+    LEFT JOIN users me ON me.id = ${s.userId}
+    WHERE o.id = ${id}`;
+  if (!d) return null;
+  const brand = (d.company_name as string | null) ?? (d.brand_name as string | null) ?? (d.tenant_name as string);
+  return {
+    ...d, brand, settings: readSettings(d.email_settings),
+    color: (d.brand_badge as { from?: string } | null)?.from ?? null,
+    logo_url: d.logo_v ? appUrl(`/api/brand/${d.tenant_id}/logo?v=${d.logo_v}`) : null,
+  } as typeof d & { brand: string; settings: EmailSettings; color: string | null; logo_url: string | null };
+}
+
+function emailVars(d: NonNullable<Awaited<ReturnType<typeof emailContext>>>, locale: 'el' | 'en', link: string): Record<string, string> {
+  const loc = locale === 'el' ? 'el-GR' : 'en-GB';
+  return {
+    customer: d.customer_name, number: d.number, link, company: d.brand,
+    sender: d.sender_name ?? d.owner_name ?? d.brand,
+    total: Number(d.total_amount).toLocaleString(loc, { style: 'currency', currency: d.currency ?? 'EUR' }),
+    valid_until: d.valid_until ? new Date(d.valid_until).toLocaleDateString(loc) : '—',
+  };
+}
 
 export default async function offerRoutes(app: FastifyInstance) {
   // ======================= Authenticated =======================
@@ -405,30 +437,72 @@ export default async function offerRoutes(app: FastifyInstance) {
     });
 
     // ---- Send to customer: public link (+ email if SMTP configured) ----
+    /** Subject and text the send dialog starts from (organisation template, filled in), plus the customer's email. */
+    r.get('/offers/:id/email-draft', async (req, reply) => {
+      const { id } = z.object({ id: z.string().uuid() }).parse(req.params);
+      const q = z.object({ locale: z.enum(['el', 'en']).default('el'), template: z.enum(TEMPLATE_KEYS).default('offer_send') }).parse(req.query);
+      const s = req.session;
+      const d = await withTenant(s.tenantId, (tx) => emailContext(tx, s, id));
+      if (!d) return reply.code(404).send({ error: 'not_found' });
+      const tpl = template(d.settings, q.template, q.locale);
+      const vars = emailVars(d, q.locale, '{link}');
+      return { to: d.customer_email, subject: fill(tpl.subject, vars), body: fill(tpl.body, vars), track: d.settings.track_opens, own_smtp: d.own_smtp, can_send: env.smtpConfigured || d.own_smtp };
+    });
+
     r.post('/offers/:id/send', async (req, reply) => {
       const { id } = z.object({ id: z.string().uuid() }).parse(req.params);
-      const b = z.object({ email: z.string().email().nullish(), message: z.string().max(2000).nullish(), locale: z.enum(['el', 'en']).default('el') }).parse(req.body ?? {});
+      const b = z.object({
+        email: z.string().trim().email().max(320).nullish(),
+        cc: z.string().trim().email().max(320).nullish(),
+        subject: z.string().trim().max(300).nullish(),
+        message: z.string().max(5000).nullish(),     // the email text (edited in the dialog); template if empty
+        template: z.enum(TEMPLATE_KEYS).default('offer_send'),
+        locale: z.enum(['el', 'en']).default('el'),
+      }).parse(req.body ?? {});
       const s = req.session;
       const res = await withTenant(s.tenantId, async (tx) => {
         const [o] = await tx`
-          SELECT o.id, o.number, o.status, o.customer_id, o.public_token, o.current_version, c.name AS customer_name, t.name AS tenant_name
-          FROM offers o JOIN customers c ON c.id = o.customer_id JOIN tenants t ON t.id = o.tenant_id
-          WHERE o.id = ${id} FOR UPDATE OF o`;
+          SELECT o.id, o.number, o.status, o.customer_id, o.public_token, o.current_version
+          FROM offers o WHERE o.id = ${id} FOR UPDATE OF o`;
         if (!o) return { code: 404 as const };
         if (!['approved', 'sent'].includes(o.status)) return { code: 409 as const };
         const token = o.public_token ?? randomBytes(24).toString('base64url');
-        await tx`UPDATE offers SET status = 'sent', public_token = ${token}, sent_at = now(), sent_to = ${b.email ?? null}, updated_at = now() WHERE id = ${id}`;
-        await offerEvent(tx, s.tenantId, id, 'offer.sent', by(s));
+        const first = o.status !== 'sent';
+        await tx`UPDATE offers SET status = 'sent', public_token = ${token}, sent_at = ${first ? tx`now()` : tx`coalesce(sent_at, now())`},
+                 sent_to = coalesce(${b.email ?? null}, sent_to), updated_at = now() WHERE id = ${id}`;
+        if (first) await offerEvent(tx, s.tenantId, id, 'offer.sent', by(s));
         const url = appUrl(`/${b.locale}/p/${token}`);
+        let messageId: string | null = null;
         if (b.email) {
+          const d = (await emailContext(tx, s, id))!;
+          const tpl = template(d.settings, b.template, b.locale);
+          const vars = emailVars(d, b.locale, url);
+          const subject = (b.subject?.trim() || fill(tpl.subject, vars)).slice(0, 300);
+          // The link is always included: {link} where the text has it, else the button below the text
+          const body = fill(b.message?.trim() || tpl.body, vars);
+          const track = d.settings.track_opens ? randomBytes(24).toString('base64url') : null;
+          const [m] = await tx`
+            INSERT INTO email_messages (tenant_id, offer_id, customer_id, user_id, kind, to_addr, cc_addr, subject, track_token)
+            VALUES (${s.tenantId}, ${id}, ${o.customer_id}, ${s.userId}, ${b.template === 'offer_reminder' ? 'reminder' : 'offer'}, ${b.email}, ${b.cc ?? null}, ${subject}, ${track})
+            RETURNING id`;
+          messageId = m.id;
+          const label = b.locale === 'el' ? 'Προβολή & αποδοχή προσφοράς' : 'View & accept the offer';
+          const html = renderHtml({
+            brand: d.brand, logoUrl: d.logo_url, color: d.color, body, signature: d.settings.signature,
+            button: { label, url }, footer: [d.company_name ?? d.brand, d.company_vat ? `ΑΦΜ ${d.company_vat}` : null].filter(Boolean).join(' · '),
+            pixelUrl: track ? appUrl(`/api/public/e/${track}.gif`) : null,
+          });
+          const replyTo = d.settings.reply_to_owner ? (d.owner_email ?? d.sender_email) : (d.settings.reply_to ?? null);
+          const bcc = [b.cc, d.settings.bcc_sender ? d.sender_email : null].filter(Boolean).join(', ') || null;
           await enqueue('email', {
-            to: b.email,
-            subject: `${o.tenant_name}: ${b.locale === 'el' ? 'Προσφορά' : 'Offer'} ${o.number}`,
-            text: `${b.message ? b.message + '\n\n' : ''}${b.locale === 'el' ? 'Δείτε και αποδεχτείτε την προσφορά' : 'View and accept the offer'}: ${url}`,
+            to: b.email, subject, text: body.includes(url) ? body : `${body}\n\n${label}: ${url}`, html,
+            tenantId: s.tenantId, messageId: m.id as string, fromName: d.settings.from_name || d.brand, replyTo, bcc,
           }, tx);
         }
-        await logActivity(tx, s, o, 'email_sent', 'Αποστολή προσφοράς', `${o.number} · v.${String(o.current_version).padStart(2, '0')}${b.email ? ' → ' + b.email : ''}`);
-        return { code: 200 as const, url, emailed: !!b.email && env.smtpConfigured };
+        await logActivity(tx, s, o, 'email_sent', b.template === 'offer_reminder' ? 'Υπενθύμιση προσφοράς' : 'Αποστολή προσφοράς',
+          `${o.number} · v.${String(o.current_version).padStart(2, '0')}${b.email ? ' → ' + b.email : ''}`);
+        const own = b.email ? (await tx`SELECT smtp_enc IS NOT NULL AS own FROM tenants WHERE id = ${s.tenantId}`)[0].own : false;
+        return { code: 200 as const, url, emailed: !!b.email && (env.smtpConfigured || own), message_id: messageId };
       });
       if (res.code !== 200) return reply.code(res.code).send({ error: res.code === 404 ? 'not_found' : 'not_approved' });
       await publish({ tenantId: s.tenantId, type: 'offer.updated', data: { id } });
@@ -444,7 +518,7 @@ export default async function offerRoutes(app: FastifyInstance) {
   async function loadPublic(token: string) {
     const [o] = await sql`
       SELECT o.id, o.tenant_id, o.number, o.status, o.current_version, o.net_amount, o.vat_amount, o.total_amount,
-             o.valid_until, o.sent_at, o.responded_at, o.responder_name, o.notes, o.owner_id, o.customer_id,
+             o.valid_until, o.sent_at, o.responded_at, o.responder_name, o.notes, o.owner_id, o.customer_id, o.signature,
              c.name AS customer_name, b.name AS branch_name, sp.name AS space_name,
              co.name AS company_name, co.vat AS company_vat, t.name AS tenant_name, u.full_name AS owner_name, u.email AS owner_email
       FROM offers o JOIN customers c ON c.id = o.customer_id JOIN tenants t ON t.id = o.tenant_id
@@ -462,6 +536,22 @@ export default async function offerRoutes(app: FastifyInstance) {
       SELECT i.position, sp.name AS space_name, i.description, i.unit, i.quantity, i.unit_price, i.discount, i.vat_rate, i.net_amount, i.vat_amount
       FROM offer_items i JOIN offer_versions v ON v.id = i.version_id LEFT JOIN spaces sp ON sp.id = i.space_id
       WHERE v.tenant_id = ${o.tenant_id} AND v.offer_id = ${o.id} AND v.version = ${o.current_version} ORDER BY i.position`;
+    // Customer opened the link (not counted for the team's own browsers, which carry a session cookie)
+    if (!req.cookies[COOKIE] && (req.query as { preview?: string }).preview === undefined) {
+      const [v] = await sql`
+        UPDATE offers SET view_count = view_count + 1, viewed_at = coalesce(viewed_at, now()), last_viewed_at = now()
+        WHERE id = ${o.id} RETURNING view_count, (SELECT email_settings FROM tenants WHERE id = ${o.tenant_id}) AS es`;
+      if (v?.view_count === 1 && o.status === 'sent') {
+        await withTenant(o.tenant_id, async (tx) => {
+          await tx`INSERT INTO activities (tenant_id, customer_id, offer_id, kind, title, body)
+                   VALUES (${o.tenant_id}, ${o.customer_id}, ${o.id}, 'offer_viewed', 'Ο πελάτης άνοιξε την προσφορά', ${o.number})`;
+          if (o.owner_id && readSettings(v.es).notify_view) {
+            await enqueue('notify', { tenantId: o.tenant_id, userIds: [o.owner_id], title: `👀 ${o.number}`, body: `${o.customer_name} άνοιξε την προσφορά`, url: `/el/offers/${o.id}` }, tx);
+          }
+        });
+        await publish({ tenantId: o.tenant_id, type: 'offer.updated', data: { id: o.id } });
+      }
+    }
     const { id: _i, tenant_id: _t, owner_id: _o, customer_id: _c, ...pub } = o;
     const expired = !!o.valid_until && new Date(o.valid_until) < new Date(new Date().toDateString());
     return { offer: pub, items, expired };
@@ -469,7 +559,14 @@ export default async function offerRoutes(app: FastifyInstance) {
 
   app.post('/public/offers/:token/respond', async (req, reply) => {
     const { token } = tokenParam.parse(req.params);
-    const b = z.object({ decision: z.enum(['accept', 'reject']), name: z.string().trim().min(2).max(120), note: z.string().max(2000).nullish() }).parse(req.body);
+    const b = z.object({
+      decision: z.enum(['accept', 'reject']), name: z.string().trim().min(2).max(120), note: z.string().max(2000).nullish(),
+      email: z.string().trim().email().max(320).nullish(),
+      // Drawn signature (PNG data URL), required for acceptance
+      signature: z.string().max(300000).regex(/^data:image\/png;base64,[A-Za-z0-9+/=]+$/).nullish(),
+      agree: z.boolean().optional(),
+    }).parse(req.body);
+    if (b.decision === 'accept' && (!b.signature || !b.agree)) return reply.code(400).send({ error: 'signature_required' });
     const o = await loadPublic(token);
     if (!o) return reply.code(404).send({ error: 'not_found' });
     if (o.status !== 'sent') return reply.code(409).send({ error: 'already_responded' });
@@ -477,7 +574,9 @@ export default async function offerRoutes(app: FastifyInstance) {
     const status = b.decision === 'accept' ? 'accepted' : 'rejected';
     await withTenant(o.tenant_id, async (tx) => {
       const [u] = await tx`
-        UPDATE offers SET status = ${status}, responded_at = now(), responder_name = ${b.name}, response_note = ${b.note ?? null}, updated_at = now()
+        UPDATE offers SET status = ${status}, responded_at = now(), responder_name = ${b.name}, response_note = ${b.note ?? null},
+               responder_email = ${b.email ?? null}, signature = ${b.decision === 'accept' ? b.signature! : null},
+               responder_ip = ${req.ip}, responder_ua = ${String(req.headers['user-agent'] ?? '').slice(0, 500)}, updated_at = now()
         WHERE id = ${o.id} AND status = 'sent' RETURNING id`;
       if (!u) return;
       await offerEvent(tx, o.tenant_id, o.id, status === 'accepted' ? 'offer.accepted' : 'offer.rejected', { type: 'customer' });

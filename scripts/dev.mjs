@@ -83,7 +83,14 @@ else {
 }
 
 // 2) Migrations (fast no-op when up to date)
-const mig = spawnSync('npm run db:migrate -w @softify/api --silent', { cwd: root, shell: true, encoding: 'utf8' });
+// After an unclean shutdown Postgres replays its log first ("the database system is starting up"): wait for it
+let mig;
+for (let i = 0; i < 60; i++) {
+  mig = spawnSync('npm run db:migrate -w @softify/api --silent', { cwd: root, shell: true, encoding: 'utf8' });
+  if (mig.status === 0 || !/57P03|starting up|CONNECT_TIMEOUT|ECONNREFUSED/.test(mig.stdout + mig.stderr)) break;
+  if (i === 0) say('Η βάση κάνει ανάκτηση μετά από απότομο κλείσιμο — αναμονή…');
+  await new Promise((r) => setTimeout(r, 2000));
+}
 if (mig.status !== 0) { console.error(mig.stdout, mig.stderr); say('Οι migrations απέτυχαν.'); stopAll(); }
 else say('Migrations: ενημερωμένες.');
 

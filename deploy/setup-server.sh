@@ -166,12 +166,16 @@ c "Αυτόματη εκκίνηση μετά από επανεκκίνηση"
 env PATH="$PATH" pm2 startup systemd -u "$APP_USER" --hp "/home/$APP_USER" >/dev/null
 systemctl enable "pm2-$APP_USER" >/dev/null 2>&1 || true
 
-# --- Daily database backup (keeps 14 days) ------------------------------------------
+# --- Backups: database + documents every night, restore test every Sunday ----------
+c "Backups"
+apt-get install -y -qq gnupg rclone >/dev/null 2>&1 || apt-get install -y -qq gnupg >/dev/null
 BACKUP_DIR="/var/backups/softifyos"
-mkdir -p "$BACKUP_DIR"; chown postgres:postgres "$BACKUP_DIR"; chmod 700 "$BACKUP_DIR"
+mkdir -p "$BACKUP_DIR"; chmod 700 "$BACKUP_DIR"
+grep -q '^BACKUP_DIR=' "$ENV_FILE" || echo "BACKUP_DIR=$BACKUP_DIR" >> "$ENV_FILE"
 cat >/etc/cron.d/softifyos-backup <<EOF
-# SoftifyOS: daily database dump at 03:15, keep 14 days
-15 3 * * * postgres pg_dump -p $PG_PORT -Fc $DB_NAME > $BACKUP_DIR/$DB_NAME-\$(date +\%F).dump && find $BACKUP_DIR -name '*.dump' -mtime +14 -delete
+# SoftifyOS: database + documents at 03:15 (14 daily, 8 weekly, 12 monthly), restore test on Sundays at 05:00
+15 3 * * * root APP_DIR=$APP_DIR bash $APP_DIR/deploy/backup.sh >> /var/log/softifyos-backup.log 2>&1
+0 5 * * 0 root APP_DIR=$APP_DIR bash $APP_DIR/deploy/restore.sh --verify >> /var/log/softifyos-backup.log 2>&1
 EOF
 
 c "Η αρχική εγκατάσταση ολοκληρώθηκε"

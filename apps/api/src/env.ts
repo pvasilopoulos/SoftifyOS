@@ -31,4 +31,18 @@ export const env = {
     from: process.env.SMTP_FROM ?? 'SoftifyOS <no-reply@localhost>',
   },
   get smtpConfigured() { return Boolean(this.smtp.host); },
+  // Calendar sync (OAuth apps registered by the installation's administrator; redirect = APP_URL/api/calendar/oauth/<provider>/callback)
+  google: { clientId: process.env.GOOGLE_CLIENT_ID ?? '', clientSecret: process.env.GOOGLE_CLIENT_SECRET ?? '' },
+  microsoft: { clientId: process.env.MS_CLIENT_ID ?? '', clientSecret: process.env.MS_CLIENT_SECRET ?? '', tenant: process.env.MS_TENANT ?? 'common' },
+  // Monitoring: new errors are sent once to these (both optional); BACKUP_DIR lets /api/health report the last backup
+  alert: { email: process.env.ALERT_EMAIL ?? '', webhook: process.env.ALERT_WEBHOOK_URL ?? '' },
+  backupDir: process.env.BACKUP_DIR ?? '',
+  // SaaS billing (Stripe). Without STRIPE_SECRET_KEY there are no plans/limits (single-company installation).
+  stripe: {
+    secretKey: process.env.STRIPE_SECRET_KEY ?? '',
+    webhookSecret: process.env.STRIPE_WEBHOOK_SECRET ?? '',
+    enforce: process.env.BILLING_ENFORCE === 'true',      // apply plan limits even without Stripe (testing)
+    prices: Object.fromEntries((['starter', 'business', 'enterprise'] as const).flatMap((p) => (['month', 'year'] as const)
+      .map((i) => [`${p}_${i}`, process.env[`STRIPE_PRICE_${p.toUpperCase()}_${i.toUpperCase()}`] ?? '']))) as Record<string, string>,
+  },
 };

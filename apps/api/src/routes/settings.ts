@@ -5,6 +5,7 @@ import { createHash, randomBytes } from 'node:crypto';
 import { z } from 'zod';
 import { hash, verify } from '@node-rs/argon2';
 import { decodeCursor, encodeCursor, searchKey, sql, withTenant, type Tx } from '../db.js';
+import { planOf } from '../billing.js';
 import { can, invalidateMembership, invalidateTenantRoles, issueSession, notImpersonating, PERMISSIONS, requireAuth, type Permission, type Session } from '../auth.js';
 import { enqueue } from '../jobs.js';
 import { DEFAULT_VISIBLE, effectiveFilters, FILTER_KEYS, INDEX_FILTERS, INDEXES } from '../filters.js';
@@ -250,6 +251,8 @@ export default async function settingsRoutes(app: FastifyInstance) {
         }
         const [exists] = await tx`SELECT 1 FROM memberships WHERE tenant_id = ${s.tenantId} AND user_id = ${u.id}`;
         if (exists) return { code: 409 as const };
+        const lim = (await planOf(s.tenantId)).limits.users;
+        if (lim !== null && (await tx`SELECT count(*)::int AS n FROM memberships WHERE tenant_id = ${s.tenantId}`)[0].n >= lim) return { code: 402 as const, limit: lim };
         await tx`INSERT INTO memberships (tenant_id, user_id, role, title) VALUES (${s.tenantId}, ${u.id}, ${b.role}, ${b.title})`;
         // Existing accounts already have a password: they just see the new organisation at login
         const inviteUrl = u.password_set ? null : await createInvitation(tx, s, u.id, b.email, b.locale);
@@ -257,6 +260,7 @@ export default async function settingsRoutes(app: FastifyInstance) {
         return { code: 201 as const, inviteUrl, existing: u.password_set as boolean };
       });
       if (res.code === 409) return reply.code(409).send({ error: 'already_member' });
+      if (res.code === 402) return reply.code(402).send({ error: 'plan_limit_users', limit: res.limit });
       if (res.code === 400) return reply.code(400).send({ error: 'invalid_role' });
       return reply.code(201).send({ inviteUrl: res.inviteUrl, existing: res.existing, emailed: env.smtpConfigured });
     });

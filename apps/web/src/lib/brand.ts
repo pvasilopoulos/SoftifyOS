@@ -7,7 +7,7 @@ import { usePathname } from 'next/navigation';
 import { api, type Me } from './api';
 
 export type BrandKind = 'logo' | 'icon' | 'icon192' | 'favicon';
-export type BrandBadge = { text?: string | null; from?: string; to?: string; fg?: string; shape?: 'rounded' | 'circle' | 'square' };
+export type BrandBadge = { text?: string | null; from?: string; to?: string; fg?: string; shape?: 'rounded' | 'circle' | 'square'; kind?: 'mark' | 'text' };
 export type Brand = { tenant_id: string; name: string; tagline: string | null; custom_name: boolean; assets: Partial<Record<BrandKind, number>>; badge?: BrandBadge };
 
 const CACHE = 'sos.brand';

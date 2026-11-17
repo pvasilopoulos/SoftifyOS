@@ -1,5 +1,6 @@
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import { SignJWT, jwtVerify } from 'jose';
+import { planOf } from './billing.js';
 import { env } from './env.js';
 import { sql } from './db.js';
 
@@ -103,6 +104,10 @@ export async function requireAuth(req: FastifyRequest, reply: FastifyReply) {
   if (!info) { clearSession(reply); return reply.code(401).send({ error: 'unauthorized' }); }
   // Role and permissions always come from the database, so changes apply without re-login
   req.session = { userId, tenantId, role: info.role, perms: info.perms, level: info.level, ...(imp ? { impersonator: imp } : {}) };
+  if (!['GET', 'HEAD', 'OPTIONS'].includes(req.method) && !/^\/api\/(auth|me|settings\/billing|logout|push)/.test(req.url)) {
+    const p = await planOf(tenantId);
+    if (!p.active) return reply.code(402).send({ error: 'subscription_inactive', reason: p.reason });
+  }
 }
 
 

@@ -2,30 +2,38 @@
 // Run one or more instances; FOR UPDATE SKIP LOCKED guarantees each job is taken by exactly one worker.
 // Connects as the table owner (no RLS) because it works across tenants.
 import webpush from 'web-push';
-import nodemailer from 'nodemailer';
 import { env } from './env.js';
+import { transportFor, withName } from './email.js';
 import { sql } from './db.js';
 import { publish } from './realtime.js';
-import type { EmailJob, JobMap, NotifyJob, WebhookJob } from './jobs.js';
+import type { CalendarPushJob, EmailJob, JobMap, NotifyJob, WebhookJob } from './jobs.js';
+import { pullDue, pushActivity } from './calendar.js';
+import { captureError, heartbeat } from './monitor.js';
 import { deliver } from './webhooks.js';
 import { runNoContactRules } from './crm.js';
 import { removeFile } from './storage.js';
 import { definitionSchema, nextRun, runReport } from './reports.js';
 
-// SMTP (e.g. the Plesk mail server on localhost). Without SMTP_HOST, emails are logged instead of sent.
-const mailer = env.smtpConfigured
-  ? nodemailer.createTransport({
-      host: env.smtp.host, port: env.smtp.port, secure: env.smtp.secure,
-      auth: env.smtp.user ? { user: env.smtp.user, pass: env.smtp.pass } : undefined,
-    })
-  : null;
-
-async function handleEmail(p: EmailJob) {
-  if (!mailer) {
+// Organisation SMTP if set, else the server's SMTP_* (e.g. Plesk mail on localhost), else the email is only logged.
+async function handleEmail(p: EmailJob, lastAttempt: boolean) {
+  const tr = await transportFor(p.tenantId);
+  if (!tr) {
     console.log(`[email not configured] to=${p.to} subject="${p.subject}"\n${p.text}`);
+    if (p.messageId) await sql`UPDATE email_messages SET status = 'logged', sent_at = now() WHERE id = ${p.messageId}`;
     return;
   }
-  await mailer.sendMail({ from: env.smtp.from, to: p.to, subject: p.subject, text: p.text, html: p.html });
+  try {
+    await tr.transport.sendMail({
+      from: withName(tr.from, p.fromName), to: p.to, subject: p.subject, text: p.text, html: p.html,
+      replyTo: p.replyTo ?? undefined, bcc: p.bcc ?? undefined,
+    });
+    if (p.messageId) await sql`UPDATE email_messages SET status = 'sent', error = NULL, sent_at = now() WHERE id = ${p.messageId}`;
+  } catch (e) {
+    if (p.messageId) {
+      await sql`UPDATE email_messages SET error = ${String((e as Error).message).slice(0, 500)}, status = ${lastAttempt ? 'failed' : 'queued'} WHERE id = ${p.messageId}`;
+    }
+    throw e;
+  }
 }
 
 const BATCH = 50;
@@ -79,13 +87,15 @@ async function processBatch(): Promise<number> {
   await Promise.all(jobs.map(async (j) => {
     try {
       if (j.kind === 'notify') await handleNotify(j.payload as NotifyJob);
-      else if (j.kind === 'email') await handleEmail(j.payload as EmailJob);
+      else if (j.kind === 'email') await handleEmail(j.payload as EmailJob, j.attempts >= MAX_ATTEMPTS);
       else if (j.kind === 'webhook') await handleWebhook(j.payload as WebhookJob);
+      else if (j.kind === 'calendar_push') { const c = j.payload as CalendarPushJob; await pushActivity(c.tenantId, c.activityId); }
       await sql`DELETE FROM jobs WHERE id = ${j.id}`;
     } catch (e) {
       const msg = (e as Error).message;
       if (j.attempts >= MAX_ATTEMPTS) {
         console.error(`job ${j.id} dropped after ${j.attempts} attempts: ${msg}`);
+        await captureError('worker', e, { job: j.kind, attempts: j.attempts });
         await sql`DELETE FROM jobs WHERE id = ${j.id}`;
       } else {
         await sql`UPDATE jobs SET locked_at = NULL, last_error = ${msg},
@@ -211,7 +221,8 @@ async function maintenance() {
 }
 
 let running = true;
-let lastReminder = 0, lastMaintenance = 0, lastDigest = 0, lastRules = 0;
+let lastReminder = 0, lastMaintenance = 0, lastDigest = 0, lastRules = 0, lastCalendar = 0, lastBeat = 0;
+process.on('unhandledRejection', (e) => { console.error('unhandledRejection', e); captureError('worker', e, { kind: 'unhandledRejection' }); });
 console.log(`SoftifyOS worker started (push ${pushEnabled ? 'on' : 'off'})`);
 while (running) {
   try {
@@ -220,10 +231,13 @@ while (running) {
     if (now - lastMaintenance > 3_600_000) { await maintenance(); await documentExpiry(); lastMaintenance = now; }
     if (now - lastDigest > 300_000) { await morningDigest(); await scheduledReports(); lastDigest = now; }
     if (now - lastRules > 1_800_000) { await runNoContactRules(sql); lastRules = now; }
+    if (now - lastCalendar > 60_000) { await pullDue(); lastCalendar = now; }
+    if (now - lastBeat > 30_000) { await heartbeat('worker', { pid: process.pid }); lastBeat = now; }
     const n = await processBatch();
     if (n < BATCH) await new Promise((r) => setTimeout(r, 500));
   } catch (e) {
     console.error('worker loop error', e);
+    await captureError('worker', e, { kind: 'loop' });
     await new Promise((r) => setTimeout(r, 2000));
   }
 }

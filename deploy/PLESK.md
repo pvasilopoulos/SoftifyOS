@@ -89,12 +89,81 @@ sudo -u softify -H bash -c 'cd /opt/softifyos && npm run tenant:create -- \
 2. Ενεργοποίησε **SPF** και **DKIM** (Mail Settings → DKIM spam protection), ώστε τα email να μην πηγαίνουν στα spam.
 3. Για άλλον αποστολέα, άλλαξε το `SMTP_FROM` στο `/opt/softifyos/.env` και τρέξε `sudo -u softify pm2 reload all --update-env`.
 
+Κάθε οργανισμός μπορεί επίσης να βάλει **δικό του SMTP** (Microsoft 365, Gmail, δικό του Plesk) από **Ρυθμίσεις → Email**, ώστε οι προσφορές να φεύγουν από το δικό του domain. Εκεί ορίζει και πρότυπα, υπογραφή και καταγραφή ανοίγματος. Ο κωδικός αποθηκεύεται κρυπτογραφημένος.
+
 ## Βήμα 8 · Push στο κινητό
 
 1. Άνοιξε το https://app.softify.gr στο κινητό.
    - **iPhone:** Safari → Κοινοποίηση → *Προσθήκη στην οθόνη Αφετηρίας*, και μετά άνοιγμα από το εικονίδιο.
    - **Android:** Chrome → *Εγκατάσταση εφαρμογής*.
 2. **Περισσότερα → Ενεργοποίηση push ειδοποιήσεων → Αποστολή δοκιμαστικής ειδοποίησης.**
+
+## Βήμα 9 · Συγχρονισμός ημερολογίου (προαιρετικό)
+
+Κάθε χρήστης συνδέει το Google Calendar ή το Outlook / Microsoft 365 από το **Ημερολόγιο → ⟳**. Για να ενεργοποιηθεί, χρειάζεται μία φορά από εσένα:
+
+**Google**
+1. https://console.cloud.google.com → νέο project → **APIs & Services → Library** → ενεργοποίησε το **Google Calendar API**.
+2. **OAuth consent screen**: External, όνομα «SoftifyOS», scope `…/auth/calendar.events`. Για δημόσια χρήση χρειάζεται επαλήθευση από τη Google.
+3. **Credentials → Create credentials → OAuth client ID → Web application**, με Authorized redirect URI:
+   `https://app.softify.gr/api/calendar/oauth/google/callback`
+4. Στο `.env`: `GOOGLE_CLIENT_ID=…` και `GOOGLE_CLIENT_SECRET=…`
+
+**Microsoft 365 / Outlook**
+1. https://entra.microsoft.com → **App registrations → New registration**, με «Accounts in any organizational directory and personal Microsoft accounts».
+2. Redirect URI (Web): `https://app.softify.gr/api/calendar/oauth/microsoft/callback`
+3. **API permissions → Microsoft Graph → Delegated**: `Calendars.ReadWrite`, `User.Read`, `offline_access`.
+4. **Certificates & secrets → New client secret**.
+5. Στο `.env`: `MS_CLIENT_ID=…` και `MS_CLIENT_SECRET=…`
+
+Μετά: `sudo -u softify pm2 reload all --update-env`.
+
+## Βήμα 10 · Συνδρομές με κάρτα – Stripe (προαιρετικό, για SaaS)
+
+Χωρίς Stripe δεν υπάρχουν πακέτα ούτε όρια, άρα όλοι οι οργανισμοί έχουν τα πάντα. Με Stripe, κάθε νέος οργανισμός ξεκινά με **14 ημέρες δοκιμή** και μετά επιλέγει πακέτο από **Ρυθμίσεις → Συνδρομή**.
+
+1. https://dashboard.stripe.com → **Products**: φτιάξε Starter, Business και Enterprise, το καθένα με δύο recurring τιμές (μηνιαία και ετήσια, σε EUR).
+2. **Developers → Webhooks → Add endpoint**: `https://app.softify.gr/api/billing/webhook`, με events
+   `checkout.session.completed`, `customer.subscription.created`, `customer.subscription.updated`, `customer.subscription.deleted`, `invoice.payment_failed`.
+3. **Settings → Billing → Customer portal**: ενεργοποίησε την αλλαγή πακέτου, την ακύρωση και τα τιμολόγια.
+4. Στο `.env`:
+   ```
+   STRIPE_SECRET_KEY=sk_live_…
+   STRIPE_WEBHOOK_SECRET=whsec_…
+   STRIPE_PRICE_STARTER_MONTH=price_…    STRIPE_PRICE_STARTER_YEAR=price_…
+   STRIPE_PRICE_BUSINESS_MONTH=price_…   STRIPE_PRICE_BUSINESS_YEAR=price_…
+   STRIPE_PRICE_ENTERPRISE_MONTH=price_… STRIPE_PRICE_ENTERPRISE_YEAR=price_…
+   ```
+5. `sudo -u softify pm2 reload all --update-env`
+
+Δοκίμασε πρώτα με κλειδιά **test mode** (`sk_test_…`) και την κάρτα `4242 4242 4242 4242`. Οι οργανισμοί που υπήρχαν πριν από τις συνδρομές μένουν στο Enterprise.
+Αν μια συνδρομή λήξει ή μια πληρωμή εκκρεμεί πάνω από 7 ημέρες, ο οργανισμός περνά σε **μόνο ανάγνωση**: βλέπει τα δεδομένα του αλλά δεν αλλάζει τίποτα μέχρι να πληρώσει.
+
+## Βήμα 11 · Backup, επαναφορά, παρακολούθηση
+
+### Backup (αυτόματο)
+Κάθε βράδυ στις 03:15 το `deploy/backup.sh` κρατά **βάση + έγγραφα** στο `/var/backups/softifyos/<ημερομηνία>/`:
+14 ημερήσια, 8 εβδομαδιαία και 12 μηνιαία, με checksums. Log: `/var/log/softifyos-backup.log`.
+
+Συνιστάται έντονα, στο `.env`:
+- `BACKUP_PASSPHRASE=…`: κρυπτογραφεί κάθε backup (AES-256). **Φύλαξέ τη και εκτός server**, γιατί χωρίς αυτήν το backup δεν ανοίγει.
+- `BACKUP_REMOTE=…`: αντίγραφο **εκτός server**, ώστε ένα backup στον ίδιο δίσκο να μη χαθεί μαζί του. Ρύθμισε μία φορά το rclone (`sudo rclone config`, π.χ. Backblaze B2, S3 ή Google Drive) και βάλε π.χ. `BACKUP_REMOTE=b2:softifyos-backups`.
+
+### Δοκιμή επαναφοράς (αυτόματη, κάθε Κυριακή)
+Το `deploy/restore.sh --verify` επαναφέρει το τελευταίο backup σε **προσωρινή** βάση, μετρά οργανισμούς, πελάτες και προσφορές, και τη σβήνει. Η παραγωγή δεν αγγίζεται. Αποτέλεσμα: `/var/backups/softifyos/last-verify.json`.
+
+### Επαναφορά (σε περίπτωση ανάγκης)
+```bash
+ls /var/backups/softifyos/                                   # διάλεξε backup
+sudo bash /opt/softifyos/deploy/restore.sh 2026-11-17_0315   # ζητά να γράψεις το όνομα της βάσης για επιβεβαίωση
+```
+Πριν από την επαναφορά κρατά αυτόματα backup της τρέχουσας κατάστασης. Μετά σταματά την εφαρμογή, επαναφέρει βάση και έγγραφα, και την ξεκινά ξανά.
+
+### Παρακολούθηση
+- **https://app.softify.gr/api/health**: 200 όταν όλα είναι εντάξει, 503 όταν κάτι θέλει προσοχή (βάση, worker, ουρά εργασιών, παλιό ή αποτυχημένο backup). Βάλ' το σε **UptimeRobot** ή **Better Stack** (δωρεάν), με έλεγχο κάθε 1–5 λεπτά.
+- **Σφάλματα**: κάθε νέο σφάλμα (API, worker ή browser) ομαδοποιείται και στέλνεται **μία φορά** στο `ALERT_EMAIL` και/ή στο `ALERT_WEBHOOK_URL` (Slack, Teams ή Discord). Τα βλέπεις και με:
+  `sudo -u postgres psql softifyos -c "SELECT source, count, last_seen, message FROM error_events WHERE resolved_at IS NULL ORDER BY last_seen DESC LIMIT 20"`
+  Όταν διορθωθεί κάτι: `UPDATE error_events SET resolved_at = now() WHERE fingerprint = '…'`. Αν ξαναεμφανιστεί, θα έρθει νέα ειδοποίηση.
 
 ---
 
@@ -115,10 +184,13 @@ ssh root@app.softify.gr "sudo bash /opt/softifyos/deploy/deploy.sh \$(ls -t /roo
 | Κατάσταση υπηρεσιών | `sudo -u softify pm2 ls` |
 | Logs (live) | `sudo -u softify pm2 logs` |
 | Επανεκκίνηση | `sudo -u softify pm2 reload all --update-env` |
-| Backup τώρα | `sudo -u postgres pg_dump -Fc softifyos > /root/softifyos.dump` |
-| Restore | `sudo -u postgres pg_restore -d softifyos --clean /root/softifyos.dump` |
+| Backup τώρα | `sudo bash /opt/softifyos/deploy/backup.sh` |
+| Έλεγχος backup | `sudo bash /opt/softifyos/deploy/restore.sh --verify` |
+| Επαναφορά | `sudo bash /opt/softifyos/deploy/restore.sh <φάκελος>` |
+| Υγεία | `curl -s https://app.softify.gr/api/health` |
+| Δοκιμή φόρτου | `node scripts/loadtest.mjs --url https://app.softify.gr --users 50 --seconds 60` (δες παρακάτω) |
 
-> Αν το Plesk είχε ήδη δική του PostgreSQL, η 17 μπαίνει σε άλλη θύρα (π.χ. 5433). Τη βλέπεις στο `DATABASE_URL` του `.env` και τη δίνεις με `-p 5433` στις εντολές backup/restore.
+> Αν το Plesk είχε ήδη δική του PostgreSQL, η 17 μπαίνει σε άλλη θύρα (π.χ. 5433). Τα scripts backup και restore τη διαβάζουν από το `DATABASE_URL` του `.env`.
 
 ## Κλιμάκωση όταν μεγαλώσει ο όγκος
 

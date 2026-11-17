@@ -15,6 +15,7 @@ import { TasksPanel } from '@/components/task-ui';
 import { Link, useRouter } from '@/i18n/navigation';
 import { Avatar, IconButton, Skeleton, StatusBadge, Tabs } from '@/components/ui';
 import { useToast } from '@/components/providers';
+import { EngagementCard, SendDialog } from '@/components/offer-email';
 
 // Stepper position: 0 created, 1 approval, 2 send, 3 customer response, 4 all done
 const stepIndex: Record<string, number> = { draft: 0, in_progress: 0, pending_approval: 1, approved: 2, sent: 3, accepted: 4, rejected: 3 };
@@ -33,7 +34,7 @@ export default function OfferPage({ params }: { params: Promise<{ id: string }> 
   const [tab, setTab] = useState<'summary' | 'items' | 'versions' | 'approvals' | 'tasks' | 'documents'>('summary');
   const [viewVersion, setViewVersion] = useState<number | null>(null);
   const [rejecting, setRejecting] = useState(false);
-  const [sending, setSending] = useState(false);
+  const [sending, setSending] = useState<false | 'send' | 'remind'>(false);
 
   const { data, isLoading } = useQuery({
     queryKey: ['offer', id, viewVersion],
@@ -139,6 +140,16 @@ export default function OfferPage({ params }: { params: Promise<{ id: string }> 
             </dl>
           </section>
           <div className="space-y-4">
+            <EngagementCard offerId={o.id} viewedAt={o.viewed_at} lastViewedAt={o.last_viewed_at} viewCount={o.view_count}
+              canRemind={o.status === 'sent' && data.can.send} onRemind={() => setSending('remind')} />
+            {o.signature && (
+              <section className="card p-4">
+                <div className="mb-2 text-sm font-semibold">{t('signature')}</div>
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={o.signature} alt={t('signature')} className="h-24 rounded-lg border border-border bg-white object-contain" />
+                <div className="mt-2 text-xs text-muted">{[o.responder_name, o.responder_email, o.responded_at && relative(o.responded_at, locale, { today: ta('today'), yesterday: ta('yesterday') }), o.responder_ip].filter(Boolean).join(' · ')}</div>
+              </section>
+            )}
             {data.publicUrl && <PublicLink url={data.publicUrl} />}
             {o.notes && <section className="card p-4 text-sm"><div className="mb-1 font-semibold">{t('notes')}</div><p className="whitespace-pre-line text-muted">{o.notes}</p></section>}
           </div>
@@ -223,7 +234,7 @@ export default function OfferPage({ params }: { params: Promise<{ id: string }> 
             </button>
           )}
           {data.can.send && (
-            <button onClick={() => setSending(true)} className="flex flex-[1.4] items-center justify-center gap-2 rounded-xl bg-primary py-3 text-sm font-semibold text-white">
+            <button onClick={() => setSending('send')} className="flex flex-[1.4] items-center justify-center gap-2 rounded-xl bg-primary py-3 text-sm font-semibold text-white">
               <Send size={18} /> {o.status === 'sent' ? t('resend') : t('send')}
             </button>
           )}
@@ -235,7 +246,7 @@ export default function OfferPage({ params }: { params: Promise<{ id: string }> 
         </div>
       </div>
 
-      {sending && <SendDialog offerId={id} onClose={() => setSending(false)} onSent={refresh} />}
+      {sending && <SendDialog offerId={id} reminder={sending === 'remind'} onClose={() => setSending(false)} onSent={refresh} onLink={() => toast({ title: t('sentOk') })} />}
     </div>
   );
 }
@@ -274,39 +285,5 @@ function PublicLink({ url }: { url: string }) {
         <a href={url} target="_blank" rel="noopener" aria-label="open" className="grid h-9 w-9 place-items-center rounded-lg border border-border"><ExternalLink size={15} /></a>
       </div>
     </section>
-  );
-}
-
-function SendDialog({ offerId, onClose, onSent }: { offerId: string; onClose: () => void; onSent: () => void }) {
-  const t = useTranslations('offers');
-  const locale = useLocale();
-  const [email, setEmail] = useState('');
-  const [message, setMessage] = useState('');
-  const [result, setResult] = useState<{ url: string } | null>(null);
-  const send = useMutation({
-    mutationFn: () => api<{ url: string }>(`/offers/${offerId}/send`, { method: 'POST', json: { email: email || null, message: message || null, locale } }),
-    onSuccess: (r) => { setResult(r); onSent(); },
-  });
-  return (
-    <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 sm:items-center" onClick={onClose}>
-      <div onClick={(e) => e.stopPropagation()} className="w-full max-w-md rounded-t-3xl bg-surface p-6 sheet-pb sm:rounded-3xl">
-        <div className="mb-2 flex items-center justify-between">
-          <h2 className="text-lg font-bold">{t('sendTitle')}</h2>
-          <IconButton label="close" onClick={onClose}><X size={20} /></IconButton>
-        </div>
-        {result ? <PublicLink url={result.url} /> : (
-          <form onSubmit={(e) => { e.preventDefault(); send.mutate(); }} className="space-y-3">
-            <p className="text-sm text-muted">{t('sendHint')}</p>
-            <input type="email" placeholder={t('customerEmail')} value={email} onChange={(e) => setEmail(e.target.value)}
-              className="w-full rounded-xl border border-border bg-surface-2 px-3.5 py-3 outline-none focus:border-primary" />
-            <textarea rows={3} placeholder={t('message')} value={message} onChange={(e) => setMessage(e.target.value)}
-              className="w-full rounded-xl border border-border bg-surface-2 px-3.5 py-3 outline-none focus:border-primary" />
-            <button disabled={send.isPending} className="flex w-full items-center justify-center gap-2 rounded-xl bg-primary py-3 font-semibold text-white disabled:opacity-60">
-              {send.isPending ? <Loader2 size={18} className="animate-spin" /> : <Send size={18} />} {t('send')}
-            </button>
-          </form>
-        )}
-      </div>
-    </div>
   );
 }

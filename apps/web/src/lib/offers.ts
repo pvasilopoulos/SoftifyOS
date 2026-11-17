@@ -11,6 +11,8 @@ export type OfferDetail = {
     space_id: string | null; space_name: string | null; company_id: string | null; company_name: string | null; company_vat: string | null;
     owner_name: string | null; notes: string | null;
     sent_at: string | null; sent_to: string | null; responded_at: string | null; responder_name: string | null; response_note: string | null;
+    viewed_at: string | null; last_viewed_at: string | null; view_count: number;
+    signature: string | null; responder_email: string | null; responder_ip: string | null;
   };
   version: number;
   versions: { version: number; net_amount: string; vat_amount: string; total_amount: string; created_at: string; note: string | null; created_by_name: string | null }[];
@@ -25,7 +27,7 @@ export type PublicOffer = {
     number: string; status: string; current_version: number; net_amount: string; vat_amount: string; total_amount: string;
     valid_until: string | null; sent_at: string | null; responded_at: string | null; responder_name: string | null; notes: string | null;
     customer_name: string; branch_name: string | null; space_name: string | null; company_name: string | null; company_vat: string | null;
-    tenant_name: string; owner_name: string | null; owner_email: string | null;
+    tenant_name: string; owner_name: string | null; owner_email: string | null; signature: string | null;
   };
   items: OfferItem[];
   expired: boolean;

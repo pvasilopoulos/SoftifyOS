@@ -16,6 +16,7 @@ import { QuickSettings } from './quick-settings';
 import { brandAsset, useBrand, useBrandHead } from '@/lib/brand';
 import { TabContent, TabsProvider, useEmbedded } from './tabs';
 import { ImpersonationBar } from './impersonation';
+import { BillingBar } from './billing';
 import { CopilotButton, CopilotProvider } from './copilot';
 import { LongPressSheet, QuickOpen, SplitPane, TabBar, TabsCountButton, TabSwitcher, useTabSwipe, useTabSync } from './tabs-ui';
 
@@ -92,6 +93,7 @@ function Shell({ children }: { children: ReactNode }) {
   return (
     <>
     <ImpersonationBar />
+    <BillingBar />
     <div className="min-h-dvh lg:flex">
       {/* Desktop sidebar */}
       <aside className="sticky top-0 hidden h-dvh w-72 shrink-0 flex-col bg-sidebar p-5 text-white lg:flex">

@@ -9,6 +9,7 @@ import { createHash, timingSafeEqual } from 'node:crypto';
 import { BlockList, isIP } from 'node:net';
 import { z, ZodError } from 'zod';
 import { decodeCursor, encodeCursor, sql, withTenant, type Tx } from '../db.js';
+import { planBlocks } from '../billing.js';
 import { isValidAfm } from './customers.js';
 import { openApiSpec } from './integration-openapi.js';
 import { emitEntityEvents, hasWebhooks, emitEvents, type EventSource } from '../webhooks.js';
@@ -98,6 +99,8 @@ async function authenticate(req: FastifyRequest, reply: FastifyReply) {
   const ctx = hit.ctx;
   req.apiLog = { tenantId: ctx.tenantId, keyId: ctx.id };
   if (ctx.expiresAt !== null && ctx.expiresAt <= Date.now()) return problem(reply, 401, 'key_expired', 'This API key has expired');
+  const pb = await planBlocks(ctx.tenantId, 'api');
+  if (pb) return problem(reply, 402, pb, pb === 'plan_feature' ? 'The subscription plan does not include the integration API' : 'The subscription is not active');
   if (ctx.ips && !ipAllowed(ctx.ips, req.ip)) return problem(reply, 403, 'ip_not_allowed', `Requests from ${req.ip} are not allowed for this key`);
 
   // Token bucket per key

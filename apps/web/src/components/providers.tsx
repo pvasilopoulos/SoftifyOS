@@ -1,4 +1,5 @@
 'use client';
+import { installErrorReporting } from '@/lib/report-error';
 import { DialogHost } from './confirm';
 import { QueryClient, QueryClientProvider, useQueryClient } from '@tanstack/react-query';
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
@@ -55,6 +56,7 @@ export function Providers({ children }: { children: ReactNode }) {
   });
 
   useEffect(() => { registerSW().catch(() => {}); }, []);
+  useEffect(() => installErrorReporting(), []);
 
   return (
     <QueryClientProvider client={qc}>
