@@ -64,7 +64,12 @@ echo "PM2 $(pm2 -v)"
 if ! dpkg -s "postgresql-$PG_MAJOR" >/dev/null 2>&1; then
   c "Εγκατάσταση PostgreSQL $PG_MAJOR"
   apt-get install -y -qq postgresql-common >/dev/null
-  /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh -y >/dev/null
+  if ! /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh -y >/dev/null; then
+    # Ubuntu releases past end of life (e.g. 20.04 focal) live on apt-archive.postgresql.org
+    echo "Το apt.postgresql.org δεν έχει πια αυτή την έκδοση Ubuntu: χρήση apt-archive.postgresql.org"
+    for f in /etc/apt/sources.list.d/pgdg*; do [ -f "$f" ] && sed -i 's#://apt\.postgresql\.org/#://apt-archive.postgresql.org/#' "$f"; done
+    apt-get update -qq || true
+  fi
   apt-get install -y -qq "postgresql-$PG_MAJOR" >/dev/null
 fi
 # If Plesk already runs another PostgreSQL, Ubuntu gives this cluster the next free port
