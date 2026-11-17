@@ -6,17 +6,17 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import clsx from 'clsx';
 import { useInfiniteQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useWindowVirtualizer } from '@tanstack/react-virtual';
-import { useLocale, useTranslations } from 'next-intl';
+import { useTranslations } from 'next-intl';
 import {
   ArrowDownUp, Check, ChevronDown, ChevronRight, ChevronsDownUp, ChevronsUpDown, FilePlus2, LayoutGrid, ListFilter, Loader2,
-  MapPin, Pencil, Plus, Store, Trash2, X,
+  Pencil, Plus, Store, Trash2, X,
 } from 'lucide-react';
 import { api, type Page } from '@/lib/api';
-import { money } from '@/lib/format';
 import { Link } from '@/i18n/navigation';
-import { EntityTile, Skeleton, StatusBadge } from './ui';
+import { EntityTile, Skeleton } from './ui';
 import { BranchDialog, type BranchLike } from './customer-dialogs';
-import { BranchDetails } from './branch-details';
+import { BranchDetailsDisplay, CustomerRowParts, SpaceChip, StoreRowParts } from './display-views';
+import { DisplayCustomizeButton } from './display';
 
 // ============================== Toolbar controls ==============================
 const iconBtn = 'relative grid h-11 w-11 shrink-0 place-items-center rounded-xl border border-border bg-surface text-muted transition hover:text-text';
@@ -173,11 +173,11 @@ export function ExpandToggle({ mode, onChange }: { mode: ExpandMode; onChange: (
 /** extra = the f_* filter query from useIndexFilters */
 export type ListFilters = { sort: string; q: string; extra: string };
 
-type TreeSpace = { id: string; name: string; kind: string; area_sqm: string | null };
+type TreeSpace = { id: string; name: string; kind: string; area_sqm: string | null; notes?: string | null; custom?: Record<string, unknown> };
 type TreeBranch = BranchLike & { status: string; spaces_count: number; open_offers: number; spaces: TreeSpace[] };
 type TreeCustomer = {
   id: string; code: string; kind: string; name: string; trade_name: string | null; status: string; annual_value: string;
-  address_city: string | null; branches_count: number; spaces_count: number; branches: TreeBranch[]; matched_branches?: string[];
+  address_city: string | null; branches_count: number; spaces_count: number; branches: TreeBranch[]; matched_branches?: string[]; [k: string]: unknown;
 };
 
 const offerHref = (customerId: string, customerName: string, branchId: string) =>
@@ -186,7 +186,6 @@ const offerHref = (customerId: string, customerName: string, branchId: string) =
 export function CustomerTreeView({ filters, mode }: { filters: ListFilters; mode: ExpandMode }) {
   const t = useTranslations('customers');
   const tc = useTranslations('customer');
-  const locale = useLocale();
   const qc = useQueryClient();
   // Expansion = default for everyone ("all" / "none") + per-row exceptions, so "expand all" also covers pages loaded later
   const [toggled, setToggled] = useState<Set<string>>(new Set());
@@ -246,20 +245,17 @@ export function CustomerTreeView({ filters, mode }: { filters: ListFilters; mode
                       className="grid h-9 w-9 shrink-0 place-items-center rounded-lg text-muted hover:bg-surface-2" disabled={!c.branches.length}>
                       {c.branches.length ? (open ? <ChevronDown size={20} className="text-primary" /> : <ChevronRight size={20} />) : <span className="h-1.5 w-1.5 rounded-full bg-border" />}
                     </button>
+                    <CustomerRowParts c={c}>{(p) => (<>
                     <Link href={`/customers/${c.id}`} className="flex min-w-0 flex-1 items-center gap-3">
                       <CustomerAvatar name={c.name} size={44} />
                       <div className="min-w-0 flex-1">
                         <div className="truncate font-semibold hover:text-primary">{c.name}</div>
-                        <div className="flex min-w-0 items-center gap-1 truncate text-xs text-muted">
-                          {t('storesCount', { count: c.branches_count })} · {t('spacesCount', { count: c.spaces_count })}
-                          {c.address_city && <> · <MapPin size={12} className="shrink-0" />{c.address_city}</>}
-                        </div>
+                        <div className="min-w-0 text-xs text-muted">{p.line}</div>
+                        <div className="mt-1 empty:hidden sm:hidden">{p.badges}</div>
                       </div>
                     </Link>
-                    <div className="hidden text-right sm:block">
-                      <div className="tabular text-sm font-semibold">{money(c.annual_value, locale, 0)}</div>
-                      <StatusBadge status={c.status} />
-                    </div>
+                    <div className="hidden flex-col items-end gap-1 text-right sm:flex">{p.side}{p.badges}</div>
+                    </>)}</CustomerRowParts>
                     <button onClick={() => setDialog({ customerId: c.id })} title={t('addStore')} aria-label={t('addStore')}
                       className="grid h-9 w-9 shrink-0 place-items-center rounded-lg text-primary hover:bg-primary-soft"><Plus size={18} /></button>
                   </div>
@@ -281,19 +277,17 @@ export function CustomerTreeView({ filters, mode }: { filters: ListFilters; mode
                               <button onClick={() => setOpenStores((s) => toggle(s, b.id))} aria-expanded={storeOpen}
                                 className="flex min-w-0 basis-full items-center gap-2.5 text-left sm:basis-auto sm:flex-1">
                                 <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-primary-soft text-primary"><Store size={15} /></span>
+                                <StoreRowParts b={b as unknown as Record<string, unknown>}>{(p) => (<>
                                 <div className="min-w-0 flex-1">
-                                  <div className="line-clamp-2 text-sm font-medium sm:truncate">{b.name}{b.trade_name && <span className="font-normal text-primary"> · {b.trade_name}</span>}</div>
-                                  <div className="truncate text-xs text-muted">
-                                    {[b.address, b.city].filter(Boolean).join(', ') || '—'} · {t('spacesCount', { count: b.spaces_count })}
-                                  </div>
+                                  <div className="flex min-w-0 flex-wrap items-baseline gap-x-1 text-sm font-medium sm:flex-nowrap"><span className="line-clamp-2 sm:truncate">{b.name}</span>{p.title}</div>
+                                  <div className="min-w-0 text-xs text-muted">{p.line}</div>
                                 </div>
-                                {b.open_offers > 0 && <span className="hidden shrink-0 rounded-full bg-warning-soft px-2 py-0.5 text-xs font-medium text-warning sm:inline">{t('openOffers', { count: b.open_offers })}</span>}
-                                {b.ongoing_status_name && <span className="hidden shrink-0 rounded-full bg-warning-soft px-2 py-0.5 text-xs font-medium text-warning sm:inline">{b.ongoing_status_name}</span>}
-                                <span className="hidden sm:inline-flex"><StatusBadge status={b.status} /></span>
+                                <span className="hidden shrink-0 sm:block">{p.badges}</span>
+                                </>)}</StoreRowParts>
                                 <ChevronDown size={16} className={clsx('shrink-0 text-muted transition-transform', storeOpen && 'rotate-180 text-primary')} />
                               </button>
                               <div className="flex w-full items-center gap-1 pl-[42px] sm:w-auto sm:pl-0">
-                              <span className="mr-auto sm:hidden"><StatusBadge status={b.status} /></span>
+                              <span className="mr-auto min-w-0 sm:hidden"><StoreRowParts b={b as unknown as Record<string, unknown>}>{(p) => p.badges}</StoreRowParts></span>
                               <Link href={offerHref(c.id, c.name, b.id)} title={t('offerForStore')} aria-label={t('offerForStore')}
                                 className="grid h-8 w-8 shrink-0 place-items-center rounded-lg text-muted hover:bg-primary-soft hover:text-primary"><FilePlus2 size={16} /></Link>
                               <button onClick={() => setDialog({ customerId: c.id, branch: b })} title={tc('editBranch')} aria-label={tc('editBranch')}
@@ -307,20 +301,14 @@ export function CustomerTreeView({ filters, mode }: { filters: ListFilters; mode
                               <div className="mb-2 ml-5 space-y-2 pb-1 sm:ml-14">
                                 {/* Store data and its spaces are separate, labelled blocks */}
                                 <div className="rounded-xl border border-border bg-surface p-2.5">
-                                  <div className="mb-1.5 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted"><Store size={12} /> {tc('storeData')}</div>
-                                  <BranchDetails b={b} />
+                                  <div className="mb-1.5 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted"><Store size={12} /> {tc('storeData')}<span className="flex-1" /><DisplayCustomizeButton surface="disp_store_details" /></div>
+                                  <BranchDetailsDisplay b={b as unknown as Record<string, unknown>} />
                                 </div>
                                 {b.spaces.length > 0 && (
                                   <div className="rounded-xl border border-primary/20 bg-primary-soft/40 p-2.5">
-                                  <div className="mb-1.5 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-primary"><LayoutGrid size={12} /> {tc('spacesTitle', { count: b.spaces.length })}</div>
+                                  <div className="mb-1.5 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-primary"><LayoutGrid size={12} /> {tc('spacesTitle', { count: b.spaces.length })}<span className="flex-1" /><DisplayCustomizeButton surface="disp_space" /></div>
                                   <ul className="flex flex-wrap gap-1.5">
-                                    {b.spaces.map((s) => (
-                                      <li key={s.id} className="flex items-center gap-1.5 rounded-lg border border-border bg-surface px-2 py-1 text-xs">
-                                        <LayoutGrid size={12} className="text-primary" />
-                                        <span className="font-medium">{s.name}</span>
-                                        <span className="text-muted">{[s.kind, s.area_sqm && `${Number(s.area_sqm)} m²`].filter(Boolean).join(' · ')}</span>
-                                      </li>
-                                    ))}
+                                    {b.spaces.map((s) => <SpaceChip key={s.id} s={s as unknown as Record<string, unknown>} />)}
                                   </ul>
                                   </div>
                                 )}
@@ -354,7 +342,7 @@ export type StoreFilters = { q: string; sort: string; extra: string };
 type StoreRow = {
   id: string; name: string; trade_name: string | null; city: string | null; region: string | null; address: string | null; postal_code: string | null;
   status: string; spaces_count: number; customer_id: string; customer_name: string; customer_status: string; open_offers: number;
-  geo_zone_name: string | null; tour_name: string | null; ongoing_status_name: string | null;
+  geo_zone_name: string | null; tour_name: string | null; ongoing_status_name: string | null; [k: string]: unknown;
 };
 
 export function StoresView({ filters: f }: { filters: StoreFilters }) {
@@ -390,24 +378,17 @@ export function StoresView({ filters: f }: { filters: StoreFilters }) {
             return (
               <div key={b.id} style={{ position: 'absolute', top: 0, left: 0, right: 0, transform: `translateY(${it.start - v.options.scrollMargin}px)` }} className="pb-3">
                 <div className="card flex items-center gap-3 p-3.5 transition hover:border-primary/40">
+                  <StoreRowParts b={b}>{(p) => (<>
                   <Link href={`/customers/${b.customer_id}?tab=branches&branch=${b.id}`} className="flex min-w-0 flex-1 items-center gap-3">
                     <span className="grid h-12 w-12 shrink-0 place-items-center rounded-2xl bg-primary-soft text-primary"><Store size={22} /></span>
                     <div className="min-w-0 flex-1">
-                      <div className="truncate font-semibold">{b.name}{b.trade_name && <span className="font-normal text-primary"> · {b.trade_name}</span>}</div>
-                      <div className="truncate text-sm text-muted">{b.customer_name}</div>
-                      <div className="mt-0.5 flex min-w-0 items-center gap-1 truncate text-xs text-muted">
-                        <MapPin size={12} className="shrink-0" />{[b.address, b.postal_code, b.city, b.region].filter(Boolean).join(', ') || '—'}
-                      </div>
+                      <div className="flex min-w-0 items-baseline gap-x-1 font-semibold"><span className="truncate">{b.name}</span>{p.title}</div>
+                      <div className="mt-0.5 min-w-0 text-xs text-muted">{p.line}</div>
+                      <div className="mt-1 empty:hidden sm:hidden">{p.badges}</div>
                     </div>
                   </Link>
-                  <div className="hidden shrink-0 flex-col items-end gap-1 sm:flex">
-                    <span className="rounded-full bg-surface-2 px-2.5 py-0.5 text-xs">{t('spacesCount', { count: b.spaces_count })}</span>
-                    {b.ongoing_status_name && <span className="rounded-full bg-warning-soft px-2 py-0.5 text-xs font-medium text-warning">{b.ongoing_status_name}</span>}
-                    {b.tour_name && <span className="rounded-full bg-info-soft px-2 py-0.5 text-xs text-info">{b.tour_name}</span>}
-                    {b.geo_zone_name && <span className="rounded-full bg-surface-2 px-2 py-0.5 text-xs text-muted">{b.geo_zone_name}</span>}
-                    {b.open_offers > 0 && <span className="rounded-full bg-warning-soft px-2 py-0.5 text-xs font-medium text-warning">{t('openOffers', { count: b.open_offers })}</span>}
-                    {b.status === 'inactive' && <StatusBadge status="inactive" />}
-                  </div>
+                  <div className="hidden max-w-[45%] shrink-0 sm:block">{p.badges}</div>
+                  </>)}</StoreRowParts>
                   <Link href={offerHref(b.customer_id, b.customer_name, b.id)} title={t('offerForStore')} aria-label={t('offerForStore')}
                     className="grid h-9 w-9 shrink-0 place-items-center rounded-lg text-muted hover:bg-primary-soft hover:text-primary"><FilePlus2 size={18} /></Link>
                 </div>

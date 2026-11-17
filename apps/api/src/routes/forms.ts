@@ -7,7 +7,7 @@ import { can, requireAuth, type Session } from '../auth.js';
 import { audit } from './settings.js';
 import {
   buildEffective, CATALOG, CUSTOM_FORMS, CUSTOM_TYPES, effectiveForm, FORM_LABELS, FORM_MODULE, FORMS, invalidateForms,
-  levelConfigSchema, loadCustom, PERSONAL_PROPS, type FormKey, type Level, type LevelConfig, type Scope,
+  isDisplay, levelConfigSchema, loadCustom, PERSONAL_DISPLAY_PROPS, PERSONAL_PROPS, type FormKey, type Level, type LevelConfig, type Scope,
 } from '../forms.js';
 
 const forbid = (reply: FastifyReply) => reply.code(403).send({ error: 'forbidden' });
@@ -35,7 +35,8 @@ function sanitize(form: FormKey, cfg: LevelConfig, customKeys: string[], persona
   const fields: LevelConfig['fields'] = {};
   for (const [k, v] of Object.entries(cfg.fields)) {
     if (!known.has(k)) continue;
-    const entry = (personal ? Object.fromEntries(Object.entries(v).filter(([p]) => (PERSONAL_PROPS as string[]).includes(p))) : { ...v }) as LevelConfig['fields'][string];
+    const allowed = (isDisplay(form) ? PERSONAL_DISPLAY_PROPS : PERSONAL_PROPS) as string[];
+    const entry = (personal ? Object.fromEntries(Object.entries(v).filter(([p]) => allowed.includes(p))) : { ...v }) as LevelConfig['fields'][string];
     // rules may only reference fields of this form
     if (entry.rules) entry.rules = entry.rules.filter((r) => known.has(r.field) && r.field !== k);
     if (Object.keys(entry).length) fields[k] = entry;
@@ -140,7 +141,7 @@ export default async function formRoutes(app: FastifyInstance) {
         const customs = customsAll.filter((c) => c.active);
         const level: LevelConfig = row?.config ?? { fields: {}, sections: {} };
         return {
-          form, scope: q.scope, key, personal: !can(s, 'forms.manage'), personal_props: PERSONAL_PROPS,
+          form, scope: q.scope, key, personal: !can(s, 'forms.manage'), personal_props: isDisplay(form) ? PERSONAL_DISPLAY_PROPS : PERSONAL_PROPS,
           level: { fields: level.fields ?? {}, sections: level.sections ?? {} },
           version: row?.version ?? 0, updated_at: row?.updated_at ?? null, updated_by_name: row?.updated_by_name ?? null,
           base: buildEffective(form, customs, above),

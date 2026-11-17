@@ -38,4 +38,6 @@ export type Me = {
   tenant: { id: string; slug: string; name: string; role: string; title: string | null; show_customer_avatar?: boolean; customers_view?: 'list' | 'tree' | 'stores'; role_name?: string; permissions?: string[] };
   tenants: { id: string; slug: string; name: string; role: string }[];
   brand?: import('./brand').Brand;
+  /** Set while an admin is signed in as this user (Settings → Users → Sign in as). */
+  impersonator?: { id: string; email: string; full_name: string } | null;
 };

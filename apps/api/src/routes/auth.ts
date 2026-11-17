@@ -1,8 +1,8 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { verify } from '@node-rs/argon2';
-import { sql } from '../db.js';
-import { clearSession, issueSession, requireAuth } from '../auth.js';
+import { sql, withTenant } from '../db.js';
+import { clearSession, issueSession, notImpersonating, requireAuth } from '../auth.js';
 import { loadBrand } from './branding.js';
 import { effectiveFilters } from '../filters.js';
 
@@ -35,7 +35,20 @@ export default async function authRoutes(app: FastifyInstance) {
 
   app.post('/auth/logout', async (_req, reply) => { clearSession(reply); return { ok: true }; });
 
-  app.post('/auth/switch-tenant', { preHandler: requireAuth }, async (req, reply) => {
+  // End "Sign in as": back to the admin's own session
+  app.post('/auth/impersonate/stop', { preHandler: requireAuth }, async (req, reply) => {
+    const s = req.session;
+    if (!s.impersonator) return reply.code(409).send({ error: 'not_impersonating' });
+    const [m] = await sql<{ role: string }[]>`SELECT role FROM memberships WHERE user_id = ${s.impersonator} AND tenant_id = ${s.tenantId}`;
+    if (!m) { clearSession(reply); return reply.code(401).send({ error: 'unauthorized' }); }
+    const [u] = await sql<{ email: string }[]>`SELECT email FROM users WHERE id = ${s.userId}`;
+    await withTenant(s.tenantId, (tx) => tx`INSERT INTO audit_log (tenant_id, actor_id, action, entity, details)
+      VALUES (${s.tenantId}, ${s.impersonator!}, 'user.impersonate_stop', ${u?.email ?? null}, NULL)`);
+    await issueSession(reply, { userId: s.impersonator, tenantId: s.tenantId, role: m.role });
+    return { ok: true };
+  });
+
+  app.post('/auth/switch-tenant', { preHandler: [requireAuth, notImpersonating] }, async (req, reply) => {
     const { tenantId } = z.object({ tenantId: z.string().uuid() }).parse(req.body);
     const [m] = await sql<{ role: string }[]>`SELECT role FROM memberships WHERE user_id = ${req.session.userId} AND tenant_id = ${tenantId}`;
     if (!m) return reply.code(403).send({ error: 'forbidden' });
@@ -46,6 +59,8 @@ export default async function authRoutes(app: FastifyInstance) {
   app.get('/me', { preHandler: requireAuth }, async (req) => {
     const { userId, tenantId } = req.session;
     const [user] = await sql`SELECT id, email, full_name, avatar_url, locale FROM users WHERE id = ${userId}`;
+    const [impersonator] = req.session.impersonator
+      ? await sql`SELECT id, email, full_name FROM users WHERE id = ${req.session.impersonator}` : [];
     // (tenant defaults are used to pre-fill new offers)
     const tenants = await sql`
       SELECT t.id, t.slug, t.name, m.role, r.name AS role_name, r.permissions, m.title, t.currency, t.default_vat_rate, t.offer_validity_days, t.offer_terms,
@@ -73,6 +88,6 @@ export default async function authRoutes(app: FastifyInstance) {
       },
       custom_filters: customFilters,
     }))(cur);
-    return { user, tenant, tenants: tenants.map(({ index_defaults: _d, prefs: _p, ...t }) => t), brand: await loadBrand(tenantId) };
+    return { user, tenant, tenants: tenants.map(({ index_defaults: _d, prefs: _p, ...t }) => t), brand: await loadBrand(tenantId), impersonator: impersonator ?? null };
   });
 }

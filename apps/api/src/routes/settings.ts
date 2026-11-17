@@ -5,7 +5,7 @@ import { createHash, randomBytes } from 'node:crypto';
 import { z } from 'zod';
 import { hash, verify } from '@node-rs/argon2';
 import { decodeCursor, encodeCursor, searchKey, sql, withTenant, type Tx } from '../db.js';
-import { can, invalidateMembership, invalidateTenantRoles, issueSession, PERMISSIONS, requireAuth, type Permission, type Session } from '../auth.js';
+import { can, invalidateMembership, invalidateTenantRoles, issueSession, notImpersonating, PERMISSIONS, requireAuth, type Permission, type Session } from '../auth.js';
 import { enqueue } from '../jobs.js';
 import { DEFAULT_VISIBLE, effectiveFilters, FILTER_KEYS, INDEX_FILTERS, INDEXES } from '../filters.js';
 import { ALL_LISTS, isNameList, nameInUse, nameListUsage, renameInRecords } from '../lookups.js';
@@ -17,8 +17,10 @@ const CUSTOMER_VIEWS = ['list', 'tree', 'stores'] as const;
 const sha256 = (s: string) => createHash('sha256').update(s).digest('hex');
 
 export async function audit(tx: Tx, s: Session, action: string, entity: string | null, details?: unknown) {
+  // While signed in as someone else, every entry says which admin really did it
+  const d = s.impersonator ? { ...(details && typeof details === 'object' ? details : details === undefined ? {} : { value: details }), impersonated_by: s.impersonator } : details;
   await tx`INSERT INTO audit_log (tenant_id, actor_id, action, entity, details)
-           VALUES (${s.tenantId}, ${s.userId}, ${action}, ${entity}, ${details === undefined ? null : tx.json(details as never)})`;
+           VALUES (${s.tenantId}, ${s.userId}, ${action}, ${entity}, ${d === undefined ? null : tx.json(d as never)})`;
 }
 
 const forbid = (reply: FastifyReply) => reply.code(403).send({ error: 'forbidden' });
@@ -62,14 +64,14 @@ export default async function settingsRoutes(app: FastifyInstance) {
     r.addHook('preHandler', requireAuth);
 
     // ---------- My profile (any role) ----------
-    r.put('/me', async (req) => {
+    r.put('/me', { preHandler: notImpersonating }, async (req) => {
       const b = z.object({ full_name: z.string().trim().min(2).max(120), locale: z.enum(['el', 'en']) }).parse(req.body);
       await sql`UPDATE users SET full_name = ${b.full_name}, locale = ${b.locale} WHERE id = ${req.session.userId}`;
       return { ok: true };
     });
 
     // Changing the sign-in email needs the current password
-    r.post('/me/email', async (req, reply) => {
+    r.post('/me/email', { preHandler: notImpersonating }, async (req, reply) => {
       const b = z.object({ email: z.string().trim().toLowerCase().email().max(200), password: z.string().min(1) }).parse(req.body);
       const [u] = await sql`SELECT email, password_hash FROM users WHERE id = ${req.session.userId}`;
       if (!u || !(await verify(u.password_hash, b.password))) return reply.code(400).send({ error: 'wrong_password' });
@@ -86,7 +88,7 @@ export default async function settingsRoutes(app: FastifyInstance) {
       return { ok: true };
     });
 
-    r.post('/me/password', async (req, reply) => {
+    r.post('/me/password', { preHandler: notImpersonating }, async (req, reply) => {
       const b = z.object({ current: z.string().min(1), next: z.string().min(10).max(200) }).parse(req.body);
       const [u] = await sql`SELECT password_hash FROM users WHERE id = ${req.session.userId}`;
       if (!u || !(await verify(u.password_hash, b.current))) return reply.code(400).send({ error: 'wrong_password' });
@@ -279,6 +281,27 @@ export default async function settingsRoutes(app: FastifyInstance) {
       const [{ n }] = await tx`SELECT count(*)::int AS n FROM memberships WHERE tenant_id = ${tenantId} AND role = 'owner' AND user_id <> ${excluding}`;
       return n;
     }
+
+    // "Sign in as": an admin sees the app exactly as this user (2 hours, recorded in the audit log)
+    r.post('/settings/users/:id/impersonate', async (req, reply) => {
+      if (!can(req.session, 'users.manage')) return forbid(reply);
+      const { id } = idParam.parse(req.params);
+      const s = req.session;
+      if (s.impersonator) return reply.code(409).send({ error: 'already_impersonating' });
+      if (id === s.userId) return reply.code(409).send({ error: 'self' });
+      const res = await withTenant(s.tenantId, async (tx) => {
+        const [m] = await tx`SELECT m.role, u.email FROM memberships m JOIN users u ON u.id = m.user_id WHERE m.tenant_id = ${s.tenantId} AND m.user_id = ${id}`;
+        if (!m) return null;
+        // Only owners can sign in as an owner (same rule as changing their role)
+        if (!canAssign(s, m.role)) return { forbidden: true as const };
+        await audit(tx, s, 'user.impersonate', m.email, { role: m.role });
+        return { role: m.role as string };
+      });
+      if (!res) return reply.code(404).send({ error: 'not_found' });
+      if ('forbidden' in res) return forbid(reply);
+      await issueSession(reply, { userId: id, tenantId: s.tenantId, role: res.role, impersonator: s.userId });
+      return { ok: true };
+    });
 
     r.put('/settings/users/:id', async (req, reply) => {
       if (!can(req.session, 'users.manage')) return forbid(reply);

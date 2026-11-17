@@ -15,6 +15,7 @@ import { useLive } from './providers';
 import { QuickSettings } from './quick-settings';
 import { brandAsset, useBrand, useBrandHead } from '@/lib/brand';
 import { TabContent, TabsProvider, useEmbedded } from './tabs';
+import { ImpersonationBar } from './impersonation';
 import { LongPressSheet, QuickOpen, SplitPane, TabBar, TabsCountButton, TabSwitcher, useTabSwipe, useTabSync } from './tabs-ui';
 
 /** Organisation logo + name (Settings → Branding). Public pages pass signedIn={false}. */
@@ -88,6 +89,8 @@ function Shell({ children }: { children: ReactNode }) {
   const { data: notif } = useQuery({ queryKey: ['notifications'], queryFn: () => api<{ unread: number }>('/notifications'), refetchInterval: 120_000 });
 
   return (
+    <>
+    <ImpersonationBar />
     <div className="min-h-dvh lg:flex">
       {/* Desktop sidebar */}
       <aside className="sticky top-0 hidden h-dvh w-72 shrink-0 flex-col bg-sidebar p-5 text-white lg:flex">
@@ -163,6 +166,7 @@ function Shell({ children }: { children: ReactNode }) {
         </div>
       </nav>
     </div>
+    </>
   );
 }
 

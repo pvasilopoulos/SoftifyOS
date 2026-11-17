@@ -23,6 +23,11 @@ import { useMe } from './app-shell';
 import { FormFields, formInput } from './form-engine';
 import { useLookup, ID_LISTS, type LookupList } from './lookup-select';
 import { useCrmMeta } from '@/lib/crm';
+import { DisplayPreview } from './display-views';
+import type { Surface } from './display';
+
+const isDisp = (f: string) => f.startsWith('disp_');
+const DISP_LOCKS: Prop[] = ['hidden', 'label', 'section', 'format', 'showLabel', 'showEmpty', 'mobile'];
 
 type Overview = {
   can_manage: boolean; me: { id: string; role: string };
@@ -188,7 +193,7 @@ export function ModuleFormsSection() {
     <div className="space-y-4">
       {/* Form picker */}
       <section className="card p-3 sm:p-4">
-        {(['customers', 'offers', 'crm'] as const).map((mod) => (
+        {(['customers', 'offers', 'crm', 'display'] as const).map((mod) => (
           <div key={mod} className="mb-3 last:mb-0">
             <div className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-muted">{t(`module_${mod}`)}</div>
             <div className="no-scrollbar flex gap-2 overflow-x-auto sm:flex-wrap">
@@ -288,7 +293,7 @@ export function ModuleFormsSection() {
                   {!fields.length && <p className="p-4 text-sm text-muted">{t('emptySection')}</p>}
                   <ul className="divide-y divide-border">
                     {fields.map((f, i) => (
-                      <FieldRow key={f.key} f={f} own={draft.fields[f.key]} personal={personal}
+                      <FieldRow key={f.key} f={f} own={draft.fields[f.key]} personal={personal} disp={isDisp(form)}
                         first={i === 0} last={i === fields.length - 1}
                         onOpen={() => setEditing(f.key)}
                         onToggle={(p, v) => setField(f.key, { [p]: v })}
@@ -346,8 +351,8 @@ function Chip({ children, tone }: { children: ReactNode; tone?: 'danger' | 'prim
 }
 
 // ============================================================ field row
-function FieldRow({ f, own, personal, first, last, onOpen, onToggle, onMove, onDrop }: {
-  f: EffField; own?: FieldCfg; personal: boolean; first: boolean; last: boolean;
+function FieldRow({ f, own, personal, disp, first, last, onOpen, onToggle, onMove, onDrop }: {
+  f: EffField; own?: FieldCfg; personal: boolean; disp?: boolean; first: boolean; last: boolean;
   onOpen: () => void; onToggle: (p: 'hidden' | 'readonly' | 'required', v: boolean | undefined) => void; onMove: (dir: -1 | 1) => void; onDrop: (k: string) => void;
 }) {
   const t = useTranslations('forms');
@@ -386,13 +391,15 @@ function FieldRow({ f, own, personal, first, last, onOpen, onToggle, onMove, onD
           {!!f.options?.length && <Chip>{t('optionsCount', { n: f.options.length })}</Chip>}
           {!!f.rules.length && <Chip tone="primary">{t('rulesCount', { n: f.rules.length })}</Chip>}
           {f.locked.length > 0 && <Chip><Lock size={10} /> {f.locked.length}</Chip>}
-          {f.width !== 'half' && !f.fixedLayout && <Chip>{t(`width_${f.width}`)}</Chip>}
+          {!disp && f.width !== 'half' && !f.fixedLayout && <Chip>{t(`width_${f.width}`)}</Chip>}
+          {disp && <Chip tone="primary">{t(`format_${f.format}`)}</Chip>}
+          {disp && !f.mobile && <Chip>{t('notOnMobile')}</Chip>}
         </div>
       </button>
       <div className="flex shrink-0 items-center gap-0.5">
         <Quick on={!f.hidden} disabled={lockedQuick('hidden')} label={f.hidden ? t('show') : t('hide')} onClick={() => toggle('hidden')}>{f.hidden ? <EyeOff size={16} /> : <Eye size={16} />}</Quick>
-        <Quick on={f.required} disabled={lockedQuick('required')} label={t('required')} onClick={() => toggle('required')} tone="danger"><Asterisk size={16} /></Quick>
-        <Quick on={f.readonly} disabled={lockedQuick('readonly')} label={t('readonly')} onClick={() => toggle('readonly')} tone="warning"><PencilOff size={16} /></Quick>
+        {!disp && <Quick on={f.required} disabled={lockedQuick('required')} label={t('required')} onClick={() => toggle('required')} tone="danger"><Asterisk size={16} /></Quick>}
+        {!disp && <Quick on={f.readonly} disabled={lockedQuick('readonly')} label={t('readonly')} onClick={() => toggle('readonly')} tone="warning"><PencilOff size={16} /></Quick>}
       </div>
     </li>
   );
@@ -434,7 +441,8 @@ function Preview({ form, live, manage, ov, levelName }: { form: FormKey; live: E
       <div className="max-h-[75dvh] overflow-auto p-4">
         <p className="mb-3 text-xs text-muted">{as ? t('previewSaved') : t('previewHint')}</p>
         {!eff ? <Loader2 className="mx-auto animate-spin text-muted" /> : (
-          <FormFields eff={eff} values={values} variant="plain" idPrefix="pv" onChange={(k, v) => setValues((x) => ({ ...x, [k]: v }))} />
+          isDisp(form) ? <DisplayPreview surface={form as Surface} eff={eff} />
+            : <FormFields eff={eff} values={values} variant="plain" idPrefix="pv" onChange={(k, v) => setValues((x) => ({ ...x, [k]: v }))} />
         )}
         {!!Object.keys(values).length && <button type="button" onClick={() => setValues({})} className="mt-3 text-xs font-medium text-primary">{t('clearPreview')}</button>}
       </div>
@@ -443,7 +451,7 @@ function Preview({ form, live, manage, ov, levelName }: { form: FormKey; live: E
 }
 
 // ============================================================ field dialog
-type Tab = 'basic' | 'texts' | 'values' | 'validation' | 'rules' | 'layout' | 'locks';
+type Tab = 'basic' | 'display' | 'texts' | 'values' | 'validation' | 'rules' | 'layout' | 'locks';
 
 function FieldDialog({ f, base, own, scope, personal, can, live, onChange, onClose }: {
   f: EffField; base: EffField; own: FieldCfg; scope: Scope; personal: boolean; can: (p: Prop) => boolean | undefined; live: Effective;
@@ -453,9 +461,12 @@ function FieldDialog({ f, base, own, scope, personal, can, live, onChange, onClo
   const locale = useLocale();
   const isText = TEXT_TYPES.includes(f.type);
   const isChoice = CHOICE_TYPES.includes(f.type) || f.key === 'company_id';
-  const tabs: Tab[] = (['basic', 'texts', 'values', 'validation', 'rules', 'layout', 'locks'] as Tab[]).filter((x) =>
-    !(x === 'locks' && (scope === 'user' || personal)) && !(x === 'layout' && f.fixedLayout)
-    && !(x === 'validation' && !(isText || f.type === 'number')) && !(personal && !['values', 'layout'].includes(x)));
+  const disp = isDisp(live.form);
+  const tabs: Tab[] = disp
+    ? (['display', 'texts', 'layout', 'locks'] as Tab[]).filter((x) => !(x === 'locks' && (scope === 'user' || personal)) && !(personal && !['display', 'layout'].includes(x)))
+    : (['basic', 'texts', 'values', 'validation', 'rules', 'layout', 'locks'] as Tab[]).filter((x) =>
+      !(x === 'locks' && (scope === 'user' || personal)) && !(x === 'layout' && f.fixedLayout)
+      && !(x === 'validation' && !(isText || f.type === 'number')) && !(personal && !['values', 'layout'].includes(x)));
   const [tab, setTab] = useState<Tab>(tabs[0]);
   const set = (p: keyof FieldCfg, v: unknown) => { const next = { ...own, [p]: v } as FieldCfg; if (v === undefined) delete next[p]; onChange(next); };
   const lockedAbove = (p: Prop) => base.locked.includes(p);
@@ -494,9 +505,39 @@ function FieldDialog({ f, base, own, scope, personal, can, live, onChange, onClo
         </div>
       )}
 
+      {tab === 'display' && (
+        <div className="space-y-3">
+          {f.core && <p className="rounded-xl bg-primary-soft/60 p-3 text-sm text-primary">{t('coreInfo')}</p>}
+          <div className="rounded-xl border border-border p-3">
+            <div className="mb-2 flex items-center justify-between"><span className="font-medium">{t('p_format')}</span><Inherit p="format" /></div>
+            <div className="grid grid-cols-3 gap-1 rounded-2xl bg-surface-2 p-1">
+              {(['text', 'chip', 'badge'] as const).map((w) => (
+                <button key={w} type="button" disabled={disabled('format')} onClick={() => set('format', w === base.format ? undefined : w)}
+                  className={clsx('rounded-xl py-2 text-sm font-medium', (own.format ?? base.format) === w ? 'bg-surface text-primary shadow-sm' : 'text-muted')}>
+                  {t(`format_${w}`)}
+                </button>
+              ))}
+            </div>
+          </div>
+          {(['hidden', 'showLabel', 'showEmpty', 'mobile'] as const).map((p) => (
+            <div key={p} className="flex items-center gap-3 rounded-xl border border-border p-3">
+              <div className="min-w-0 flex-1">
+                <div className="font-medium">{t(`p_${p}`)}</div>
+                <div className="text-xs text-muted">{t(p === 'hidden' ? 'h_hiddenDisplay' : `h_${p}`)}</div>
+              </div>
+              <div className="flex flex-col items-end gap-1">
+                <TriState value={own[p]} inherited={base[p]} disabled={disabled(p)} onChange={(v) => set(p, v)} />
+                <Inherit p={p} />
+              </div>
+            </div>
+          ))}
+          {f.src && <p className="text-xs text-muted">{t('srcHint')}</p>}
+        </div>
+      )}
+
       {tab === 'texts' && (
         <div className="space-y-4">
-          {(['label', 'placeholder', 'help'] as const).map((p) => (
+          {((disp ? ['label'] : ['label', 'placeholder', 'help']) as ('label' | 'placeholder' | 'help')[]).map((p) => (
             <div key={p}>
               <div className="mb-1 flex items-center justify-between"><span className="text-sm font-medium">{t(`p_${p}`)}</span><Inherit p={p} /></div>
               <div className="grid gap-2 sm:grid-cols-2">
@@ -593,7 +634,7 @@ function FieldDialog({ f, base, own, scope, personal, can, live, onChange, onClo
               {live.sections.map((s) => <option key={s.key} value={s.key}>{l10n(s.label, locale, s.baseLabel) || s.key}</option>)}
             </select>
           </label>
-          <div>
+          {!disp && <div>
             <span className="mb-1 flex items-center justify-between text-sm font-medium">{t('p_width')} <Inherit p="width" /></span>
             <div className="grid grid-cols-3 gap-1 rounded-2xl bg-surface-2 p-1">
               {(['third', 'half', 'full'] as const).map((w) => (
@@ -603,7 +644,7 @@ function FieldDialog({ f, base, own, scope, personal, can, live, onChange, onClo
                 </button>
               ))}
             </div>
-          </div>
+          </div>}
           <p className="text-xs text-muted">{t('orderHint')}</p>
         </div>
       )}
@@ -612,7 +653,7 @@ function FieldDialog({ f, base, own, scope, personal, can, live, onChange, onClo
         <div className="space-y-2">
           <p className="text-sm text-muted">{t('locksHint')}</p>
           <div className="grid grid-cols-2 gap-1.5">
-            {(['hidden', 'required', 'readonly', 'default', 'label', 'options', 'rules', 'section', 'width', 'pattern'] as Prop[]).map((p) => {
+            {(disp ? DISP_LOCKS : ['hidden', 'required', 'readonly', 'default', 'label', 'options', 'rules', 'section', 'width', 'pattern'] as Prop[]).map((p) => {
               const on = !!own.locked?.includes(p) || base.locked.includes(p);
               return (
                 <label key={p} className={clsx('flex items-center gap-2 rounded-xl border border-border p-2.5 text-sm', base.locked.includes(p) && 'opacity-60')}>

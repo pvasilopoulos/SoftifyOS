@@ -1,5 +1,6 @@
 'use client';
 import { appConfirm } from './confirm';
+import { ImpersonateButton } from './impersonation';
 // Settings module sections. Each section loads its own data; admin-only edits are enforced by the API too.
 import { useEffect, useState, type ReactNode } from 'react';
 import clsx from 'clsx';
@@ -368,6 +369,7 @@ export function UsersSection() {
                   {!roles.some((r) => r.key === u.role) && <option value={u.role}>{roleName(u.role)}</option>}
                   {(editable ? assignable : roles).map((r) => <option key={r.key} value={r.key}>{r.name}</option>)}
                 </select>
+                {editable && u.password_set && !me?.impersonator && <ImpersonateButton userId={u.id} name={u.full_name} />}
                 {editable && !u.password_set && (
                   <button onClick={() => resend.mutate(u.id)} title={t('resend')} aria-label={t('resend')} className="grid h-9 w-9 place-items-center rounded-lg text-muted hover:bg-surface-2 hover:text-primary"><Mail size={16} /></button>
                 )}

@@ -9,8 +9,8 @@ import clsx from 'clsx';
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useLocale, useTranslations } from 'next-intl';
 import {
-  Archive, ArchiveRestore, ArrowLeft, CalendarDays, CheckCircle2, ChevronDown, ChevronRight, FileText, Globe, Mail,
-  MapPin, NotebookPen, Pencil, Phone, Plus, Smartphone, Star, StickyNote, Store, Trash2,
+  Archive, ArchiveRestore, ArrowLeft, CalendarDays, CheckCircle2, ChevronDown, ChevronRight, FileText, Mail,
+  NotebookPen, Pencil, Phone, Plus, Star, StickyNote, Store, Trash2,
 } from 'lucide-react';
 import { api, ApiError, type Activity, type Offer, type Page } from '@/lib/api';
 import { useToast } from '@/components/providers';
@@ -21,8 +21,8 @@ import { Avatar, EntityTile, IconButton, Skeleton, StatusBadge, Tabs } from '@/c
 import { BranchDialog, ContactDialog, SpaceDialog } from '@/components/customer-dialogs';
 import { ActivityEditor, CompleteDialog, TypeIcon, type EditorPreset } from '@/components/crm-editor';
 import { dueLabel, tone, type Activity as CrmActivity } from '@/lib/crm';
-import { BranchDetails } from '@/components/branch-details';
-import { useCustomRows } from '@/components/custom-values';
+import { BranchDetailsDisplay, SpaceLine, StoreRowParts, useCustomerCardValues } from '@/components/display-views';
+import { DisplayCustomizeButton, DisplayRows } from '@/components/display';
 import { DocumentsPanel } from '@/components/documents-ui';
 import { TasksPanel } from '@/components/task-ui';
 
@@ -172,42 +172,9 @@ export default function CustomerPage({ params }: { params: Promise<{ id: string 
       <Tabs value={tab} onChange={setTab} options={tabs} />
 
       {tab === 'overview' && (
-        <div className="grid gap-4 lg:grid-cols-2 [&>*]:min-w-0">
-          <InfoCard title={t('basics')}>
-            <Row k={t('code')} v={c.code} />
-            <Row k={t('vat')} v={c.vat} />
-            <Row k={t('taxOffice')} v={c.tax_office} />
-            <Row k={t('gemi')} v={c.gemi} />
-            <Row k={t('activityField')} v={c.activity} />
-            <Row k={t('manager')} v={c.account_manager_name && <span className="flex items-center gap-2"><Avatar name={c.account_manager_name} size={22} />{c.account_manager_name}</span>} />
-            <Row k={t('source')} v={sourceLabel(c.source)} />
-            <Row k={t('prefecture')} v={c.address_region} />
-            <Row k={t('geoZone')} v={c.geo_zone_name} />
-          </InfoCard>
-          <InfoCard title={t('contactInfo')}>
-            <Row k={t('email')} v={c.email && <a href={`mailto:${c.email}`} className="text-primary hover:underline">{c.email}</a>} icon={Mail} />
-            <Row k={t('phone')} v={c.phone && <a href={`tel:${c.phone}`} className="text-primary">{c.phone}</a>} icon={Phone} />
-            <Row k={t('mobile')} v={c.mobile && <a href={`tel:${c.mobile}`} className="text-primary">{c.mobile}</a>} icon={Smartphone} />
-            <Row k="Web" v={c.website && <a href={c.website.startsWith('http') ? c.website : `https://${c.website}`} target="_blank" rel="noopener" className="text-primary hover:underline">{c.website}</a>} icon={Globe} />
-            {primary && <Row k={t('primary')} v={`${primary.full_name}${primary.role_title ? ` · ${primary.role_title}` : ''}`} icon={Star} />}
-          </InfoCard>
-          <InfoCard title={t('address')}>
-            <p className="text-sm leading-relaxed">
-              {[c.address_street, [c.address_postal, c.address_city].filter(Boolean).join(' '), c.address_region, c.address_country].filter(Boolean).join(', ') || '—'}
-            </p>
-            <div className="mt-3 text-xs font-medium text-muted">{t('billing')}</div>
-            <p className="text-sm">{c.billing_address
-              ? [c.billing_address.street, [c.billing_address.postal, c.billing_address.city].filter(Boolean).join(' ')].filter(Boolean).join(', ')
-              : t('sameAsAddress')}</p>
-          </InfoCard>
-          <InfoCard title={t('terms')}>
-            <Row k={t('paymentTerms')} v={termsLabel(c.payment_terms)} />
-            <Row k={t('creditLimit')} v={c.credit_limit ? money(c.credit_limit, locale, 0) : null} />
-            <Row k={t('discount')} v={Number(c.discount) ? `${Number(c.discount)}%` : null} />
-          </InfoCard>
-          <CustomCard custom={c.custom} />
-          {c.notes && <InfoCard title={t('notes')} wide><p className="whitespace-pre-line text-sm">{c.notes}</p></InfoCard>}
-        </div>
+        <CustomerCard c={c as unknown as Record<string, unknown>}
+          primary={primary ? `${primary.full_name}${primary.role_title ? ` · ${primary.role_title}` : ''}` : null}
+          termsLabel={termsLabel} sourceLabel={sourceLabel} />
       )}
 
       {tab === 'subsidiaries' && (
@@ -310,15 +277,23 @@ function Kpi({ label, value, sub, tone }: { label: string; value: string; sub?: 
   );
 }
 
-/** Custom fields of the customer (Module Forms); nothing when there are none. */
-function CustomCard({ custom }: { custom?: Record<string, unknown> }) {
-  const tf = useTranslations('forms');
-  const rows = useCustomRows('customer', custom);
-  if (!rows.length) return null;
+/** Overview: sections and fields from Settings → Module Forms → Display (customer card). */
+function CustomerCard({ c, primary, termsLabel, sourceLabel }: {
+  c: Record<string, unknown>; primary: string | null; termsLabel: (x: string | null) => string | null; sourceLabel: (x: string | null) => string | null;
+}) {
+  const values = useCustomerCardValues(c, { primary, termsLabel, sourceLabel });
+  const LONG = new Set(['address', 'billing', 'notes']);
   return (
-    <InfoCard title={tf('customValues')}>
-      {rows.map((r) => <Row key={r.key} k={r.label} v={r.type === 'url' && r.value ? <a href={r.value} target="_blank" rel="noreferrer" className="text-primary underline">{r.value}</a> : r.value} />)}
-    </InfoCard>
+    <div className="space-y-2">
+      <div className="flex justify-end"><DisplayCustomizeButton surface="disp_customer_card" /></div>
+      <div className="grid gap-4 lg:grid-cols-2 [&>*]:min-w-0">
+        <DisplayRows surface="disp_customer_card" values={values} render={(s, rows) => (
+          <InfoCard title={s.title} wide={s.key === 'notes'}>
+            {rows.map((r) => <Row key={r.key} k={r.label} v={r.value} icon={r.icon} wrap={LONG.has(r.key) || !r.label} />)}
+          </InfoCard>
+        )} />
+      </div>
+    </div>
   );
 }
 
@@ -331,11 +306,11 @@ function InfoCard({ title, children, wide }: { title: string; children: ReactNod
   );
 }
 
-function Row({ k, v, icon: Icon }: { k: string; v: ReactNode; icon?: typeof Mail }) {
+function Row({ k, v, icon: Icon, wrap }: { k: string; v: ReactNode; icon?: typeof Mail; wrap?: boolean }) {
   return (
-    <div className="flex items-center justify-between gap-4 py-2.5 text-sm">
-      <dt className="flex shrink-0 items-center gap-1.5 text-muted">{Icon && <Icon size={14} />}{k}</dt>
-      <dd className="min-w-0 truncate text-right font-medium">{v || <span className="text-muted">—</span>}</dd>
+    <div className={clsx('flex justify-between gap-4 py-2.5 text-sm', wrap ? 'items-start' : 'items-center')}>
+      {(k || Icon) && <dt className="flex shrink-0 items-center gap-1.5 text-muted">{Icon && <Icon size={14} />}{k}</dt>}
+      <dd className={clsx('min-w-0 font-medium', wrap ? (k ? 'text-right' : 'flex-1') : 'truncate text-right')}>{v || <span className="text-muted">—</span>}</dd>
     </div>
   );
 }
@@ -358,16 +333,13 @@ function BranchCard({ branch: b, canEdit, onEdit, onAddSpace, onEditSpace, focus
       <div className="flex items-center gap-1 pr-2">
         <button onClick={() => setOpen(!open)} aria-expanded={open} className="flex min-w-0 flex-1 items-center gap-3 p-3.5 text-left">
           <EntityTile name={b.name} size={52} />
+          <StoreRowParts b={{ ...b, spaces_count: b.spaces.length } as unknown as Record<string, unknown>}>{(p) => (
           <div className="min-w-0 flex-1">
-            <div className="truncate font-semibold">{b.name}</div>
-            {b.trade_name && <div className="truncate text-xs font-medium text-primary">{b.trade_name}</div>}
-            {(b.city || b.address) && <div className="flex items-center gap-1 truncate text-sm text-muted"><MapPin size={14} className="shrink-0" />{[b.address, b.city].filter(Boolean).join(', ')}</div>}
-            <div className="mt-1 flex flex-wrap gap-1.5">
-              <span className="rounded-full bg-surface-2 px-2.5 py-0.5 text-xs">{t('spaces', { count: b.spaces.length })}</span>
-              {b.tour_name && <span className="rounded-full bg-info-soft px-2.5 py-0.5 text-xs text-info">{b.tour_name}</span>}
-              <StatusBadge status={b.status} />
-            </div>
+            <div className="flex min-w-0 items-baseline gap-x-1 font-semibold"><span className="truncate">{b.name}</span>{p.title}</div>
+            <div className="text-sm text-muted">{p.line}</div>
+            <div className="mt-1 empty:hidden">{p.badges}</div>
           </div>
+          )}</StoreRowParts>
           <ChevronDown size={20} className={clsx('shrink-0 text-muted transition-transform', open && 'rotate-180 text-primary')} />
         </button>
         {canEdit && (
@@ -380,17 +352,14 @@ function BranchCard({ branch: b, canEdit, onEdit, onAddSpace, onEditSpace, focus
       </div>
       {open && (
         <div className="border-t border-border bg-surface-2/50 px-3.5 pb-3.5 pt-3">
-          <div className="mb-3"><BranchDetails b={b} /></div>
+          <div className="mb-3 flex items-start gap-2"><div className="min-w-0 flex-1"><BranchDetailsDisplay b={b as unknown as Record<string, unknown>} /></div><DisplayCustomizeButton surface="disp_store_details" /></div>
           {b.spaces.length === 0 ? <p className="py-2 text-sm text-muted">{t('noSpaces')}</p> : (
             <ul className="divide-y divide-border rounded-xl border border-border bg-surface">
               {b.spaces.map((sp) => (
                 <li key={sp.id}>
                   <button onClick={() => canEdit && onEditSpace(sp)} className="flex w-full items-center gap-3 px-3 py-2.5 text-left hover:bg-surface-2">
                     <span className="grid h-9 w-9 place-items-center rounded-lg bg-primary-soft text-primary"><Store size={16} /></span>
-                    <div className="min-w-0 flex-1">
-                      <div className="truncate text-sm font-medium">{sp.name}</div>
-                      <div className="text-xs text-muted">{[sp.kind, sp.area_sqm && `${Number(sp.area_sqm)} m²`].filter(Boolean).join(' · ')}</div>
-                    </div>
+                    <div className="min-w-0 flex-1 text-sm"><SpaceLine s={sp as unknown as Record<string, unknown>} /></div>
                     {canEdit && <Pencil size={14} className="text-muted" />}
                   </button>
                 </li>

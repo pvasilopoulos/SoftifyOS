@@ -4,7 +4,9 @@ import { useQuery } from '@tanstack/react-query';
 import { api } from './api';
 
 export type L10n = { el?: string; en?: string };
-export type FormKey = 'customer' | 'branch' | 'space' | 'contact' | 'activity' | 'offer' | 'offer_item';
+export type FormKey = 'customer' | 'branch' | 'space' | 'contact' | 'activity' | 'offer' | 'offer_item'
+  | 'disp_customer_row' | 'disp_store_row' | 'disp_store_details' | 'disp_space' | 'disp_customer_card';
+export type Format = 'chip' | 'text' | 'badge';
 export type FieldType = 'text' | 'textarea' | 'number' | 'date' | 'bool' | 'select' | 'multiselect' | 'email' | 'url' | 'phone'
   | 'list' | 'lookup' | 'user' | 'tags' | 'country' | 'ref' | 'group';
 export type Width = 'full' | 'half' | 'third';
@@ -15,7 +17,8 @@ export type DefaultValue =
   | { kind: 'me' }
   | { kind: 'parent'; field: string };
 export type Prop = 'hidden' | 'readonly' | 'required' | 'default' | 'label' | 'placeholder' | 'help' | 'section' | 'order' | 'width'
-  | 'min' | 'max' | 'minLength' | 'maxLength' | 'pattern' | 'patternMessage' | 'options' | 'rules';
+  | 'min' | 'max' | 'minLength' | 'maxLength' | 'pattern' | 'patternMessage' | 'options' | 'rules'
+  | 'format' | 'showLabel' | 'showEmpty' | 'mobile';
 export type Scope = 'organization' | 'role' | 'user';
 
 export type EffField = {
@@ -26,6 +29,7 @@ export type EffField = {
   label: L10n; baseLabel: L10n; placeholder: L10n; help: L10n;
   min: number | null; max: number | null; minLength: number | null; maxLength: number | null; pattern: string | null; patternMessage: L10n;
   options: string[] | null; rules: Rule[]; locked: Prop[]; source: Partial<Record<Prop, Scope>>;
+  format: Format; showLabel: boolean; showEmpty: boolean; mobile: boolean; src: string | null;
 };
 export type EffSection = { key: string; label: L10n; baseLabel: L10n; order: number; collapsed: boolean; tab: string | null; hidden: boolean; custom: boolean };
 export type Effective = { form: FormKey; fields: EffField[]; sections: EffSection[] };
@@ -35,6 +39,7 @@ export type FieldCfg = Partial<{
   label: L10n; placeholder: L10n; help: L10n; section: string; order: number; width: Width;
   min: number | null; max: number | null; minLength: number | null; maxLength: number | null; pattern: string | null; patternMessage: L10n;
   options: string[] | null; rules: Rule[]; locked: Prop[];
+  format: Format; showLabel: boolean; showEmpty: boolean; mobile: boolean;
 }>;
 export type SectionCfg = Partial<{ label: L10n; order: number; collapsed: boolean; tab: string | null; hidden: boolean }>;
 export type LevelConfig = { fields: Record<string, FieldCfg>; sections: Record<string, SectionCfg> };

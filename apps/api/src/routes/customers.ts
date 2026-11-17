@@ -167,7 +167,8 @@ export default async function customerRoutes(app: FastifyInstance) {
         : q.sort === 'value' ? tx`AND (annual_value, id) < (${cur[0]}::numeric, ${cur[1]}::uuid)`
         : tx`AND (name, id) > (${cur[0]}, ${cur[1]}::uuid)`;
       const rows = await tx`
-        SELECT id, code, kind, name, trade_name, status, category, tags, image_url, annual_value, address_city,
+        SELECT id, code, kind, name, trade_name, status, category, tags, image_url, annual_value, address_city, address_region, source,
+               vat, phone, email, custom, (SELECT full_name FROM users WHERE id = customers.account_manager_id) AS manager_name,
                companies_count, branches_count, spaces_count, created_at, archived_at
                ${withBranches ? tx`, (
                  SELECT coalesce(json_agg(x ORDER BY x.name), '[]') FROM (
@@ -179,7 +180,7 @@ export default async function customerRoutes(app: FastifyInstance) {
                           (SELECT name FROM lookup_values WHERE id = b.tour_id) AS tour_name,
                           (SELECT count(*) FROM offers o WHERE o.branch_id = b.id
                             AND o.status IN ('draft','in_progress','pending_approval','approved','sent'))::int AS open_offers,
-                          (SELECT coalesce(json_agg(json_build_object('id', sp.id, 'name', sp.name, 'kind', sp.kind, 'area_sqm', sp.area_sqm)
+                          (SELECT coalesce(json_agg(json_build_object('id', sp.id, 'name', sp.name, 'kind', sp.kind, 'area_sqm', sp.area_sqm, 'notes', sp.notes, 'custom', sp.custom)
                                   ORDER BY sp.name), '[]') FROM spaces sp WHERE sp.branch_id = b.id) AS spaces
                    FROM branches b WHERE b.customer_id = customers.id ORDER BY b.name LIMIT 50) x
                ) AS branches` : tx``}
@@ -233,8 +234,8 @@ export default async function customerRoutes(app: FastifyInstance) {
         : q.sort === 'spaces' ? tx`AND (b.spaces_count, b.id) < (${Number(cur[0])}, ${cur[1]}::uuid)`
         : tx`AND (b.name, b.id) > (${cur[0]}, ${cur[1]}::uuid)`;
       const rows = await tx`
-        SELECT b.id, b.name, b.trade_name, b.city, b.region, b.address, b.postal_code, b.phone, b.status, b.spaces_count,
-               b.seasonality, b.season_months,
+        SELECT b.id, b.name, b.trade_name, b.city, b.region, b.address, b.postal_code, b.phone, b.manager_name, b.status, b.spaces_count,
+               b.seasonality, b.season_months, b.custom,
                b.customer_id, c.name AS customer_name, c.status AS customer_status,
                (SELECT name FROM lookup_values WHERE id = b.geo_zone_id) AS geo_zone_name,
                (SELECT name FROM lookup_values WHERE id = b.tour_id) AS tour_name,
@@ -391,7 +392,7 @@ export default async function customerRoutes(app: FastifyInstance) {
         FROM offers WHERE tenant_id = ${T} AND customer_id = ${id}`;
       const decided = stats.won_offers + stats.lost_offers;
       const branches = await tx`
-        SELECT b.id, b.name, b.trade_name, b.city, b.region, b.address, b.postal_code, b.phone, b.manager_name, b.status, b.spaces_count,
+        SELECT b.id, b.name, b.trade_name, b.city, b.region, b.address, b.postal_code, b.phone, b.manager_name, b.custom, b.status, b.spaces_count,
                b.geo_zone_id, b.fee_schedule_id, b.tour_id, b.ongoing_status_id, b.seasonality, b.season_months,
                gz.name AS geo_zone_name, fs.name AS fee_schedule_name, tr.name AS tour_name, os.name AS ongoing_status_name,
                coalesce(json_agg(json_build_object('id', s.id, 'name', s.name, 'kind', s.kind, 'area_sqm', s.area_sqm, 'notes', s.notes, 'custom', s.custom)

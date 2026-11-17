@@ -5,12 +5,11 @@ import { Suspense, useEffect, useRef, useState } from 'react';
 import clsx from 'clsx';
 import { useInfiniteQuery, useQuery } from '@tanstack/react-query';
 import { useWindowVirtualizer } from '@tanstack/react-virtual';
-import { useLocale, useTranslations } from 'next-intl';
-import { ListTree, Loader2, MapPin, Plus, Search, Store, Users, X } from 'lucide-react';
+import { useTranslations } from 'next-intl';
+import { ListTree, Loader2, Plus, Search, Store, Users, X } from 'lucide-react';
 import { api, type Customer, type Page } from '@/lib/api';
-import { money } from '@/lib/format';
 import { Link } from '@/i18n/navigation';
-import { EntityTile, PageHeader, Skeleton, StatusBadge } from '@/components/ui';
+import { EntityTile, PageHeader, Skeleton } from '@/components/ui';
 import { ActiveFilterChips, CustomerTreeView, ExpandToggle, SortMenu, StoresView, type ExpandMode } from '@/components/customer-views';
 import { IndexFilterMenu, useFilterChips, useIndexFilters } from '@/components/index-filters';
 import { useMe } from '@/components/app-shell';
@@ -18,6 +17,8 @@ import { tabStore } from '@/lib/tab-store';
 import { decodeConfig, ManageViewsDialog, sameConfig, SavedViewsBar, SaveViewButton, useSavedViews, type SavedView, type ViewConfig } from '@/components/saved-views';
 import { useRouter, usePathname } from '@/i18n/navigation';
 import { useSearchParams } from 'next/navigation';
+import { CustomerRowParts } from '@/components/display-views';
+import { DisplayCustomizeButton } from '@/components/display';
 
 type View = 'list' | 'tree' | 'stores';
 type Row = Customer & { trade_name: string | null; tags: string[]; address_city: string | null; archived_at: string | null };
@@ -39,7 +40,6 @@ function CustomersPageInner() {
   const t = useTranslations('customers');
   const ts = useTranslations('status');
   const tl = useTranslations('lookup');
-  const locale = useLocale();
   // Opens with the default view from Settings → Indexes (user → role → organisation);
   // a view picked here is kept for this browser session.
   const [view, setViewState] = useState<View | null>(null);
@@ -193,6 +193,8 @@ function CustomersPageInner() {
           <SaveViewButton active={active} dirty={dirty} current={current} exportHref={exportHref}
             onSaved={(id) => setActiveId(id)} onRevert={() => active && applyConfig(active.config)} onManage={() => setManage(true)} />
         )}
+        <DisplayCustomizeButton surface={isStores ? 'disp_store_row' : 'disp_customer_row'}
+          className="grid h-11 w-11 shrink-0 place-items-center rounded-xl border border-border bg-surface text-muted transition hover:text-text" />
       </div>
       {manage && <ManageViewsDialog onClose={() => setManage(false)} onApply={applyView} />}
       <ActiveFilterChips chips={chips} />
@@ -210,22 +212,15 @@ function CustomersPageInner() {
             return (
               <div key={c.id} style={{ position: 'absolute', top: 0, left: 0, right: 0, transform: `translateY(${it.start - v.options.scrollMargin}px)` }} className="pb-3">
                 <Link href={`/customers/${c.id}`} className={clsx('card flex items-center gap-3.5 p-3.5 transition hover:border-primary/40', c.archived_at && 'opacity-60')}>
+                  <CustomerRowParts c={c as unknown as Record<string, unknown>}>{(p) => (<>
                   <CustomerAvatar name={c.name} />
                   <div className="min-w-0 flex-1">
                     <div className="truncate font-semibold">{c.name}</div>
-                    <div className="flex min-w-0 items-center gap-1 truncate text-sm text-muted">
-                      {c.kind === 'group' ? `${t('group')} · ${t('companies', { count: c.companies_count })}` : (c.trade_name || c.code)}
-                      {c.address_city && <><span>·</span><MapPin size={13} className="shrink-0" />{c.address_city}</>}
-                    </div>
-                    <div className="mt-1 flex min-w-0 gap-1.5 overflow-hidden">
-                      <StatusBadge status={c.status} />
-                      {c.tags?.slice(0, 2).map((tag) => <span key={tag} className="truncate rounded-full bg-primary-soft px-2 py-0.5 text-xs text-primary">#{tag}</span>)}
-                    </div>
+                    <div className="min-w-0 text-sm text-muted">{p.line}</div>
+                    <div className="mt-1 min-w-0 overflow-hidden empty:hidden">{p.badges}</div>
                   </div>
-                  <div className="hidden text-right sm:block">
-                    <div className="text-xs text-muted">{t('annualValue')}</div>
-                    <div className="tabular font-semibold">{money(c.annual_value, locale, 0)}</div>
-                  </div>
+                  <div className="hidden text-right sm:block">{p.side}</div>
+                  </>)}</CustomerRowParts>
                 </Link>
               </div>
             );

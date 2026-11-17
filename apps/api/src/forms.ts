@@ -4,7 +4,17 @@ import { z } from 'zod';
 import type { Tx } from './db.js';
 
 export type L10n = { el?: string; en?: string };
-export const FORMS = ['customer', 'branch', 'space', 'contact', 'activity', 'offer', 'offer_item'] as const;
+export const FORMS = ['customer', 'branch', 'space', 'contact', 'activity', 'offer', 'offer_item',
+  'disp_customer_row', 'disp_store_row', 'disp_store_details', 'disp_space', 'disp_customer_card'] as const;
+/** Display surfaces (what read-only screens show): the data form whose custom fields / visibility they follow. */
+export const DISPLAY: Record<string, { data: 'customer' | 'branch' | 'space'; customSection: string; customHidden: boolean }> = {
+  disp_customer_row: { data: 'customer', customSection: 'line', customHidden: true },
+  disp_store_row: { data: 'branch', customSection: 'line', customHidden: true },
+  disp_store_details: { data: 'branch', customSection: 'main', customHidden: false },
+  disp_space: { data: 'space', customSection: 'main', customHidden: true },
+  disp_customer_card: { data: 'customer', customSection: 'custom', customHidden: false },
+};
+export const isDisplay = (f: string) => f.startsWith('disp_');
 export type FormKey = (typeof FORMS)[number];
 export const CUSTOM_FORMS = ['customer', 'branch', 'space', 'contact', 'activity', 'offer'] as const;
 export const CUSTOM_TYPES = ['text', 'textarea', 'number', 'date', 'bool', 'select', 'multiselect', 'email', 'url', 'phone'] as const;
@@ -21,7 +31,10 @@ export type CatalogField = {
   choices?: Choice[];
   /** Layout fixed (e.g. offer lines are a grid): order/section/width are not configurable. */
   fixedLayout?: boolean;
+  /** Display surfaces: hidden until someone turns it on; the data field it shows; chip / text / badge. */
+  defaultHidden?: boolean; src?: string; format?: Format;
 };
+export type Format = 'chip' | 'text' | 'badge';
 type CatalogForm = { sections: { key: string; label: L10n }[]; fields: CatalogField[] };
 
 // ------------------------------------------------------------------ catalogue
@@ -166,21 +179,132 @@ export const CATALOG: Record<FormKey, CatalogForm> = {
       f('vat_rate', 'number', 'line', L('ΦΠΑ %', 'VAT %'), { fixedLayout: true }),
     ],
   },
+  // ---------------------------------------------------------------- display surfaces
+  disp_customer_row: {
+    sections: [
+      { key: 'line', label: L('Κάτω από το όνομα', 'Below the name') }, { key: 'badges', label: L('Ετικέτες (badges)', 'Badges') },
+      { key: 'side', label: L('Δεξιά', 'Right side') },
+    ],
+    fields: [
+      f('kind_info', 'text', 'line', L('Τύπος / διακριτικός τίτλος', 'Type / trade name'), { src: 'kind' }),
+      f('stores_spaces', 'text', 'line', L('Καταστήματα & χώροι', 'Stores & spaces')),
+      f('city', 'text', 'line', L('Πόλη', 'City'), { src: 'address_city' }),
+      f('region', 'text', 'line', L('Νομός', 'Prefecture'), { src: 'address_region', defaultHidden: true }),
+      f('code', 'text', 'line', L('Κωδικός', 'Code'), { src: 'code', defaultHidden: true }),
+      f('vat', 'text', 'line', L('ΑΦΜ', 'VAT no.'), { src: 'vat', defaultHidden: true }),
+      f('phone', 'text', 'line', L('Τηλέφωνο', 'Phone'), { src: 'phone', defaultHidden: true }),
+      f('email', 'text', 'line', L('Email', 'Email'), { src: 'email', defaultHidden: true }),
+      f('manager', 'text', 'line', L('Account manager', 'Account manager'), { src: 'account_manager_id', defaultHidden: true }),
+      f('status', 'text', 'badges', L('Κατάσταση', 'Status'), { src: 'status', format: 'badge' }),
+      f('tags', 'text', 'badges', L('Ετικέτες', 'Tags'), { src: 'tags', format: 'badge' }),
+      f('category', 'text', 'badges', L('Κατηγορία', 'Category'), { src: 'category', format: 'badge', defaultHidden: true }),
+      f('source', 'text', 'badges', L('Πηγή', 'Source'), { src: 'source', format: 'badge', defaultHidden: true }),
+      f('annual_value', 'text', 'side', L('Ετήσια αξία', 'Annual value'), { src: 'annual_value' }),
+    ],
+  },
+  disp_store_row: {
+    sections: [
+      { key: 'title', label: L('Δίπλα στο όνομα', 'Next to the name') }, { key: 'line', label: L('Κάτω από το όνομα', 'Below the name') },
+      { key: 'badges', label: L('Ετικέτες (badges)', 'Badges') },
+    ],
+    fields: [
+      f('trade_name', 'text', 'title', L('Διακριτικός τίτλος', 'Trade name'), { src: 'trade_name' }),
+      f('customer', 'text', 'line', L('Πελάτης (λίστα καταστημάτων)', 'Customer (store list)')),
+      f('address', 'text', 'line', L('Διεύθυνση', 'Address'), { src: 'address' }),
+      f('city', 'text', 'line', L('Πόλη', 'City'), { src: 'city' }),
+      f('region', 'text', 'line', L('Νομός', 'Prefecture'), { src: 'region', defaultHidden: true }),
+      f('spaces_count', 'text', 'line', L('Πλήθος χώρων', 'Number of spaces')),
+      f('phone', 'text', 'line', L('Τηλέφωνο', 'Phone'), { src: 'phone', defaultHidden: true }),
+      f('manager', 'text', 'line', L('Υπεύθυνος', 'Store manager'), { src: 'manager_name', defaultHidden: true }),
+      f('open_offers', 'text', 'badges', L('Ανοιχτές προσφορές', 'Open offers'), { format: 'badge' }),
+      f('ongoing_status', 'text', 'badges', L('Status on going', 'Status on going'), { src: 'ongoing_status_id', format: 'badge' }),
+      f('tour', 'text', 'badges', L('Εξόρμηση', 'Field tour'), { src: 'tour_id', format: 'badge', defaultHidden: true }),
+      f('geo_zone', 'text', 'badges', L('Γεωγραφική ζώνη', 'Geographic zone'), { src: 'geo_zone_id', format: 'badge', defaultHidden: true }),
+      f('seasonality', 'text', 'badges', L('Εποχικότητα', 'Seasonality'), { src: 'seasonality', format: 'badge', defaultHidden: true }),
+      f('status', 'text', 'badges', L('Κατάσταση', 'Status'), { src: 'status', format: 'badge' }),
+    ],
+  },
+  disp_store_details: {
+    sections: [{ key: 'main', label: L('Στοιχεία καταστήματος', 'Store details') }],
+    fields: [
+      f('ongoing_status', 'text', 'main', L('Status on going', 'Status on going'), { src: 'ongoing_status_id', format: 'chip' }),
+      f('trade_name', 'text', 'main', L('Διακριτικός τίτλος', 'Trade name'), { src: 'trade_name', format: 'chip' }),
+      f('address', 'text', 'main', L('Διεύθυνση', 'Address'), { src: 'address', format: 'chip' }),
+      f('city', 'text', 'main', L('Πόλη', 'City'), { src: 'city', format: 'chip', defaultHidden: true }),
+      f('region', 'text', 'main', L('Νομός', 'Prefecture'), { src: 'region', format: 'chip' }),
+      f('geo_zone', 'text', 'main', L('Γεωγραφική ζώνη', 'Geographic zone'), { src: 'geo_zone_id', format: 'chip' }),
+      f('fee_schedule', 'text', 'main', L('Αμοιβολόγιο', 'Fee schedule'), { src: 'fee_schedule_id', format: 'chip' }),
+      f('tour', 'text', 'main', L('Εξόρμηση', 'Field tour'), { src: 'tour_id', format: 'chip' }),
+      f('seasonality', 'text', 'main', L('Εποχικότητα', 'Seasonality'), { src: 'seasonality', format: 'chip' }),
+      f('phone', 'text', 'main', L('Τηλέφωνο', 'Phone'), { src: 'phone', format: 'chip' }),
+      f('manager', 'text', 'main', L('Υπεύθυνος καταστήματος', 'Store manager'), { src: 'manager_name', format: 'chip' }),
+      f('status', 'text', 'main', L('Κατάσταση', 'Status'), { src: 'status', format: 'chip', defaultHidden: true }),
+    ],
+  },
+  disp_space: {
+    sections: [{ key: 'main', label: L('Χώρος', 'Space') }],
+    fields: [
+      f('name', 'text', 'main', L('Όνομα χώρου', 'Space name'), { core: true }),
+      f('kind', 'text', 'main', L('Τύπος χώρου', 'Space type'), { src: 'kind' }),
+      f('area', 'text', 'main', L('Εμβαδόν', 'Area'), { src: 'area_sqm' }),
+      f('notes', 'text', 'main', L('Σημειώσεις', 'Notes'), { src: 'notes', defaultHidden: true }),
+    ],
+  },
+  disp_customer_card: {
+    sections: [
+      { key: 'basics', label: L('Βασικά στοιχεία', 'Details') }, { key: 'contact', label: L('Επικοινωνία', 'Contact') },
+      { key: 'address', label: L('Διεύθυνση', 'Address') }, { key: 'terms', label: L('Εμπορικοί όροι', 'Commercial terms') },
+      { key: 'custom', label: L('Επιπλέον πεδία', 'Additional fields') }, { key: 'notes', label: L('Σημειώσεις', 'Notes') },
+    ],
+    fields: [
+      f('code', 'text', 'basics', L('Κωδικός', 'Code'), { src: 'code' }),
+      f('vat', 'text', 'basics', L('ΑΦΜ', 'VAT no.'), { src: 'vat' }),
+      f('tax_office', 'text', 'basics', L('ΔΟΥ', 'Tax office'), { src: 'tax_office' }),
+      f('gemi', 'text', 'basics', L('ΓΕΜΗ', 'Reg. no.'), { src: 'gemi' }),
+      f('activity', 'text', 'basics', L('Δραστηριότητα', 'Activity'), { src: 'activity' }),
+      f('trade_name', 'text', 'basics', L('Διακριτικός τίτλος', 'Trade name'), { src: 'trade_name', defaultHidden: true }),
+      f('manager', 'text', 'basics', L('Account manager', 'Account manager'), { src: 'account_manager_id' }),
+      f('source', 'text', 'basics', L('Πηγή', 'Source'), { src: 'source' }),
+      f('category', 'text', 'basics', L('Κατηγορία', 'Category'), { src: 'category', defaultHidden: true }),
+      f('region', 'text', 'basics', L('Νομός', 'Prefecture'), { src: 'address_region' }),
+      f('geo_zone', 'text', 'basics', L('Γεωγραφική ζώνη', 'Geographic zone'), { src: 'geo_zone_id' }),
+      f('tags', 'text', 'basics', L('Ετικέτες', 'Tags'), { src: 'tags', defaultHidden: true }),
+      f('email', 'text', 'contact', L('Email', 'Email'), { src: 'email' }),
+      f('phone', 'text', 'contact', L('Τηλέφωνο', 'Phone'), { src: 'phone' }),
+      f('mobile', 'text', 'contact', L('Κινητό', 'Mobile'), { src: 'mobile' }),
+      f('website', 'text', 'contact', L('Ιστοσελίδα', 'Website'), { src: 'website' }),
+      f('primary_contact', 'text', 'contact', L('Κύρια επαφή', 'Primary contact')),
+      f('address', 'text', 'address', L('Διεύθυνση έδρας', 'Registered address'), { src: 'address_street' }),
+      f('billing', 'text', 'address', L('Τιμολόγηση', 'Billing'), { src: 'billing_address' }),
+      f('payment_terms', 'text', 'terms', L('Πληρωμή', 'Payment'), { src: 'payment_terms' }),
+      f('credit_limit', 'text', 'terms', L('Πιστωτικό όριο', 'Credit limit'), { src: 'credit_limit' }),
+      f('discount', 'text', 'terms', L('Έκπτωση', 'Discount'), { src: 'discount' }),
+      f('annual_value', 'text', 'terms', L('Ετήσια αξία', 'Annual value'), { src: 'annual_value', defaultHidden: true }),
+      f('notes', 'text', 'notes', L('Σημειώσεις', 'Notes'), { src: 'notes' }),
+    ],
+  },
 };
 export const FORM_LABELS: Record<FormKey, L10n> = {
   customer: L('Πελάτες', 'Customers'), branch: L('Καταστήματα', 'Stores'), space: L('Χώροι', 'Spaces'), contact: L('Επαφές', 'Contacts'),
   activity: L('Ενέργειες CRM', 'CRM activities'), offer: L('Προσφορές', 'Offers'), offer_item: L('Γραμμές προσφοράς', 'Offer lines'),
+  disp_customer_row: L('Γραμμή πελάτη (λίστα & δέντρο)', 'Customer row (list & tree)'), disp_store_row: L('Γραμμή καταστήματος', 'Store row'),
+  disp_store_details: L('Στοιχεία καταστήματος', 'Store details'), disp_space: L('Χώροι (chips)', 'Spaces (chips)'),
+  disp_customer_card: L('Καρτέλα πελάτη', 'Customer card'),
 };
 export const FORM_MODULE: Record<FormKey, string> = {
   customer: 'customers', branch: 'customers', space: 'customers', contact: 'customers', activity: 'crm', offer: 'offers', offer_item: 'offers',
+  disp_customer_row: 'display', disp_store_row: 'display', disp_store_details: 'display', disp_space: 'display', disp_customer_card: 'display',
 };
 
 // ------------------------------------------------------------------ level configuration (what is stored)
 export const PROPS = ['hidden', 'readonly', 'required', 'default', 'label', 'placeholder', 'help', 'section', 'order', 'width',
-  'min', 'max', 'minLength', 'maxLength', 'pattern', 'patternMessage', 'options', 'rules'] as const;
+  'min', 'max', 'minLength', 'maxLength', 'pattern', 'patternMessage', 'options', 'rules',
+  'format', 'showLabel', 'showEmpty', 'mobile'] as const;
 export type Prop = (typeof PROPS)[number];
 /** What a user may change on their own form (without forms.manage). */
 export const PERSONAL_PROPS: Prop[] = ['default', 'section', 'order', 'width'];
+/** On display surfaces a user may also choose what they see and how. */
+export const PERSONAL_DISPLAY_PROPS: Prop[] = ['hidden', 'section', 'order', 'format', 'showLabel', 'showEmpty', 'mobile'];
 const LAYOUT_PROPS: Prop[] = ['section', 'order', 'width'];
 
 const l10n = z.object({ el: z.string().max(300).optional(), en: z.string().max(300).optional() });
@@ -207,6 +331,7 @@ const fieldCfg = z.object({
   pattern: z.string().max(300).nullable().refine(validRegex, 'invalid_pattern'), patternMessage: l10n,
   options: z.array(z.string().max(200)).max(500).nullable(),
   rules: z.array(ruleSchema).max(20),
+  format: z.enum(['chip', 'text', 'badge']), showLabel: z.boolean(), showEmpty: z.boolean(), mobile: z.boolean(),
   locked: z.array(z.enum(PROPS)).max(PROPS.length),
 }).partial();
 export type FieldCfg = z.infer<typeof fieldCfg>;
@@ -229,6 +354,7 @@ export type EffField = {
   label: L10n; baseLabel: L10n; placeholder: L10n; help: L10n;
   min: number | null; max: number | null; minLength: number | null; maxLength: number | null; pattern: string | null; patternMessage: L10n;
   options: string[] | null; rules: Rule[];
+  format: Format; showLabel: boolean; showEmpty: boolean; mobile: boolean; src: string | null;
   locked: Prop[]; source: Partial<Record<Prop, Scope>>;
 };
 export type EffSection = { key: string; label: L10n; baseLabel: L10n; order: number; collapsed: boolean; tab: string | null; hidden: boolean; custom: boolean };
@@ -246,17 +372,22 @@ export function buildEffective(form: FormKey, customs: CustomFieldRow[], levels:
   const base = (c: CatalogField, i: number, custom = false): EffField => ({
     key: c.key, type: c.type, core: !!c.core, custom, fixedLayout: !!c.fixedLayout, list: c.list ?? null, choices: c.choices ?? null,
     section: c.section, order: (i + 1) * 10, width: c.width ?? 'half',
-    hidden: false, readonly: false, required: !!c.core, default: null,
+    hidden: !!c.defaultHidden, readonly: false, required: !!c.core, default: null,
     label: c.label, baseLabel: c.label, placeholder: {}, help: {},
-    min: null, max: null, minLength: null, maxLength: null, pattern: null, patternMessage: {}, options: null, rules: [], locked: [], source: {},
+    min: null, max: null, minLength: null, maxLength: null, pattern: null, patternMessage: {}, options: null, rules: [],
+    format: c.format ?? 'text', showLabel: form === 'disp_store_details' || form === 'disp_customer_card', showEmpty: false, mobile: true, src: c.src ?? null,
+    locked: [], source: {},
   });
   cat.fields.forEach((c, i) => fields.set(c.key, base(c, i)));
   if (customs.length) {
-    if (!sections.has('custom')) sections.set('custom', { key: 'custom', label: L('Επιπλέον πεδία', 'Additional fields'), baseLabel: L('Επιπλέον πεδία', 'Additional fields'), order: (cat.sections.length + 1) * 10, collapsed: false, tab: null, hidden: false, custom: false });
+    const disp = DISPLAY[form];
+    const cSection = disp?.customSection ?? 'custom';
+    if (!sections.has(cSection)) sections.set(cSection, { key: cSection, label: L('Επιπλέον πεδία', 'Additional fields'), baseLabel: L('Επιπλέον πεδία', 'Additional fields'), order: (cat.sections.length + 1) * 10, collapsed: false, tab: null, hidden: false, custom: false });
     customs.forEach((cf, i) => {
       const type = cf.type as FieldType;
       fields.set(`cf_${cf.key}`, base({
-        key: `cf_${cf.key}`, type, section: 'custom', label: cf.label, width: type === 'textarea' ? 'full' : 'half',
+        key: `cf_${cf.key}`, type, section: cSection, label: cf.label, width: type === 'textarea' ? 'full' : 'half',
+        defaultHidden: disp?.customHidden, src: disp ? `cf_${cf.key}` : undefined, format: form === 'disp_store_details' ? 'chip' : undefined,
         choices: ['select', 'multiselect'].includes(type) ? cf.options.map((o) => ({ value: o, label: { el: o, en: o } })) : undefined,
       }, 1000 + i, true));
     });
@@ -464,6 +595,7 @@ export async function loadLevels(tx: Tx, tenantId: string, form: FormKey, role: 
   return rows.sort((a, b) => rank[a.scope] - rank[b.scope]).map((r) => ({ scope: r.scope, config: r.config }));
 }
 export async function loadCustom(tx: Tx, tenantId: string, form: FormKey, all = false) {
+  if (DISPLAY[form]) form = DISPLAY[form].data;   // display surfaces show the data form's custom fields
   if (!(CUSTOM_FORMS as readonly string[]).includes(form)) return [];
   return tx<(CustomFieldRow & { id: string; active: boolean; filterable: boolean })[]>`
     SELECT id, key, type, label, options, sort, active, filterable FROM custom_fields
