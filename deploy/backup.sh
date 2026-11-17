@@ -14,6 +14,10 @@
 # Writes $BACKUP_DIR/last.json, which /api/health reads (alerts when the last backup is older than 26 h or failed).
 # =============================================================================
 set -euo pipefail
+# Newest PostgreSQL client tools first: the server may be newer than the distro default
+# (e.g. Plesk on Ubuntu 20.04 ships pg_dump 12, SoftifyOS runs 17), and pg_dump refuses an older client.
+PG_BIN="$(ls -d /usr/lib/postgresql/*/bin 2>/dev/null | sort -V | tail -1 || true)"
+[ -n "$PG_BIN" ] && export PATH="$PG_BIN:$PATH"
 
 APP_DIR="${APP_DIR:-/opt/softifyos}"
 ENV_FILE="$APP_DIR/.env"
