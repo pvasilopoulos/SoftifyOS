@@ -109,7 +109,10 @@ PLATFORM_ADMINS=${adminMail}
     if (!fs.existsSync(envFile)) die('Λείπει το .env. Τρέξε πρώτα: npm run plesk -- init --db "…"');
     fs.mkdirSync(runDir, { recursive: true });
     const log = path.join(runDir, 'deploy.log');
+    const lock = path.join(runDir, 'deploy.lock');
     if (!args.wait) {
+      // Never truncate the log of a deploy that is still running
+      if (fs.existsSync(lock)) die('Τρέχει ήδη ενημέρωση. Πρόοδος: npm run plesk -- log (αν έχει κολλήσει πάνω από 30 λεπτά: npm run plesk -- unlock)');
       // Long job: run detached so the Plesk command window (or cron) can return immediately
       const out = fs.openSync(log, 'w');
       const child = spawn(process.execPath, [import.meta.filename, 'deploy', '--wait'], { cwd: root, detached: true, stdio: ['ignore', out, out], env: { ...process.env, PATH } });
@@ -119,7 +122,6 @@ PLATFORM_ADMINS=${adminMail}
 Τέλος όταν γράφει «✓ Ολοκληρώθηκε». Έλεγχος: npm run plesk -- status`);
       return;
     }
-    const lock = path.join(runDir, 'deploy.lock');
     try { fs.mkdirSync(lock); } catch { die('Τρέχει ήδη άλλη ενημέρωση (αν δεν τρέχει, σβήσε τον φάκελο .run/deploy.lock).'); }
     try {
       say(`Έναρξη ${new Date().toISOString()}`);
@@ -133,6 +135,21 @@ PLATFORM_ADMINS=${adminMail}
     } finally {
       fs.rmSync(lock, { recursive: true, force: true });
     }
+  },
+
+  /** Last lines of a log in .run (deploy, api, worker): npm run plesk -- log [api] [--lines 80] */
+  async log() {
+    const name = rest.find((a) => !a.startsWith('--')) ?? 'deploy';
+    const file = path.join(runDir, `${name}.log`);
+    if (!fs.existsSync(file)) die(`Δεν υπάρχει ακόμα το .run/${name}.log`);
+    const lines = fs.readFileSync(file, 'utf8').replace(/\0+/g, '').split('\n');
+    const n = Number(args.lines) || 40;
+    say(lines.slice(-n).join('\n'));
+    if (name === 'deploy') say(fs.existsSync(path.join(runDir, 'deploy.lock')) ? '\n… η ενημέρωση τρέχει ακόμα' : '\n(η ενημέρωση δεν τρέχει)');
+  },
+  async unlock() {
+    fs.rmSync(path.join(runDir, 'deploy.lock'), { recursive: true, force: true });
+    say('Το κλείδωμα της ενημέρωσης αφαιρέθηκε. Τώρα: npm run plesk -- deploy');
   },
 
   async migrate() { run('npm', ['run', 'db:migrate']); },

@@ -1,5 +1,5 @@
 'use client';
-import { useEffect, useMemo, useState } from 'react';
+import { Suspense, useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import clsx from 'clsx';
 import { useQuery } from '@tanstack/react-query';
@@ -23,6 +23,10 @@ const startOfDay = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDat
 const addDays = (d: Date, n: number) => new Date(d.getFullYear(), d.getMonth(), d.getDate() + n);
 
 export default function CalendarPage() {
+  return <Suspense><CalendarInner /></Suspense>;
+}
+
+function CalendarInner() {
   const t = useTranslations('calendar');
   const locale = useLocale();
   const [view, setView] = useState<'day' | 'week' | 'month'>('day');

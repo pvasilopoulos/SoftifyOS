@@ -44,7 +44,7 @@ fi
 
 c "Βασικά πακέτα"
 export DEBIAN_FRONTEND=noninteractive
-apt-get update -qq
+apt-get update -qq || echo "Προσοχή: κάποιο αποθετήριο apt απέτυχε (συνεχίζουμε). Δες: apt-get update"
 apt-get install -y -qq ca-certificates curl gnupg openssl build-essential >/dev/null
 
 # --- Node.js ----------------------------------------------------------------------
