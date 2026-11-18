@@ -11,6 +11,22 @@ function preferredLocale(req: NextRequest) {
   return cookie && (routing.locales as readonly string[]).includes(cookie) ? cookie : routing.defaultLocale;
 }
 
+/**
+ * Behind nginx (production) Next builds URLs from its own address (http://localhost:3000), so a
+ * redirect would send the browser there. Rewrite such Location headers to the public origin the
+ * browser actually used (Host / X-Forwarded-Host + X-Forwarded-Proto, set by nginx).
+ */
+function publicRedirect(req: NextRequest, res: NextResponse) {
+  const loc = res.headers.get('location');
+  const host = req.headers.get('x-forwarded-host') ?? req.headers.get('host');
+  if (!loc || !host) return res;
+  const target = new URL(loc, req.nextUrl.origin);
+  if (target.origin !== req.nextUrl.origin) return res; // external redirect: leave as is
+  const proto = (req.headers.get('x-forwarded-proto') ?? req.nextUrl.protocol.replace(':', '')).split(',')[0].trim();
+  res.headers.set('location', `${proto}://${host}${target.pathname}${target.search}${target.hash}`);
+  return res;
+}
+
 export default function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
   const isLogin = /^\/((el|en)\/)?login\/?$/.test(pathname);
@@ -20,9 +36,9 @@ export default function middleware(req: NextRequest) {
     const url = req.nextUrl.clone();
     url.pathname = `/${preferredLocale(req)}/login`;
     url.search = '';
-    return NextResponse.redirect(url);
+    return publicRedirect(req, NextResponse.redirect(url));
   }
-  return intl(req);
+  return publicRedirect(req, intl(req));
 }
 
 export const config = {
