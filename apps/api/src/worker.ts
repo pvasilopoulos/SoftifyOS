@@ -32,6 +32,7 @@ async function runBackup() {
 }
 import { deliver } from './webhooks.js';
 import { enqueueDuePulls, runErpJob } from './erp.js';
+import { reconcileDue } from './ai-cost.js';
 import { runNoContactRules } from './crm.js';
 import { removeFile } from './storage.js';
 import { definitionSchema, nextRun, runReport } from './reports.js';
@@ -99,6 +100,8 @@ async function handleWebhook(p: WebhookJob) {
   }
 }
 
+const erpRunning = new Set<string>();
+
 async function processBatch(): Promise<number> {
   const jobs = await sql<Job[]>`
     UPDATE jobs SET locked_at = now(), attempts = attempts + 1
@@ -113,7 +116,18 @@ async function processBatch(): Promise<number> {
       else if (j.kind === 'webhook') await handleWebhook(j.payload as WebhookJob);
       else if (j.kind === 'calendar_push') { const c = j.payload as CalendarPushJob; await pushActivity(c.tenantId, c.activityId); }
       else if (j.kind === 'backup_run') await runBackup();
-      else if (j.kind.startsWith('erp_')) await runErpJob((j.payload as ErpJob).tenantId, j.kind.slice(4) as 'pull' | 'push' | 'lists' | 'full');
+      else if (j.kind.startsWith('erp_')) {
+        // An ERP sync can take minutes (first import, slow Soft1): it runs beside the queue instead of holding up
+        // notifications and emails. One at a time per organisation; another request meanwhile waits for the next round.
+        const T = (j.payload as ErpJob).tenantId;
+        if (erpRunning.has(T)) { await sql`UPDATE jobs SET locked_at = NULL, attempts = attempts - 1, run_at = now() + interval '20 seconds' WHERE id = ${j.id}`; return; }
+        erpRunning.add(T);
+        await sql`DELETE FROM jobs WHERE id = ${j.id}`;
+        void runErpJob(T, j.kind.slice(4) as 'pull' | 'push' | 'lists' | 'full')
+          .catch((e) => captureError('worker', e, { job: j.kind }))
+          .finally(() => erpRunning.delete(T));
+        return;
+      }
       await sql`DELETE FROM jobs WHERE id = ${j.id}`;
     } catch (e) {
       const msg = (e as Error).message;
@@ -252,7 +266,7 @@ while (running) {
   try {
     const now = Date.now();
     if (now - lastReminder > 15_000) { await scheduleReminders(); lastReminder = now; }
-    if (now - lastMaintenance > 3_600_000) { await maintenance(); await documentExpiry(); lastMaintenance = now; }
+    if (now - lastMaintenance > 3_600_000) { await maintenance(); await documentExpiry(); await reconcileDue().catch((e) => console.error('ai reconcile', e)); lastMaintenance = now; }
     if (now - lastDigest > 300_000) { await morningDigest(); await scheduledReports(); lastDigest = now; }
     if (now - lastRules > 1_800_000) { await runNoContactRules(sql); lastRules = now; }
     if (now - lastCalendar > 60_000) { await pullDue(); await enqueueDuePulls(); lastCalendar = now; }

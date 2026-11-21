@@ -1,6 +1,6 @@
 'use client';
 import { useTabTitle } from '@/components/tabs';
-import { Suspense, useState, type ComponentType } from 'react';
+import { Suspense, useEffect, useState, type ComponentType } from 'react';
 import clsx from 'clsx';
 import { useSearchParams } from 'next/navigation';
 import { useTranslations } from 'next-intl';
@@ -55,9 +55,12 @@ function SettingsInner() {
   const router = useRouter();
   const sp = useSearchParams();
   const { data: me } = useMe();
-  const sections = SECTIONS.filter((s) => !s.platform || me?.platform_admin);
+  // The server renders without /me: filter only after mounting, so the first client render matches (no hydration error)
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
+  const sections = mounted && me ? SECTIONS.filter((s) => !s.platform || me.platform_admin) : SECTIONS;
   // Until /me arrives keep the section from the URL (the API checks access anyway)
-  const current = (me ? sections : SECTIONS).find((s) => s.key === sp.get('s'));
+  const current = sections.find((s) => s.key === sp.get('s'));
   const active = current ?? sections[0];
   useTabTitle(`${t('title')} · ${t(`nav.${active.key}` as never)}`);
   const Section = active.Component;

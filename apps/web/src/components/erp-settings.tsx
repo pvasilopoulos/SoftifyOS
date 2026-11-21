@@ -1,13 +1,13 @@
 'use client';
 // Settings → ERP (SoftOne Soft1): connection, field mapping, value mapping, the two ERP lists, sync settings and log.
-import { useEffect, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import clsx from 'clsx';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useLocale, useTranslations } from 'next-intl';
 import {
   AlertTriangle, ArrowDownUp, CheckCircle2, ChevronDown, Database, Eye, Info, Loader2, Plug, Plus, RefreshCw, Save, Search, Trash2, Wand2, XCircle,
 } from 'lucide-react';
-import { api } from '@/lib/api';
+import { api, ApiError } from '@/lib/api';
 import type { ActivityStatus, ErpValue } from '@/lib/crm';
 import { appConfirm } from './confirm';
 import { useToast } from './providers';
@@ -19,11 +19,14 @@ type Meta = {
   object: string; table: string; list: string; filter: string; reconcile_filter: string; fields: Fields; customer_match: 'external_id' | 'code';
   series_map: Record<string, string>; default_series: string; default_type: string; users_map: Record<string, string>; priority_map: Record<string, number>;
   lists: { characterization: ListSrc; status: ListSrc };
+  seen?: Partial<Record<'series' | 'users' | 'priority' | 'characterization' | 'status', Record<string, string>>>;
   last_pull_at?: string | null; last_push_at?: string | null; last_ok_at?: string | null; last_error?: string | null; connected?: { company: string; at: string } | null;
+  running?: { what: string; since: string } | null;
 };
 type Conn = { url: string; username: string; app_id: string; company: string; branch: string; module: string; refid: string; has_password: boolean };
 type LogRow = { at: string; level: 'info' | 'warning' | 'error'; action: string; external_id: string | null; message: string };
 type ErpData = {
+  defaults: Meta;
   meta: Meta; connection: Conn | null; values: ErpValue[]; types: { key: string; name: string; active: boolean }[];
   users: { id: string; full_name: string; email: string }[]; stats: { pending: number; errors: number; skipped: number; synced: number };
   queued: string[]; log: LogRow[];
@@ -38,7 +41,7 @@ const btnPrimary = 'flex items-center justify-center gap-1.5 rounded-xl bg-prima
 
 export function ErpSettingsSection() {
   const t = useTranslations('erp');
-  const q = useQuery({ queryKey: ['settings', 'erp'], queryFn: () => api<ErpData>('/settings/erp'), refetchInterval: (x) => (x.state.data?.queued.length ? 2000 : 20_000) });
+  const q = useQuery({ queryKey: ['settings', 'erp'], queryFn: () => api<ErpData>('/settings/erp'), refetchInterval: (x) => (x.state.data?.queued.length || x.state.data?.meta.running ? 2000 : 20_000) });
   if (q.isError) return <p className="text-sm text-muted">{t('noAccess')}</p>;
   if (!q.data) return <Loader2 className="mx-auto animate-spin text-muted" />;
   return <ErpBody key={JSON.stringify(q.data.meta.fields) + (q.data.connection?.url ?? '')} data={q.data} />;
@@ -61,17 +64,18 @@ function ErpBody({ data }: { data: ErpData }) {
     const { last_pull_at: _a, last_push_at: _b, last_ok_at: _c, last_error: _d, connected: _e, ...body } = { ...m, ...extra } as Meta & Record<string, unknown>;
     delete (body as Record<string, unknown>).provider; delete (body as Record<string, unknown>).last_reconcile_at;
     try { await api('/settings/erp/settings', { method: 'PUT', json: body }); setDirty(false); if (extra) setM((x) => ({ ...x, ...extra })); toast({ title: t('saved') }); reload(); }
-    catch { toast({ title: t('saveError') }); }
+    catch (e) { toast({ title: t('saveError'), body: errText(e, t) }); }
     setBusy(null);
   };
   const sync = async (what: 'pull' | 'push' | 'lists' | 'full') => {
     setBusy(`sync-${what}`);
     try { await api('/settings/erp/sync', { method: 'POST', json: { what } }); toast({ title: t('syncQueued') }); reload(); }
-    catch { toast({ title: t('syncError') }); }
+    catch (e) { toast({ title: t('syncError'), body: errText(e, t) }); }
     setBusy(null);
   };
 
   const connected = !!data.connection;
+  const running = data.queued.length > 0 || (!!data.meta.running && Date.now() - new Date(data.meta.running.since).getTime() < 30 * 60_000);
   const state = !connected ? 'none' : !data.meta.enabled ? 'off' : data.meta.last_error ? 'error' : 'on';
   return (
     <div className="@container space-y-4">
@@ -93,8 +97,8 @@ function ErpBody({ data }: { data: ErpData }) {
               <label className="flex h-10 items-center gap-2 rounded-xl border border-border px-3 text-sm font-medium">
                 <input type="checkbox" className="h-4 w-4 accent-[var(--primary)]" checked={m.enabled} onChange={(e) => saveSettings({ enabled: e.target.checked })} /> {t('enabled')}
               </label>
-              <button type="button" onClick={() => sync('full')} disabled={!!busy || data.queued.length > 0} className={clsx(btnPrimary, 'h-10 flex-1 @lg:flex-none')}>
-                {data.queued.length ? <Loader2 size={15} className="animate-spin" /> : <RefreshCw size={15} />} {data.queued.length ? t('running') : t('syncNow')}
+              <button type="button" onClick={() => sync('full')} disabled={!!busy || running} className={clsx(btnPrimary, 'h-10 flex-1 @lg:flex-none')}>
+                {running ? <Loader2 size={15} className="animate-spin" /> : <RefreshCw size={15} />} {running ? t('running') : t('syncNow')}
               </button>
             </div>
           )}
@@ -133,7 +137,7 @@ function ErpBody({ data }: { data: ErpData }) {
             </div>
           </Card>
 
-          <MappingCard m={m} patch={patch} />
+          <MappingCard m={m} patch={patch} defaults={data.defaults.fields} />
           <ValuesCard m={m} patch={patch} types={data.types} users={data.users} />
 
           <div className="sticky bottom-3 z-10 flex justify-end">
@@ -195,12 +199,12 @@ function ConnectionCard({ conn, onSaved }: { conn: Conn | null; onSaved: () => v
   const save = async () => {
     setBusy('save');
     try { await api('/settings/erp/connection', { method: 'PUT', json: v }); toast({ title: t('saved') }); setV((o) => ({ ...o, password: '' })); onSaved(); }
-    catch { toast({ title: t('saveError') }); }
+    catch (e) { toast({ title: t('saveError'), body: errText(e, t) }); }
     setBusy(null);
   };
   const test = async () => {
     setBusy('test'); setRes(null);
-    try { setRes(await api('/settings/erp/test', { method: 'POST', json: v })); } catch { setRes({ ok: false, error: t('saveError') }); }
+    try { setRes(await api('/settings/erp/test', { method: 'POST', json: v })); } catch (e) { setRes({ ok: false, error: errText(e, t) }); }
     setBusy(null);
   };
   const remove = async () => {
@@ -250,25 +254,40 @@ function ConnectionCard({ conn, onSaved }: { conn: Conn | null; onSaved: () => v
 }
 
 // ---------------------------------------------------------------- field mapping
-function MappingCard({ m, patch }: { m: Meta; patch: (p: Partial<Meta>) => void }) {
+function MappingCard({ m, patch, defaults }: { m: Meta; patch: (p: Partial<Meta>) => void; defaults: Fields }) {
   const t = useTranslations('erp');
   const [fields, setFields] = useState<{ name: string; caption: string }[]>([]);
   const [busy, setBusy] = useState<'fields' | 'sample' | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [sample, setSample] = useState<{ key: string; raw: Record<string, unknown>; mapped: Preview & Record<string, unknown> } | null>(null);
+  const [rawQ, setRawQ] = useState('');
   const discover = async () => {
     setBusy('fields'); setErr(null);
-    const r = await api<{ ok: boolean; fields?: { name: string; caption: string }[]; error?: string }>(`/settings/erp/fields?object=${m.object}&table=${m.table}`).catch(() => ({ ok: false, error: t('saveError') }));
-    if (r.ok && 'fields' in r && r.fields) setFields(r.fields); else setErr(r.error ?? null);
+    try {
+      const r = await api<{ ok: boolean; fields?: { name: string; caption: string }[]; error?: string }>(`/settings/erp/fields?object=${m.object}&table=${m.table}`);
+      if (r.ok && r.fields) setFields(r.fields); else setErr(r.error ?? t('unknownError'));
+    } catch (e) { setErr(errText(e, t)); }
     setBusy(null);
   };
   const loadSample = async () => {
     setBusy('sample'); setErr(null);
-    const r = await api<{ ok: boolean; key?: string; raw?: Record<string, unknown>; mapped?: Preview & Record<string, unknown>; error?: string }>('/settings/erp/sample').catch(() => ({ ok: false, error: t('saveError') }));
-    if (r.ok && 'raw' in r && r.raw) setSample({ key: r.key!, raw: r.raw, mapped: r.mapped! }); else setErr(r.error ?? null);
+    try {
+      const r = await api<{ ok: boolean; key?: string; raw?: Record<string, unknown>; mapped?: Preview & Record<string, unknown>; error?: string }>('/settings/erp/sample');
+      if (r.ok && r.raw) setSample({ key: r.key!, raw: r.raw, mapped: r.mapped! }); else setErr(r.error ?? t('unknownError'));
+    } catch (e) { setErr(errText(e, t)); }
     setBusy(null);
   };
-  const setField = (k: keyof Fields, v: string) => patch({ fields: { ...m.fields, [k]: v.trim().toUpperCase() } });
+  const setField = (k: keyof Fields, v: string) => patch({ fields: { ...m.fields, [k]: v.trim() } });
+  // Field choices: discovered fields, else the sample's fields, plus whatever is set now
+  const options = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const f of fields) map.set(f.name, f.caption);
+    if (sample) for (const k of Object.keys(sample.raw)) if (!map.has(k)) map.set(k, '');
+    return [...map.entries()].map(([name, caption]) => ({ name, caption })).sort((a, b) => a.name.localeCompare(b.name));
+  }, [fields, sample]);
+  const shown = (v: unknown) => (v === null || v === undefined || v === '' ? '∅' : String(v));
+  const rawRows = sample ? Object.entries(sample.raw).filter(([k, v]) => !rawQ || `${k} ${shown(v)}`.toLowerCase().includes(rawQ.toLowerCase())) : [];
+  const differs = FIELD_KEYS.some((k) => (m.fields[k] ?? '') !== (defaults[k] ?? ''));
   return (
     <Card title={t('mapTitle')} hint={t('mapHint')} icon={<Database size={16} />} defaultOpen={false}>
       <div className="grid gap-3 @xl:grid-cols-3">
@@ -278,33 +297,69 @@ function MappingCard({ m, patch }: { m: Meta; patch: (p: Partial<Meta>) => void 
         <div className="@xl:col-span-3"><Field label={t('filter')} help={t('filterHelp')}><input className={clsx(input, 'font-mono')} value={m.filter} onChange={(e) => patch({ filter: e.target.value })} /></Field></div>
         <div className="@xl:col-span-3"><Field label={t('reconcileFilter')} help={t('reconcileHelp')}><input className={clsx(input, 'font-mono')} value={m.reconcile_filter} onChange={(e) => patch({ reconcile_filter: e.target.value })} /></Field></div>
       </div>
-      <div className="mt-4 flex flex-wrap items-center gap-2">
+
+      <div className="mt-5 flex flex-wrap items-center gap-2">
         <h4 className="flex-1 text-sm font-semibold">{t('fieldsTitle')}</h4>
+        {differs && <button type="button" onClick={() => patch({ fields: { ...defaults } })} className={btn}><Wand2 size={15} /> {t('soft1Defaults')}</button>}
         <button type="button" onClick={discover} disabled={!!busy} className={btn}>{busy === 'fields' ? <Loader2 size={15} className="animate-spin" /> : <Search size={15} />} {t('discover')}</button>
-        <button type="button" onClick={loadSample} disabled={!!busy} className={btn}>{busy === 'sample' ? <Loader2 size={15} className="animate-spin" /> : <Eye size={15} />} {t('sample')}</button>
+        <button type="button" onClick={loadSample} disabled={!!busy} className={btnPrimary}>{busy === 'sample' ? <Loader2 size={15} className="animate-spin" /> : <Eye size={15} />} {t('sample')}</button>
       </div>
-      {err && <p className="mt-2 rounded-xl bg-danger-soft p-2.5 text-sm text-danger">{err}</p>}
+      {err && <ErrorBox text={err} />}
       {fields.length > 0 && <p className="mt-2 text-xs text-success">{t('discovered', { n: fields.length })}</p>}
-      <datalist id="erp-fields">{fields.map((f) => <option key={f.name} value={f.name}>{f.caption}</option>)}</datalist>
-      <div className="mt-3 grid gap-x-4 gap-y-2 @xl:grid-cols-2">
-        {FIELD_KEYS.map((k) => (
-          <div key={k} className="flex items-center gap-2">
-            <span className="w-36 shrink-0 text-sm">{t(`f_${k}`)}</span>
-            <input list="erp-fields" className={clsx(input, 'font-mono')} value={m.fields[k]} placeholder={t('notMapped')} onChange={(e) => setField(k, e.target.value)} />
-            {sample && m.fields[k] && <span className="hidden w-32 shrink-0 truncate text-xs text-muted @3xl:block" title={String(sample.raw[m.fields[k]] ?? '')}>{String(sample.raw[m.fields[k]] ?? '∅')}</span>}
-          </div>
-        ))}
+      {!sample && <p className="mt-2 text-xs text-muted">{t('sampleFirst')}</p>}
+
+      <div className="mt-3 overflow-hidden rounded-xl border border-border">
+        <table className="w-full table-fixed text-sm">
+          <colgroup><col className="w-[34%] @xl:w-[26%]" /><col className="w-[40%] @xl:w-[34%]" /><col /></colgroup>
+          <thead className="bg-surface-2/70 text-left text-xs text-muted">
+            <tr><th className="px-3 py-2 font-medium">{t('element')}</th><th className="px-3 py-2 font-medium">{t('soft1Field')}</th><th className="px-3 py-2 font-medium">{sample ? t('sampleValue', { key: sample.key }) : t('sampleValueEmpty')}</th></tr>
+          </thead>
+          <tbody className="divide-y divide-border">
+            {FIELD_KEYS.map((k) => {
+              const name = m.fields[k];
+              const val = sample && name ? sample.raw[name] : undefined;
+              const missing = !!sample && !!name && !(name in sample.raw);
+              return (
+                <tr key={k} className="align-middle">
+                  <td className="px-3 py-1.5">{t(`f_${k}`)}</td>
+                  <td className="px-3 py-1.5"><FieldPicker value={name} options={options} onChange={(v) => setField(k, v)} placeholder={t('notMapped')} /></td>
+                  <td className={clsx('truncate px-3 py-1.5 text-xs', missing ? 'text-danger' : val === undefined || val === null || val === '' ? 'text-muted' : 'text-text')} title={val !== undefined ? shown(val) : undefined}>
+                    {!sample ? '' : !name ? '—' : missing ? t('fieldMissing') : shown(val)}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
       </div>
+
       {sample && (
-        <div className="mt-4 rounded-xl bg-surface-2 p-3 text-sm">
-          <div className="mb-2 font-semibold">{t('sampleOf', { key: sample.key })}</div>
-          <dl className="grid gap-x-4 gap-y-1 @xl:grid-cols-2">
-            {(['erp_code', 'subject', 'type', 'due_at', 'ends_at', 'customer_label', 'characterization', 'erp_status', 'priority'] as const).map((k) => (
-              <div key={k} className="flex gap-2"><dt className="w-32 shrink-0 text-muted">{t(`s_${k}`)}</dt><dd className="min-w-0 truncate">{String(sample.mapped[k] ?? '—')}</dd></div>
-            ))}
-          </dl>
-          {sample.mapped.problems?.length > 0 && <p className="mt-2 text-warning">{sample.mapped.problems.join(' · ')}</p>}
-          {!sample.mapped.customer_id && <p className="mt-2 text-danger">{t('sampleNoCustomer')}</p>}
+        <div className="mt-4 space-y-3">
+          <div className="rounded-xl bg-surface-2 p-3 text-sm">
+            <div className="mb-2 font-semibold">{t('sampleOf', { key: sample.key })}</div>
+            <dl className="grid gap-x-4 gap-y-1 @xl:grid-cols-2">
+              {(['erp_code', 'subject', 'type', 'due_at', 'ends_at', 'customer_label', 'characterization', 'erp_status', 'priority'] as const).map((k) => (
+                <div key={k} className="flex gap-2"><dt className="w-32 shrink-0 text-muted">{t(`s_${k}`)}</dt><dd className="min-w-0 truncate">{String(sample.mapped[k] ?? '—')}</dd></div>
+              ))}
+            </dl>
+            {sample.mapped.problems?.length > 0 && <p className="mt-2 text-warning">{sample.mapped.problems.join(' · ')}</p>}
+            {!sample.mapped.customer_id && <p className="mt-2 text-danger">{t('sampleNoCustomer')}</p>}
+          </div>
+          <details className="rounded-xl border border-border">
+            <summary className="cursor-pointer select-none px-3 py-2 text-sm font-medium">{t('allFields', { n: Object.keys(sample.raw).length })}</summary>
+            <div className="border-t border-border p-3">
+              <input value={rawQ} onChange={(e) => setRawQ(e.target.value)} placeholder={t('searchFields')} className={clsx(input, 'mb-2')} />
+              <div className="max-h-80 overflow-y-auto">
+                <table className="w-full text-xs">
+                  <tbody className="divide-y divide-border">
+                    {rawRows.map(([k, v]) => (
+                      <tr key={k}><td className="w-1/3 py-1 pr-3 font-mono">{k}</td><td className="py-1 [overflow-wrap:anywhere]">{shown(v)}</td></tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </details>
         </div>
       )}
       <div className="mt-4 grid gap-3 @xl:grid-cols-2">
@@ -318,25 +373,99 @@ function MappingCard({ m, patch }: { m: Meta; patch: (p: Partial<Meta>) => void 
   );
 }
 
+/** Searchable field list (name + caption): a real dropdown, unlike a browser datalist that filters by the current value. */
+function FieldPicker({ value, options, onChange, placeholder }: { value: string; options: { name: string; caption: string }[]; onChange: (v: string) => void; placeholder: string }) {
+  const t = useTranslations('erp');
+  const [open, setOpen] = useState(false);
+  const [q, setQ] = useState('');
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const close = (e: MouseEvent) => { if (!ref.current?.contains(e.target as Node)) setOpen(false); };
+    document.addEventListener('mousedown', close);
+    return () => document.removeEventListener('mousedown', close);
+  }, [open]);
+  const list = options.filter((o) => !q || `${o.name} ${o.caption}`.toLowerCase().includes(q.toLowerCase())).slice(0, 200);
+  const pick = (v: string) => { onChange(v); setOpen(false); setQ(''); };
+  return (
+    <div ref={ref} className="relative">
+      <button type="button" onClick={() => setOpen(!open)} aria-expanded={open}
+        className={clsx('flex w-full items-center gap-2 rounded-lg border bg-surface px-2.5 py-1.5 text-left font-mono text-xs', open ? 'border-primary' : 'border-border hover:border-primary/60')}>
+        <span className={clsx('min-w-0 flex-1 truncate', !value && 'font-sans text-muted')}>{value || placeholder}</span>
+        <ChevronDown size={14} className="shrink-0 text-muted" />
+      </button>
+      {open && (
+        <div className="absolute left-0 z-30 mt-1 w-[min(22rem,80vw)] overflow-hidden rounded-xl border border-border bg-surface shadow-xl">
+          <div className="border-b border-border p-2">
+            <input autoFocus value={q} onChange={(e) => setQ(e.target.value)} placeholder={t('searchFields')}
+              onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); pick(list[0]?.name ?? q.trim().toUpperCase()); } if (e.key === 'Escape') setOpen(false); }}
+              className="w-full rounded-lg bg-surface-2 px-2.5 py-1.5 text-sm outline-none" />
+          </div>
+          <ul className="max-h-64 overflow-y-auto py-1 text-sm">
+            <li><button type="button" onClick={() => pick('')} className="w-full px-3 py-1.5 text-left text-muted hover:bg-surface-2">{placeholder}</button></li>
+            {list.map((o) => (
+              <li key={o.name}>
+                <button type="button" onClick={() => pick(o.name)} className={clsx('flex w-full items-baseline gap-2 px-3 py-1.5 text-left hover:bg-surface-2', o.name === value && 'bg-primary-soft')}>
+                  <span className="shrink-0 font-mono text-xs">{o.name}</span><span className="truncate text-xs text-muted">{o.caption}</span>
+                </button>
+              </li>
+            ))}
+            {!options.length && <li className="px-3 py-2 text-xs text-muted">{t('noFieldsYet')}</li>}
+            {q && !list.some((o) => o.name === q.trim().toUpperCase()) && (
+              <li><button type="button" onClick={() => pick(q.trim().toUpperCase())} className="w-full px-3 py-1.5 text-left text-xs text-primary hover:bg-surface-2">{t('useTyped', { name: q.trim().toUpperCase() })}</button></li>
+            )}
+          </ul>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ErrorBox({ text }: { text: string }) {
+  return <p className="mt-2 flex items-start gap-2 rounded-xl bg-danger-soft p-2.5 text-sm text-danger [overflow-wrap:anywhere]"><AlertTriangle size={15} className="mt-0.5 shrink-0" /> {text}</p>;
+}
+/** A readable error: the server's message, else HTTP status + code. */
+function errText(e: unknown, t: ReturnType<typeof useTranslations<'erp'>>) {
+  if (e instanceof ApiError) {
+    const body = e.body as { error?: string; message?: string } | undefined;
+    if (e.status === 504 || e.status === 0) return t('timeout');
+    return `${t('serverError')} (HTTP ${e.status}${body?.error ? ` · ${body.error}` : ''})${body?.message ? `: ${body.message}` : ''}`;
+  }
+  return `${t('unknownError')}: ${(e as Error)?.message ?? ''}`;
+}
+
 // ---------------------------------------------------------------- series / users / priority
-function MapRows({ rows, onChange, left, right, rightOptions }: {
-  rows: [string, string][]; onChange: (r: [string, string][]) => void; left: string; right: string; rightOptions: { value: string; label: string }[];
+function MapRows({ rows, onChange, left, right, rightOptions, leftOptions }: {
+  rows: [string, string][]; onChange: (r: [string, string][]) => void; left: string; right: string;
+  rightOptions: { value: string; label: string }[]; leftOptions?: Record<string, string>;
 }) {
   const t = useTranslations('erp');
+  const unused = Object.entries(leftOptions ?? {}).filter(([code]) => !rows.some(([a]) => a === code));
   return (
     <div className="space-y-2">
       <div className="grid grid-cols-[1fr_1fr_2rem] gap-2 text-xs text-muted"><span>{left}</span><span>{right}</span><span /></div>
       {rows.map(([a, b], i) => (
         <div key={i} className="grid grid-cols-[1fr_1fr_2rem] gap-2">
-          <input className={clsx(input, 'font-mono')} value={a} onChange={(e) => onChange(rows.map((r, j) => (j === i ? [e.target.value, r[1]] : r)))} />
+          <div className="min-w-0">
+            <input className={clsx(input, 'font-mono')} value={a} onChange={(e) => onChange(rows.map((r, j) => (j === i ? [e.target.value, r[1]] : r)))} />
+            {leftOptions?.[a] && leftOptions[a] !== a && <div className="mt-0.5 truncate px-1 text-xs text-muted">{leftOptions[a]}</div>}
+          </div>
           <select className={input} value={b} onChange={(e) => onChange(rows.map((r, j) => (j === i ? [r[0], e.target.value] : r)))}>
             <option value="">—</option>
             {rightOptions.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
           </select>
-          <button type="button" onClick={() => onChange(rows.filter((_, j) => j !== i))} aria-label={t('removeRow')} className="grid place-items-center rounded-lg text-danger hover:bg-danger-soft"><Trash2 size={15} /></button>
+          <button type="button" onClick={() => onChange(rows.filter((_, j) => j !== i))} aria-label={t('removeRow')} className="grid h-9 place-items-center rounded-lg text-danger hover:bg-danger-soft"><Trash2 size={15} /></button>
         </div>
       ))}
-      <button type="button" onClick={() => onChange([...rows, ['', '']])} className="flex items-center gap-1 text-sm font-medium text-primary"><Plus size={15} /> {t('addRow')}</button>
+      <div className="flex flex-wrap items-center gap-2">
+        <button type="button" onClick={() => onChange([...rows, ['', '']])} className="flex items-center gap-1 text-sm font-medium text-primary"><Plus size={15} /> {t('addRow')}</button>
+        {unused.length > 0 && (
+          <select className={clsx(input, 'w-auto py-1.5 text-xs')} value="" onChange={(e) => e.target.value && onChange([...rows, [e.target.value, '']])} aria-label={t('addSeen')}>
+            <option value="">{t('addSeen')} ({unused.length})</option>
+            {unused.map(([code, label]) => <option key={code} value={code}>{code} · {label}</option>)}
+          </select>
+        )}
+      </div>
     </div>
   );
 }
@@ -348,19 +477,27 @@ function ValuesCard({ m, patch, types, users }: { m: Meta; patch: (p: Partial<Me
   const [series, setSeries] = useState<[string, string][]>(() => Object.entries(m.series_map));
   const [people, setPeople] = useState<[string, string][]>(() => Object.entries(m.users_map));
   const toObj = (r: [string, string][]) => Object.fromEntries(r.filter(([a, b]) => a.trim() && b).map(([a, b]) => [a.trim(), b]));
-  const prioOf = (p: number) => Object.entries(m.priority_map).find(([, v]) => v === p)?.[0] ?? '';
-  const setPrio = (p: number, code: string) => {
-    const next = Object.fromEntries(Object.entries(m.priority_map).filter(([, v]) => v !== p));
-    if (code.trim()) next[code.trim()] = p;
-    patch({ priority_map: next });
-  };
+  const seen = m.seen ?? {};
   const typeOpts = types.filter((x) => x.active).map((x) => ({ value: x.key, label: x.name }));
+  // Users: suggest the SoftifyOS user with the same name as the Soft1 one
+  const autoUsers = () => {
+    const norm = (x: string) => x.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/\s+/g, ' ').trim();
+    const rows: [string, string][] = [...people];
+    for (const [code, name] of Object.entries(seen.users ?? {})) {
+      if (rows.some(([a]) => a === code)) continue;
+      const n = norm(name);
+      const u = users.find((x) => norm(x.full_name) === n || n.split(' ').reverse().join(' ') === norm(x.full_name));
+      if (u) rows.push([code, u.id]);
+    }
+    setPeople(rows); patch({ users_map: toObj(rows) });
+  };
   return (
     <Card title={t('valuesTitle')} hint={t('valuesHint')} icon={<Wand2 size={16} />} defaultOpen={false}>
+      {!Object.keys(seen).length && <p className="mb-3 rounded-xl bg-info-soft p-2.5 text-sm text-info">{t('seenHint')}</p>}
       <div className="grid gap-6 @3xl:grid-cols-2">
         <div>
           <h4 className="mb-2 text-sm font-semibold">{t('seriesTitle')}</h4>
-          <MapRows rows={series} left={t('erpSeries')} right={t('activityType')} rightOptions={typeOpts}
+          <MapRows rows={series} left={t('erpSeries')} right={t('activityType')} rightOptions={typeOpts} leftOptions={seen.series}
             onChange={(r) => { setSeries(r); patch({ series_map: toObj(r) }); }} />
           <div className="mt-3 grid grid-cols-2 gap-2">
             <Field label={t('defaultType')} help={t('defaultTypeHelp')}>
@@ -370,14 +507,29 @@ function ValuesCard({ m, patch, types, users }: { m: Meta; patch: (p: Partial<Me
           </div>
         </div>
         <div>
-          <h4 className="mb-2 text-sm font-semibold">{t('usersTitle')}</h4>
-          <MapRows rows={people} left={t('erpUser')} right={t('softifyUser')} rightOptions={users.map((u) => ({ value: u.id, label: u.full_name }))}
+          <div className="mb-2 flex items-center gap-2">
+            <h4 className="flex-1 text-sm font-semibold">{t('usersTitle')}</h4>
+            {Object.keys(seen.users ?? {}).length > 0 && <button type="button" onClick={autoUsers} className="text-xs font-medium text-primary">{t('autoUsers')}</button>}
+          </div>
+          <MapRows rows={people} left={t('erpUser')} right={t('softifyUser')} rightOptions={users.map((u) => ({ value: u.id, label: u.full_name }))} leftOptions={seen.users}
             onChange={(r) => { setPeople(r); patch({ users_map: toObj(r) }); }} />
           <p className="mt-2 text-xs text-muted">{t('usersHelp')}</p>
           <h4 className="mb-2 mt-5 text-sm font-semibold">{t('priorityTitle')}</h4>
-          <div className="grid grid-cols-3 gap-2">
-            {[1, 2, 3].map((p) => <Field key={p} label={tc(`prio_${p}`)}><input className={clsx(input, 'font-mono')} value={prioOf(p)} onChange={(e) => setPrio(p, e.target.value)} placeholder={t('erpValue')} /></Field>)}
-          </div>
+          {Object.keys(seen.priority ?? {}).length > 0 ? (
+            <div className="space-y-1.5">
+              {Object.entries(seen.priority ?? {}).map(([code, name]) => (
+                <div key={code} className="grid grid-cols-[1fr_9rem] items-center gap-2 text-sm">
+                  <span className="truncate"><span className="font-mono text-xs text-muted">{code}</span> {name}</span>
+                  <select className={clsx(input, 'py-1.5')} value={m.priority_map[code] ?? ''} onChange={(e) => {
+                    const next = { ...m.priority_map }; if (e.target.value) next[code] = Number(e.target.value); else delete next[code]; patch({ priority_map: next });
+                  }}>
+                    <option value="">{tc('prio_2')} ({t('default')})</option>
+                    {[1, 2, 3].map((p) => <option key={p} value={p}>{tc(`prio_${p}`)}</option>)}
+                  </select>
+                </div>
+              ))}
+            </div>
+          ) : <p className="text-xs text-muted">{t('prioritySeenHint')}</p>}
         </div>
       </div>
     </Card>
@@ -403,7 +555,7 @@ function ListsCard({ values, src, types, onSrc, onSync, busy, onSaved }: {
     try {
       await api(`/settings/erp/values/${kind}`, { method: 'PUT', json: rows.filter((r) => r.code.trim() && r.name.trim()).map(({ code, name, active, maps_to, types: ty, sort }) => ({ code: code.trim(), name: name.trim(), active, maps_to, types: ty?.length ? ty : null, sort })) });
       toast({ title: t('saved') }); setDirty(false); onSaved();
-    } catch { toast({ title: t('saveError') }); }
+    } catch (e) { toast({ title: t('saveError'), body: errText(e, t) }); }
     setSaving(false);
   };
   const preset = async () => { await api('/settings/erp/values/preset', { method: 'POST' }); toast({ title: t('presetLoaded') }); onSaved(); };
@@ -484,7 +636,7 @@ function PreviewCard() {
   const locale = useLocale();
   const [busy, setBusy] = useState(false);
   const [res, setRes] = useState<{ ok: boolean; error?: string; seen?: number; preview?: Preview[] } | null>(null);
-  const run = async () => { setBusy(true); setRes(await api<typeof res>('/settings/erp/preview', { method: 'POST' }).catch(() => ({ ok: false, error: t('saveError') }))); setBusy(false); };
+  const run = async () => { setBusy(true); setRes(await api<typeof res>('/settings/erp/preview', { method: 'POST' }).catch((e) => ({ ok: false, error: errText(e, t) }))); setBusy(false); };
   return (
     <Card title={t('previewTitle')} hint={t('previewHint')} icon={<Eye size={16} />} defaultOpen={false}
       action={<button type="button" onClick={run} disabled={busy} className={btn}>{busy ? <Loader2 size={15} className="animate-spin" /> : <Eye size={15} />} {t('runPreview')}</button>}>

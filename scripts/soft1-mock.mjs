@@ -2,7 +2,7 @@
 //   node scripts/soft1-mock.mjs [port]          (default 5711; URL in Settings → ERP: http://127.0.0.1:5711)
 //   user: demo / pass: demo / appId: 1001
 // Implements login, authenticate, getBrowserInfo, getBrowserData, getData, setData, delData, getTableFields
-// for the activities object SOACTION and the characterisation list ACTCHAR. Data lives in memory
+// for the activities object SOACTION (field names and "code|name" lookups as a real Soft1) and the characterisation list ACTCHAR. Data lives in memory
 // (GET /__state returns it, POST /__touch/<key> changes a record as if edited in Soft1).
 import http from 'node:http';
 
@@ -14,15 +14,15 @@ const day = (offset, h = 10) => { const d = new Date(); d.setDate(d.getDate() + 
 let seq = 5000, fin = 8820;
 const actions = new Map();
 const add = (o) => { const id = String(++seq); actions.set(id, { SOACTION: id, UPDDATE: local(new Date()), INSDATE: local(new Date()), ...o }); return id; };
-add({ FINCODE: `OFF000${fin++}`, SERIES: '7001', TRNDATE: local(day(-2, 0)), FROMDATE: local(day(-2, 9)), TODATE: local(day(12, 18)), TRDR: '1001', TRDBRANCH: '9999',
+add({ SOACTIONCODE: `OFF000${fin++}`, SERIES: '7001|ΠΡΟ', TRNDATE: local(day(-2, 0)), FROMDATE: local(day(-2, 9)), FINALDATE: local(day(12, 18)), TRDR: '1001', TRDBRANCH: '9999',
   COMMENTS: 'Β1Β. ΧΡΗΣΙΜΗ (ΑΠΟΚΛΕΙΣΤΙΚΗ ΧΡΗΣΗ ΡΑΔΙΟΦΩΝΟΥ ή/και TV) // 446.4', REMARKS: 'ΠΡΟΚΕΙΤΑΙ ΓΙΑ ΚΑΦΕΝΕΙΟ ΣΤΟ ΔΙΔΥΜΟΤΕΙΧΟ, ΕΙΧΕ ΔΥΟ ΧΩΡΟΥΣ.',
-  ACTCHAR: '122', ACTSTATUS: '', PRIORITY: '2', PRSNIN: 'P01', PRSNOUT: 'P01' });
-add({ FINCODE: 'ΣΥΝ0002925', SERIES: '7002', TRNDATE: local(day(-10, 0)), FROMDATE: local(day(-10, 11)), TODATE: local(day(-10, 12)), TRDR: '1001', TRDBRANCH: '9999',
-  COMMENTS: 'Ενημέρωση χρήστη', REMARKS: '', ACTCHAR: '', ACTSTATUS: '1', PRIORITY: '1', PRSNIN: 'P01', PRSNOUT: 'P02' });
-add({ FINCODE: 'ΣΥΝ0002926', SERIES: '7002', TRNDATE: local(day(3, 0)), FROMDATE: local(day(3, 10)), TODATE: local(day(3, 11)), TRDR: '9999999', TRDBRANCH: '',
-  COMMENTS: 'Πελάτης που δεν υπάρχει στο SoftifyOS', REMARKS: '', ACTCHAR: '', ACTSTATUS: '', PRIORITY: '2', PRSNIN: '', PRSNOUT: '' });
+  ACTSTATES: '122|Εκτελεσμένη', ACTSTATUS: '', PRIORITY: '2', ORDEREDBY: 'P01|Demo Χρήστης', ACTOR: 'P01|Demo Χρήστης' });
+add({ SOACTIONCODE: 'ΣΥΝ0002925', SERIES: '7002|ΣΥΝ', TRNDATE: local(day(-10, 0)), FROMDATE: local(day(-10, 11)), FINALDATE: local(day(-10, 12)), TRDR: '1001', TRDBRANCH: '9999',
+  COMMENTS: 'Ενημέρωση χρήστη', REMARKS: '', ACTSTATES: '', ACTSTATUS: '1', PRIORITY: '1', ORDEREDBY: 'P01|Demo Χρήστης', ACTOR: 'P02|Μαρία Κωνσταντίνου' });
+add({ SOACTIONCODE: 'ΣΥΝ0002926', SERIES: '7002|ΣΥΝ', TRNDATE: local(day(3, 0)), FROMDATE: local(day(3, 10)), FINALDATE: local(day(3, 11)), TRDR: '9999999', TRDBRANCH: '',
+  COMMENTS: 'Πελάτης που δεν υπάρχει στο SoftifyOS', REMARKS: '', ACTSTATES: '', ACTSTATUS: '', PRIORITY: '2', ORDEREDBY: '', ACTOR: '' });
 const chars = [['101', 'Ενημέρωση πελάτη', 1], ['121', 'Προς εκτέλεση', 1], ['122', 'Εκτελεσμένη', 1], ['123', 'Σε αναστολή', 0], ['203', 'Σε εξέλιξη', 1]];
-const FIELDS = ['SOACTION', 'FINCODE', 'SERIES', 'TRNDATE', 'FROMDATE', 'TODATE', 'TRDR', 'TRDBRANCH', 'COMMENTS', 'REMARKS', 'ACTCHAR', 'ACTSTATUS', 'PRIORITY', 'PRSNIN', 'PRSNOUT', 'UPDDATE', 'INSDATE'];
+const FIELDS = ['SOACTION', 'SOACTIONCODE', 'SERIES', 'TRNDATE', 'FROMDATE', 'FINALDATE', 'TRDR', 'TRDBRANCH', 'COMMENTS', 'REMARKS', 'ACTSTATES', 'ACTSTATUS', 'PRIORITY', 'ORDEREDBY', 'ACTOR', 'UPDDATE', 'INSDATE'];
 
 const sessions = new Set(), browsers = new Map();
 let calls = [];
@@ -37,7 +37,7 @@ function filterRows(object, filters) {
       else if (String(a[k]) !== v) return false;
     }
     return true;
-  }).map((a) => ({ key: a.SOACTION, cols: [`SOACTION;${a.SOACTION}`, a.FINCODE, a.TRNDATE, a.COMMENTS], names: ['ZOOMINFO', 'SOACTION.FINCODE', 'SOACTION.TRNDATE', 'SOACTION.COMMENTS'] }));
+  }).map((a) => ({ key: a.SOACTION, cols: [`SOACTION;${a.SOACTION}`, a.SOACTIONCODE, a.TRNDATE, a.COMMENTS], names: ['ZOOMINFO', 'SOACTION.SOACTIONCODE', 'SOACTION.TRNDATE', 'SOACTION.COMMENTS'] }));
 }
 
 function handle(b) {
@@ -76,8 +76,8 @@ function handle(b) {
         return { success: true, id: a.SOACTION };
       }
       if (!row.TRDR) return { success: false, error: 'Υποχρεωτικό πεδίο: Συναλλασσόμενος' };
-      const prefix = row.SERIES === '7001' ? 'OFF' : 'ΣΥΝ';
-      return { success: true, id: add({ FINCODE: `${prefix}000${fin++}`, ...row }) };
+      const prefix = String(row.SERIES).startsWith('7001') ? 'OFF' : 'ΣΥΝ';
+      return { success: true, id: add({ SOACTIONCODE: `${prefix}000${fin++}`, ...row }) };
     }
     case 'delData':
       need();

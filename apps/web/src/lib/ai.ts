@@ -2,7 +2,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { api } from './api';
 
-export type AiFeature = 'copilot' | 'voice' | 'summary' | 'reports' | 'offer_draft' | 'import';
+export type AiFeature = 'copilot' | 'voice' | 'summary' | 'actions_summary' | 'reports' | 'offer_draft' | 'import';
 export type AiStatus = { configured: boolean; enabled: boolean; allowed: boolean; features: Record<AiFeature, boolean>; budget_left: boolean };
 export type AiAction = {
   id: string; kind: 'task' | 'activity' | 'offer_draft' | 'save_report'; status: 'pending' | 'done' | 'cancelled' | 'failed';
@@ -50,5 +50,6 @@ export async function streamChat(body: unknown, onEvent: (e: ChatEvent) => void,
 
 /** Error code → message key in the "ai" namespace. */
 export const aiErrorKey = (code: string) =>
-  (['ai_not_configured', 'ai_disabled', 'feature_disabled', 'budget_exceeded', 'forbidden', 'ai_rate_limited', 'ai_auth', 'refused', 'too_long'] as const).includes(code as never)
+  (['ai_not_configured', 'ai_disabled', 'feature_disabled', 'budget_exceeded', 'forbidden', 'ai_rate_limited', 'ai_auth', 'refused', 'too_long',
+    'user_budget_exceeded', 'user_daily_exceeded', 'feature_budget_exceeded', 'rate_limited'] as const).includes(code as never)
     ? `err_${code}` : 'err_generic';

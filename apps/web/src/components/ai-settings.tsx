@@ -11,8 +11,9 @@ import type { AiFeature } from '@/lib/ai';
 import { Link } from '@/i18n/navigation';
 import { Card } from './settings-sections';
 import { useToast } from './providers';
+import { AiUsageDashboard } from './ai-usage';
 
-const FEATURES: AiFeature[] = ['copilot', 'voice', 'summary', 'reports', 'offer_draft', 'import'];
+const FEATURES: AiFeature[] = ['copilot', 'voice', 'summary', 'actions_summary', 'reports', 'offer_draft', 'import'];
 type Data = {
   settings: { enabled: boolean; consent_at: string | null; consent_by: string | null; monthly_budget_usd: number; features: Record<AiFeature, boolean> };
   configured: boolean; model: string; consent_by_name: string | null; env_key: boolean;
@@ -87,34 +88,7 @@ export function AiSettingsSection() {
         </div>
       </Card>
 
-      <Card title={t('usage')} description={t('usageHint')}>
-        <div className="space-y-4">
-          <div>
-            <div className="mb-1 flex items-baseline justify-between text-sm"><span>{t('thisMonth')}</span><span className="font-semibold tabular">{usd(d.month.spent)} / {usd(d.settings.monthly_budget_usd)}</span></div>
-            <div className="h-2 overflow-hidden rounded-full bg-surface-2" role="progressbar" aria-valuenow={Math.round(pct)} aria-valuemin={0} aria-valuemax={100}>
-              <div className={`h-full rounded-full ${pct >= 90 ? 'bg-danger' : 'bg-primary'}`} style={{ width: `${pct}%` }} />
-            </div>
-            {pct >= 90 && <p className="mt-1 flex items-center gap-1 text-xs text-danger"><AlertTriangle size={12} /> {t('nearBudget')}</p>}
-          </div>
-          <div className="grid gap-4 sm:grid-cols-2">
-            <UsageTable title={t('byFeature')} rows={d.month.by_feature.map((r) => ({ label: t(`f_${r.feature}` as never), calls: r.calls, usd: r.usd }))} usd={usd} empty={t('noUsage')} calls={t('calls')} />
-            <UsageTable title={t('byUser')} rows={d.month.by_user.map((r) => ({ label: r.name, calls: r.calls, usd: r.usd }))} usd={usd} empty={t('noUsage')} calls={t('calls')} />
-          </div>
-          {d.history.length > 0 && (
-            <div>
-              <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted">{t('history')}</div>
-              <div className="flex h-24 items-end gap-2">
-                {d.history.map((h) => (
-                  <div key={h.month} className="flex flex-1 flex-col items-center gap-1" title={`${h.month}: ${usd(h.usd)}`}>
-                    <div className="w-full rounded-t-[4px] bg-primary/80" style={{ height: `${Math.max(2, (h.usd / maxHist) * 80)}px` }} />
-                    <span className="text-[11px] text-muted">{h.month.slice(5)}/{h.month.slice(2, 4)}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-        </div>
-      </Card>
+      <AiUsageDashboard roles={d.roles} />
 
       <Card title={t('who')} description={t('whoHint')}>
         <ul className="flex flex-wrap gap-2">

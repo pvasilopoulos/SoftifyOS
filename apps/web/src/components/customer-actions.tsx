@@ -1,11 +1,14 @@
 'use client';
 // Customer → "Ενέργειες": the customer's CRM activities as in the ERP (code, series, store, requester, handler,
 // subject, characterisation, status, start/end, priority), with remarks, editing, ERP sync state and an AI summary.
-import { Fragment, useEffect, useState } from 'react';
+import { Fragment, useEffect, useState, type ReactNode } from 'react';
 import clsx from 'clsx';
 import { useInfiniteQuery } from '@tanstack/react-query';
 import { useLocale, useTranslations } from 'next-intl';
-import { ArrowRight, CheckCircle2, ChevronDown, Flag, Loader2, MessageSquareText, Pencil, Plus, RefreshCw, Search, Send, Sparkles, Store, Wand2, X } from 'lucide-react';
+import {
+  ArrowDown, ArrowRight, ArrowUp, CheckCircle2, ChevronDown, ChevronLeft, ChevronRight, Columns3, Download, Flag, Loader2, MessageSquareText, Pencil, Plus, RefreshCw,
+  Rows3, Search, Send, SlidersHorizontal, Sparkles, Store, Wand2, X,
+} from 'lucide-react';
 import { api, ApiError } from '@/lib/api';
 import { iconOf, tone, useCrmMeta, useCrmRefresh, type Activity, type ActivityStatus } from '@/lib/crm';
 import { useToast } from './providers';
@@ -15,6 +18,32 @@ import { AiErrorNote, Markdown } from './ai-ui';
 
 type Filter = 'any' | 'open' | 'done' | 'cancelled';
 type Page = { items: Activity[]; next_cursor: string | null };
+type ColKey = 'when' | 'series' | 'code' | 'subject' | 'store' | 'remarks' | 'handler' | 'requester' | 'status' | 'characterization' | 'priority' | 'start' | 'end' | 'created' | 'updated' | 'erp';
+type ColState = { key: ColKey; width: number; hidden: boolean };
+type SortKey = 'due_desc' | 'due' | 'updated' | 'created';
+type Extra = { owner: string; priority: string; erpStatus: string; from: string; to: string; overdue: boolean; remarks: boolean };
+
+// Every column the grid can show: width in px (resizable), which are on by default, and the server sort it maps to
+const COLUMNS: { key: ColKey; width: number; on: boolean; sort?: SortKey }[] = [
+  { key: 'when', width: 140, on: true, sort: 'due_desc' }, { key: 'series', width: 160, on: true }, { key: 'code', width: 120, on: false },
+  { key: 'subject', width: 340, on: true }, { key: 'store', width: 150, on: false }, { key: 'remarks', width: 260, on: false },
+  { key: 'handler', width: 180, on: true }, { key: 'requester', width: 160, on: false }, { key: 'status', width: 170, on: true },
+  { key: 'characterization', width: 160, on: false }, { key: 'priority', width: 100, on: false }, { key: 'start', width: 140, on: false },
+  { key: 'end', width: 140, on: false }, { key: 'created', width: 140, on: false, sort: 'created' }, { key: 'updated', width: 140, on: false, sort: 'updated' },
+  { key: 'erp', width: 64, on: true },
+];
+const STORE_KEY = 'softify.customer-actions.grid.v1';
+const defaultCols = (): ColState[] => COLUMNS.map((c) => ({ key: c.key, width: c.width, hidden: !c.on }));
+function loadCols(): ColState[] {
+  try {
+    const saved = JSON.parse(localStorage.getItem(STORE_KEY) ?? 'null') as { cols?: ColState[] } | null;
+    if (!saved?.cols) return defaultCols();
+    const known = saved.cols.filter((c) => COLUMNS.some((x) => x.key === c.key));
+    for (const c of COLUMNS) if (!known.some((x) => x.key === c.key)) known.push({ key: c.key, width: c.width, hidden: !c.on });
+    return known;
+  } catch { return defaultCols(); }
+}
+const NO_EXTRA: Extra = { owner: '', priority: '', erpStatus: '', from: '', to: '', overdue: false, remarks: false };
 
 export function CustomerActions({ customerId, customerName, canEdit }: { customerId: string; customerName: string; canEdit: boolean }) {
   const t = useTranslations('actions');
@@ -23,10 +52,12 @@ export function CustomerActions({ customerId, customerName, canEdit }: { custome
   const toast = useToast();
   const refresh = useCrmRefresh();
   const meta = useCrmMeta();
-  const aiOn = useAi('summary');
+  const aiOn = useAi('actions_summary');
   const [status, setStatus] = useState<Filter>('any');
   const [type, setType] = useState('');
   const [char, setChar] = useState('');
+  const [extra, setExtra] = useState<Extra>(NO_EXTRA);
+  const [sort, setSort] = useState<SortKey>('due_desc');
   const [q, setQ] = useState('');
   const [dq, setDq] = useState('');
   const [open, setOpen] = useState<string | null>(null);
@@ -34,24 +65,58 @@ export function CustomerActions({ customerId, customerName, canEdit }: { custome
   const [complete, setComplete] = useState<Activity | null>(null);
   const [syncing, setSyncing] = useState(false);
   const [showAi, setShowAi] = useState(false);
+  const [panel, setPanel] = useState<'filters' | 'columns' | null>(null);
+  const [cols, setCols] = useState<ColState[]>(defaultCols);
+  const [dense, setDense] = useState(false);
+  // Grid layout is a per-viewer convenience: kept in this browser
+  useEffect(() => { setCols(loadCols()); try { setDense(localStorage.getItem(`${STORE_KEY}.dense`) === '1'); } catch { /* private mode */ } }, []);
+  const saveCols = (next: ColState[]) => { setCols(next); try { localStorage.setItem(STORE_KEY, JSON.stringify({ cols: next })); } catch { /* private mode */ } };
   useEffect(() => { const h = setTimeout(() => setDq(q.trim()), 300); return () => clearTimeout(h); }, [q]);
 
-  const params = new URLSearchParams({ scope: 'all', status, customer_id: customerId, sort: 'due_desc', limit: '50' });
+  const params = new URLSearchParams({ scope: 'all', status, customer_id: customerId, sort, limit: '50' });
   if (type) params.set('type', type);
   if (char) params.set('characterization', char);
+  if (extra.erpStatus) params.set('erp_status', extra.erpStatus);
+  if (extra.owner) params.set('owner', extra.owner);
+  if (extra.priority) params.set('priority', extra.priority);
+  if (extra.overdue) params.set('due', 'overdue');
+  else if (extra.from || extra.to) {
+    params.set('due', 'range');
+    if (extra.from) params.set('from', new Date(`${extra.from}T00:00:00`).toISOString());
+    if (extra.to) params.set('to', new Date(new Date(`${extra.to}T00:00:00`).getTime() + 864e5).toISOString());
+  }
   if (dq.length >= 2) params.set('q', dq);
   const list = useInfiniteQuery({
     queryKey: ['crm', 'customer-actions', customerId, params.toString()],
     queryFn: ({ pageParam }) => api<Page>(`/crm/activities?${params}${pageParam ? `&cursor=${pageParam}` : ''}`),
     initialPageParam: '' as string, getNextPageParam: (p) => p.next_cursor ?? undefined,
   });
-  const rows = list.data?.pages.flatMap((p) => p.items) ?? [];
+  const all = list.data?.pages.flatMap((p) => p.items) ?? [];
+  const rows = extra.remarks ? all.filter((a) => a.body) : all;
   const erp = meta.data?.erp?.enabled;
-  const chars = (meta.data?.erp_values ?? []).filter((x) => x.kind === 'characterization' && x.active);
-  const filtered = !!(type || char || dq || status !== 'any');
+  const values = meta.data?.erp_values ?? [];
+  const chars = values.filter((x) => x.kind === 'characterization' && x.active);
+  const statuses = values.filter((x) => x.kind === 'status' && x.active);
+  const users = meta.data?.users ?? [];
+
+  // Active filters as removable chips
+  const chips: { key: string; label: string; clear: () => void }[] = [];
+  if (status !== 'any') chips.push({ key: 'status', label: t(`f_${status}`), clear: () => setStatus('any') });
+  if (type) chips.push({ key: 'type', label: meta.data?.types.find((x) => x.key === type)?.name ?? type, clear: () => setType('') });
+  if (char) chips.push({ key: 'char', label: chars.find((x) => x.code === char)?.name ?? char, clear: () => setChar('') });
+  if (extra.erpStatus) chips.push({ key: 'erp', label: statuses.find((x) => x.code === extra.erpStatus)?.name ?? extra.erpStatus, clear: () => setExtra((e) => ({ ...e, erpStatus: '' })) });
+  if (extra.owner) chips.push({ key: 'owner', label: `${t('h_handler')}: ${users.find((u) => u.id === extra.owner)?.full_name ?? '—'}`, clear: () => setExtra((e) => ({ ...e, owner: '' })) });
+  if (extra.priority) chips.push({ key: 'prio', label: tc(`prio_${extra.priority}`), clear: () => setExtra((e) => ({ ...e, priority: '' })) });
+  if (extra.overdue) chips.push({ key: 'overdue', label: tc('overdue'), clear: () => setExtra((e) => ({ ...e, overdue: false })) });
+  if (extra.from || extra.to) chips.push({ key: 'range', label: `${extra.from || '…'} → ${extra.to || '…'}`, clear: () => setExtra((e) => ({ ...e, from: '', to: '' })) });
+  if (extra.remarks) chips.push({ key: 'remarks', label: t('withRemarks'), clear: () => setExtra((e) => ({ ...e, remarks: false })) });
+  if (dq) chips.push({ key: 'q', label: `«${dq}»`, clear: () => setQ('') });
+  const clearAll = () => { setStatus('any'); setType(''); setChar(''); setExtra(NO_EXTRA); setQ(''); };
+  const extraCount = [extra.owner, extra.priority, extra.erpStatus, extra.from || extra.to, extra.overdue, extra.remarks].filter(Boolean).length;
 
   const d = (iso: string) => new Date(iso).toLocaleDateString(locale, { day: '2-digit', month: '2-digit', year: 'numeric' });
   const hm = (iso: string) => new Date(iso).toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit' });
+  const dt = (iso: string | null) => (iso ? `${d(iso)} ${hm(iso)}` : '—');
   /** "14:00 → 15:30" the same day, "→ 03/12/2026" when it ends another day */
   const span = (a: Activity) => {
     if (!a.due_at) return '';
@@ -62,6 +127,7 @@ export function CustomerActions({ customerId, customerName, canEdit }: { custome
   };
   const statusOf = (a: Activity) => a.erp_status_name ?? tc(`st_${a.status}`);
   const statusTone = (s: ActivityStatus, overdue: boolean) => (s === 'done' ? 'bg-success-soft text-success' : s === 'cancelled' ? 'bg-surface-2 text-muted' : overdue ? 'bg-danger-soft text-danger' : 'bg-info-soft text-info');
+  const prioTone = (p: number) => (p === 1 ? 'bg-danger-soft text-danger' : p === 3 ? 'bg-surface-2 text-muted' : 'text-muted');
 
   const sync = async () => {
     setSyncing(true);
@@ -72,7 +138,83 @@ export function CustomerActions({ customerId, customerName, canEdit }: { custome
   const resend = async (a: Activity) => { await api(`/crm/activities/${a.id}/erp-sync`, { method: 'POST' }); toast({ title: t('resendQueued') }); refresh(); };
   const newActivity = () => setEdit({ preset: { type: meta.data?.types.find((x) => x.active)?.key, customer_id: customerId, customer_name: customerName } });
 
+  // ---- cells
+  const cell = (k: ColKey, a: Activity): ReactNode => {
+    const Icon = iconOf(a.type_icon);
+    switch (k) {
+      case 'when': return <><div className={clsx('font-semibold tabular', a.overdue && 'text-danger')}>{d(a.due_at ?? a.created_at)}</div>{!dense && <div className="truncate text-xs text-muted tabular">{span(a)}</div>}</>;
+      case 'series': return (
+        <div className="flex min-w-0 items-center gap-2">
+          <span className={clsx('grid shrink-0 place-items-center rounded-lg', dense ? 'h-6 w-6' : 'h-7 w-7', tone(a.type_color))}><Icon size={dense ? 12 : 14} /></span>
+          <div className="min-w-0"><div className="truncate font-medium">{a.type_name ?? a.type}</div>{!dense && a.erp_code && <div className="truncate font-mono text-[11px] text-muted">{a.erp_code}</div>}</div>
+        </div>);
+      case 'code': return <span className="font-mono text-xs">{a.erp_code ?? '—'}</span>;
+      case 'subject': return (
+        <>
+          <div className="flex items-start gap-1.5">
+            {a.priority === 1 && <Flag size={13} className="mt-1 shrink-0 fill-danger text-danger" aria-label={tc('prio_1')} />}
+            <span className={clsx('font-semibold [overflow-wrap:anywhere]', dense ? 'line-clamp-1' : 'line-clamp-2')}>{a.subject}</span>
+          </div>
+          {!dense && (a.branch_name || a.body) && !visible.includes('remarks') && (
+            <div className="mt-0.5 flex min-w-0 items-center gap-1.5 text-xs text-muted">
+              {a.branch_name && !visible.includes('store') && <span className="flex shrink-0 items-center gap-1"><Store size={11} /> {a.branch_name}</span>}
+              {a.branch_name && !visible.includes('store') && a.body && <span>·</span>}
+              {a.body && <span className="truncate">{a.body}</span>}
+            </div>
+          )}
+        </>);
+      case 'store': return <span className="block truncate">{a.branch_name ?? '—'}</span>;
+      case 'remarks': return <span className={clsx('text-xs text-muted [overflow-wrap:anywhere]', dense ? 'line-clamp-1' : 'line-clamp-3')}>{a.body || '—'}</span>;
+      case 'handler': return <><div className="truncate font-medium">{a.owner_name ?? '—'}</div>{!dense && !visible.includes('requester') && a.requested_by_name && a.requested_by !== a.owner_id && <div className="truncate text-xs text-muted">{t('by', { name: a.requested_by_name })}</div>}</>;
+      case 'requester': return <span className="block truncate">{a.requested_by_name ?? '—'}</span>;
+      case 'status': return (
+        <>
+          <span className={clsx('inline-block max-w-full truncate rounded-md px-2 py-0.5 text-xs font-semibold', statusTone(a.status, a.overdue))}>{a.overdue ? tc('overdue') : statusOf(a)}</span>
+          {!dense && !visible.includes('characterization') && a.characterization_name && <div className="mt-1 truncate text-xs text-muted">{a.characterization_name}</div>}
+        </>);
+      case 'characterization': return <span className="block truncate">{a.characterization_name ?? '—'}</span>;
+      case 'priority': return <span className={clsx('rounded-md px-1.5 py-0.5 text-xs font-semibold', prioTone(a.priority))}>{tc(`prio_${a.priority}`)}</span>;
+      case 'start': return <span className="tabular">{dt(a.due_at)}</span>;
+      case 'end': return <span className="tabular">{dt(a.ends_at)}</span>;
+      case 'created': return <span className="tabular">{dt(a.created_at)}</span>;
+      case 'updated': return <span className="tabular">{dt(a.updated_at)}</span>;
+      case 'erp': return a.erp_state ? <ErpBadge state={a.erp_state} error={a.erp_error} compact /> : null;
+    }
+  };
+  const shownCols = cols.filter((c) => !c.hidden && (c.key !== 'erp' || erp));
+  const visible = shownCols.map((c) => c.key);
+  const total = shownCols.reduce((s, c) => s + c.width, 0);
+
+  // ---- resizing: drag the right edge of a header
+  const startResize = (key: ColKey, e: React.PointerEvent) => {
+    e.preventDefault(); e.stopPropagation();
+    const startX = e.clientX, start = cols.find((c) => c.key === key)!.width;
+    const move = (ev: PointerEvent) => setCols((cs) => cs.map((c) => (c.key === key ? { ...c, width: Math.max(56, Math.min(800, start + ev.clientX - startX)) } : c)));
+    const up = () => { window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up); setCols((cs) => { saveCols(cs); return cs; }); };
+    window.addEventListener('pointermove', move); window.addEventListener('pointerup', up);
+  };
+  const sortFor = (k: ColKey) => COLUMNS.find((c) => c.key === k)?.sort;
+  const headerClick = (k: ColKey) => {
+    const s = sortFor(k);
+    if (!s) return;
+    if (k === 'when') setSort(sort === 'due_desc' ? 'due' : 'due_desc'); else setSort(sort === s ? 'due_desc' : s);
+  };
+
+  // ---- CSV of what is shown (visible columns, plain text)
+  const exportCsv = () => {
+    const plain = (k: ColKey, a: Activity): string => ({
+      when: d(a.due_at ?? a.created_at), series: a.type_name ?? a.type, code: a.erp_code ?? '', subject: a.subject, store: a.branch_name ?? '', remarks: a.body ?? '',
+      handler: a.owner_name ?? '', requester: a.requested_by_name ?? '', status: statusOf(a), characterization: a.characterization_name ?? '', priority: tc(`prio_${a.priority}`),
+      start: a.due_at ?? '', end: a.ends_at ?? '', created: a.created_at, updated: a.updated_at, erp: a.erp_state ?? '',
+    } as Record<ColKey, string>)[k];
+    const esc = (x: string) => (/[",;\n]/.test(x) ? `"${x.replace(/"/g, '""')}"` : x);
+    const lines = [visible.map((k) => esc(t(`h_${k}`))).join(','), ...rows.map((a) => visible.map((k) => esc(plain(k, a))).join(','))];
+    const url = URL.createObjectURL(new Blob([`﻿${lines.join('\n')}`], { type: 'text/csv;charset=utf-8' }));
+    const el = document.createElement('a'); el.href = url; el.download = `${customerName.replace(/[^\p{L}\p{N}]+/gu, '-')}-energeies.csv`; el.click(); URL.revokeObjectURL(url);
+  };
+
   const select = 'h-8 rounded-lg border border-border bg-surface pl-2 pr-7 text-sm outline-none focus:border-primary';
+  const toolBtn = (active: boolean) => clsx('flex h-8 items-center gap-1.5 rounded-lg border px-2.5 text-sm font-medium transition', active ? 'border-primary bg-primary-soft text-primary' : 'border-border bg-surface hover:border-primary');
   return (
     <div className="@container space-y-3">
       {/* ---------------------------------------------------------------- toolbar */}
@@ -120,11 +262,74 @@ export function CustomerActions({ customerId, customerName, canEdit }: { custome
               {chars.map((x) => <option key={x.code} value={x.code}>{x.name}</option>)}
             </select>
           )}
-          {filtered && (
-            <button type="button" onClick={() => { setStatus('any'); setType(''); setChar(''); setQ(''); }} className="text-sm font-medium text-primary">{t('clear')}</button>
-          )}
-          <span className="ml-auto text-xs text-muted tabular">{rows.length > 0 && t('shown', { n: rows.length, more: list.hasNextPage ? '+' : '' })}</span>
+          <button type="button" onClick={() => setPanel(panel === 'filters' ? null : 'filters')} aria-expanded={panel === 'filters'} className={toolBtn(panel === 'filters' || extraCount > 0)}>
+            <SlidersHorizontal size={14} /> {t('moreFilters')}{extraCount > 0 && <span className="rounded-full bg-primary px-1.5 text-[11px] text-white">{extraCount}</span>}
+          </button>
+          <span className="flex-1" />
+          <span className="text-xs text-muted tabular">{rows.length > 0 && t('shown', { n: rows.length, more: list.hasNextPage ? '+' : '' })}</span>
+          <div className="hidden items-center gap-1 @3xl:flex">
+            <button type="button" onClick={() => { setDense(!dense); try { localStorage.setItem(`${STORE_KEY}.dense`, dense ? '0' : '1'); } catch { /* private mode */ } }}
+              aria-pressed={dense} title={t('dense')} aria-label={t('dense')} className={toolBtn(dense)}><Rows3 size={14} /></button>
+            <button type="button" onClick={() => setPanel(panel === 'columns' ? null : 'columns')} aria-expanded={panel === 'columns'} className={toolBtn(panel === 'columns')}><Columns3 size={14} /> {t('columns')}</button>
+            <button type="button" onClick={exportCsv} disabled={!rows.length} title={t('exportCsv')} aria-label={t('exportCsv')} className={toolBtn(false)}><Download size={14} /></button>
+          </div>
         </div>
+
+        {panel === 'filters' && (
+          <div className="grid gap-2 rounded-xl bg-surface-2 p-3 @xl:grid-cols-3 @4xl:grid-cols-6">
+            <label className="min-w-0"><span className="mb-1 block text-xs text-muted">{t('h_handler')}</span>
+              <select value={extra.owner} onChange={(e) => setExtra((x) => ({ ...x, owner: e.target.value }))} className={clsx(select, 'w-full')}>
+                <option value="">{t('anyone')}</option>{users.map((u) => <option key={u.id} value={u.id}>{u.full_name}</option>)}
+              </select></label>
+            <label className="min-w-0"><span className="mb-1 block text-xs text-muted">{t('h_priority')}</span>
+              <select value={extra.priority} onChange={(e) => setExtra((x) => ({ ...x, priority: e.target.value }))} className={clsx(select, 'w-full')}>
+                <option value="">{t('any')}</option>{['1', '2', '3'].map((p) => <option key={p} value={p}>{tc(`prio_${p}`)}</option>)}
+              </select></label>
+            {statuses.length > 0 && (
+              <label className="min-w-0"><span className="mb-1 block text-xs text-muted">{t('erpStatus')}</span>
+                <select value={extra.erpStatus} onChange={(e) => setExtra((x) => ({ ...x, erpStatus: e.target.value }))} className={clsx(select, 'w-full')}>
+                  <option value="">{t('any')}</option>{statuses.map((s) => <option key={s.code} value={s.code}>{s.name}</option>)}
+                </select></label>
+            )}
+            <label className="min-w-0"><span className="mb-1 block text-xs text-muted">{t('from')}</span>
+              <input type="date" value={extra.from} disabled={extra.overdue} onChange={(e) => setExtra((x) => ({ ...x, from: e.target.value }))} className={clsx(select, 'w-full pr-2')} /></label>
+            <label className="min-w-0"><span className="mb-1 block text-xs text-muted">{t('to')}</span>
+              <input type="date" value={extra.to} disabled={extra.overdue} onChange={(e) => setExtra((x) => ({ ...x, to: e.target.value }))} className={clsx(select, 'w-full pr-2')} /></label>
+            <div className="flex flex-col justify-end gap-1.5 text-sm">
+              <label className="flex items-center gap-2"><input type="checkbox" className="accent-[var(--primary)]" checked={extra.overdue} onChange={(e) => setExtra((x) => ({ ...x, overdue: e.target.checked }))} /> {t('onlyOverdue')}</label>
+              <label className="flex items-center gap-2"><input type="checkbox" className="accent-[var(--primary)]" checked={extra.remarks} onChange={(e) => setExtra((x) => ({ ...x, remarks: e.target.checked }))} /> {t('withRemarks')}</label>
+            </div>
+          </div>
+        )}
+
+        {panel === 'columns' && (
+          <div className="rounded-xl bg-surface-2 p-3">
+            <div className="mb-2 flex items-center gap-2"><span className="flex-1 text-xs text-muted">{t('columnsHint')}</span>
+              <button type="button" onClick={() => saveCols(defaultCols())} className="text-xs font-medium text-primary">{t('resetColumns')}</button></div>
+            <ul className="grid gap-1 @xl:grid-cols-2 @3xl:grid-cols-4">
+              {cols.filter((c) => c.key !== 'erp' || erp).map((c, i) => (
+                <li key={c.key} className="flex items-center gap-1.5 rounded-lg bg-surface px-2 py-1.5 text-sm">
+                  <input type="checkbox" className="accent-[var(--primary)]" checked={!c.hidden} disabled={c.key === 'subject'} id={`col-${c.key}`}
+                    onChange={() => saveCols(cols.map((x) => (x.key === c.key ? { ...x, hidden: !x.hidden } : x)))} />
+                  <label htmlFor={`col-${c.key}`} className="min-w-0 flex-1 truncate">{t(`h_${c.key}`)}</label>
+                  <button type="button" disabled={i === 0} onClick={() => { const n = [...cols]; const j = cols.indexOf(c); [n[j - 1], n[j]] = [n[j], n[j - 1]]; saveCols(n); }} aria-label={t('moveLeft')} className="grid h-6 w-6 place-items-center rounded text-muted hover:bg-surface-2 disabled:opacity-30"><ChevronLeft size={13} /></button>
+                  <button type="button" disabled={cols.indexOf(c) === cols.length - 1} onClick={() => { const n = [...cols]; const j = cols.indexOf(c); [n[j + 1], n[j]] = [n[j], n[j + 1]]; saveCols(n); }} aria-label={t('moveRight')} className="grid h-6 w-6 place-items-center rounded text-muted hover:bg-surface-2 disabled:opacity-30"><ChevronRight size={13} /></button>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+
+        {chips.length > 0 && (
+          <div className="flex flex-wrap items-center gap-1.5">
+            {chips.map((c) => (
+              <span key={c.key} className="flex items-center gap-1 rounded-full bg-primary-soft py-0.5 pl-2.5 pr-1 text-xs font-medium text-primary">
+                {c.label}<button type="button" onClick={c.clear} aria-label={t('clear')} className="grid h-4 w-4 place-items-center rounded-full hover:bg-primary/15"><X size={11} /></button>
+              </span>
+            ))}
+            {chips.length > 1 && <button type="button" onClick={clearAll} className="text-xs font-medium text-muted hover:text-text">{t('clear')}</button>}
+          </div>
+        )}
       </div>
 
       {showAi && aiOn && <ActionsAi customerId={customerId} onClose={() => setShowAi(false)} />}
@@ -134,70 +339,47 @@ export function CustomerActions({ customerId, customerName, canEdit }: { custome
         : !rows.length ? (
           <div className="card flex flex-col items-center gap-3 py-12 text-center">
             <span className="grid h-12 w-12 place-items-center rounded-2xl bg-surface-2 text-muted"><MessageSquareText size={22} /></span>
-            <p className="text-sm text-muted">{filtered ? t('emptyFiltered') : t('empty')}</p>
-            {canEdit && !filtered && <button type="button" onClick={newActivity} className="flex items-center gap-1.5 rounded-xl bg-primary px-4 py-2 text-sm font-semibold text-white"><Plus size={16} /> {t('new')}</button>}
+            <p className="text-sm text-muted">{chips.length ? t('emptyFiltered') : t('empty')}</p>
+            {chips.length > 0 && <button type="button" onClick={clearAll} className="text-sm font-medium text-primary">{t('clear')}</button>}
+            {canEdit && !chips.length && <button type="button" onClick={newActivity} className="flex items-center gap-1.5 rounded-xl bg-primary px-4 py-2 text-sm font-semibold text-white"><Plus size={16} /> {t('new')}</button>}
           </div>
         ) : (
           <>
-            {/* Wide: table */}
-            <div className="card hidden overflow-hidden @3xl:block">
-              <table className="w-full table-fixed text-left text-sm">
-                <colgroup>
-                  <col className="w-[8.5rem]" /><col className="w-[9.5rem]" /><col /><col className="w-[11rem]" /><col className="w-[10.5rem]" />{erp && <col className="w-14" />}
-                </colgroup>
-                <thead className="bg-surface-2/60 text-xs text-muted">
+            {/* Wide: configurable grid */}
+            <div className="card hidden overflow-x-auto @3xl:block">
+              <table className="table-fixed text-left text-sm" style={{ width: `max(100%, ${total}px)` }}>
+                <colgroup>{shownCols.map((c) => <col key={c.key} style={{ width: c.width }} />)}</colgroup>
+                <thead className="sticky top-0 z-10 bg-surface-2 text-xs text-muted">
                   <tr>
-                    {['when', 'series', 'subject', 'handler', 'status'].map((h) => <th key={h} className="px-4 py-2.5 font-medium">{t(`h_${h}`)}</th>)}
-                    {erp && <th className="px-2 py-2.5 text-center font-medium">ERP</th>}
+                    {shownCols.map((c) => {
+                      const s = sortFor(c.key);
+                      const activeSort = s && (c.key === 'when' ? sort === 'due_desc' || sort === 'due' : sort === s);
+                      return (
+                        <th key={c.key} className={clsx('group relative select-none px-3 py-2.5 font-medium', c.key === 'erp' && 'text-center')}>
+                          <button type="button" onClick={() => headerClick(c.key)} disabled={!s} className={clsx('flex max-w-full items-center gap-1 truncate', s && 'hover:text-text', activeSort && 'text-primary')}>
+                            <span className="truncate">{c.key === 'erp' ? 'ERP' : t(`h_${c.key}`)}</span>
+                            {activeSort && (sort === 'due' ? <ArrowUp size={12} /> : <ArrowDown size={12} />)}
+                          </button>
+                          <span role="separator" aria-orientation="vertical" aria-label={t('resize')} onPointerDown={(e) => startResize(c.key, e)}
+                            onDoubleClick={() => saveCols(cols.map((x) => (x.key === c.key ? { ...x, width: COLUMNS.find((y) => y.key === c.key)!.width } : x)))}
+                            className="absolute inset-y-1 right-0 w-2 cursor-col-resize border-r-2 border-transparent group-hover:border-border hover:!border-primary" />
+                        </th>
+                      );
+                    })}
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border">
                   {rows.map((a) => {
-                    const Icon = iconOf(a.type_icon);
                     const isOpen = open === a.id;
                     return (
                       <Fragment key={a.id}>
                         <tr onClick={() => setOpen(isOpen ? null : a.id)} aria-expanded={isOpen}
                           className={clsx('group cursor-pointer align-top transition-colors', isOpen ? 'bg-primary-soft/40' : 'hover:bg-surface-2/70')}>
-                          <td className="px-4 py-3">
-                            <div className={clsx('font-semibold tabular', a.overdue && 'text-danger')}>{a.due_at ? d(a.due_at) : d(a.created_at)}</div>
-                            <div className="text-xs text-muted tabular">{span(a)}</div>
-                          </td>
-                          <td className="px-4 py-3">
-                            <div className="flex min-w-0 items-center gap-2">
-                              <span className={clsx('grid h-7 w-7 shrink-0 place-items-center rounded-lg', tone(a.type_color))}><Icon size={14} /></span>
-                              <div className="min-w-0">
-                                <div className="truncate font-medium">{a.type_name ?? a.type}</div>
-                                {a.erp_code && <div className="truncate font-mono text-[11px] text-muted">{a.erp_code}</div>}
-                              </div>
-                            </div>
-                          </td>
-                          <td className="px-4 py-3">
-                            <div className="flex items-start gap-1.5">
-                              {a.priority === 1 && <Flag size={13} className="mt-1 shrink-0 fill-danger text-danger" aria-label={tc('prio_1')} />}
-                              <span className="line-clamp-2 font-semibold [overflow-wrap:anywhere]">{a.subject}</span>
-                            </div>
-                            {(a.branch_name || a.body) && (
-                              <div className="mt-0.5 flex min-w-0 items-center gap-1.5 text-xs text-muted">
-                                {a.branch_name && <span className="flex shrink-0 items-center gap-1"><Store size={11} /> {a.branch_name}</span>}
-                                {a.branch_name && a.body && <span>·</span>}
-                                {a.body && <span className="truncate">{a.body}</span>}
-                              </div>
-                            )}
-                          </td>
-                          <td className="px-4 py-3">
-                            <div className="truncate font-medium">{a.owner_name ?? '—'}</div>
-                            {a.requested_by_name && a.requested_by !== a.owner_id && <div className="truncate text-xs text-muted">{t('by', { name: a.requested_by_name })}</div>}
-                          </td>
-                          <td className="px-4 py-3">
-                            <span className={clsx('inline-block max-w-full truncate rounded-md px-2 py-0.5 text-xs font-semibold', statusTone(a.status, a.overdue))}>{a.overdue ? tc('overdue') : statusOf(a)}</span>
-                            {a.characterization_name && <div className="mt-1 truncate text-xs text-muted">{a.characterization_name}</div>}
-                          </td>
-                          {erp && <td className="px-2 py-3 text-center">{a.erp_state && <ErpBadge state={a.erp_state} error={a.erp_error} compact />}</td>}
+                          {shownCols.map((c) => <td key={c.key} className={clsx('min-w-0 overflow-hidden px-3', dense ? 'py-1.5' : 'py-3', c.key === 'erp' && 'text-center')}>{cell(c.key, a)}</td>)}
                         </tr>
                         {isOpen && (
                           <tr className="bg-primary-soft/40">
-                            <td colSpan={erp ? 6 : 5} className="px-4 pb-4 pt-0">
+                            <td colSpan={shownCols.length} className="px-4 pb-4 pt-0">
                               <Details a={a} canEdit={canEdit} onEdit={() => setEdit({ id: a.id })} onComplete={() => setComplete(a)} onResend={() => resend(a)} />
                             </td>
                           </tr>
@@ -220,7 +402,7 @@ export function CustomerActions({ customerId, customerName, canEdit }: { custome
                       <span className={clsx('grid h-10 w-10 shrink-0 place-items-center rounded-xl', tone(a.type_color))}><Icon size={17} /></span>
                       <span className="min-w-0 flex-1">
                         <span className="flex flex-wrap items-center gap-x-2 text-xs text-muted">
-                          <span className={clsx('font-semibold tabular', a.overdue ? 'text-danger' : 'text-text')}>{a.due_at ? d(a.due_at) : d(a.created_at)}</span>
+                          <span className={clsx('font-semibold tabular', a.overdue ? 'text-danger' : 'text-text')}>{d(a.due_at ?? a.created_at)}</span>
                           <span className="tabular">{span(a)}</span>
                           {a.erp_code && <span className="font-mono">{a.erp_code}</span>}
                         </span>

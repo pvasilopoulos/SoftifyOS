@@ -1,4 +1,5 @@
 'use client';
+import { RequestMore } from './ai-usage';
 // Shared AI UI: safe markdown (no HTML), action cards (confirm / cancel proposed changes), dictation (Web Speech API).
 import { Fragment, useEffect, useRef, useState, type ReactNode } from 'react';
 import clsx from 'clsx';
@@ -209,5 +210,11 @@ export function MicButton({ d, className, size = 18 }: { d: ReturnType<typeof us
 /** Shows why an AI feature cannot run (not configured, disabled, budget…). */
 export function AiErrorNote({ code }: { code: string }) {
   const t = useTranslations('ai');
-  return <p className="rounded-xl bg-warning-soft px-3 py-2 text-sm text-warning">{t((code.startsWith('err_') ? code : aiErrorKey(code)) as never)}</p>;
+  return (
+    <div className="rounded-xl bg-warning-soft px-3 py-2 text-sm text-warning">
+      <p>{t((code.startsWith('err_') ? code : aiErrorKey(code)) as never)}</p>
+      {/* Own monthly limit reached: ask an administrator for more right here */}
+      {code === 'user_budget_exceeded' && <RequestMore pending={false} compact />}
+    </div>
+  );
 }

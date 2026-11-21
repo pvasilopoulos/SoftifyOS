@@ -1,4 +1,6 @@
 'use client';
+import { MyAiUsage } from './ai-usage';
+import { useAiStatus } from '@/lib/ai';
 import { appConfirm } from './confirm';
 import { ImpersonateButton } from './impersonation';
 // Settings module sections. Each section loads its own data; admin-only edits are enforced by the API too.
@@ -685,6 +687,7 @@ export function ListsSection() {
 // ======================================== My profile ========================================
 export function ProfileSection() {
   const t = useTranslations('settings.profile');
+  const aiOn = useAiStatus().data?.allowed;
   const ts = useTranslations('settings');
   const toast = useToast();
   const qc = useQueryClient();
@@ -716,6 +719,7 @@ export function ProfileSection() {
   });
   return (
     <div className="space-y-4">
+      {aiOn && <MyAiUsage />}
       <Card title={t('sDetails')}>
         <form className="grid grid-cols-1 gap-3 sm:grid-cols-2" onSubmit={(e) => { e.preventDefault(); saveProfile.mutate(); }}>
           <Field label={t('fullName')}><input required minLength={2} className={input} value={name} onChange={(e) => setName(e.target.value)} /></Field>

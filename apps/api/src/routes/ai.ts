@@ -11,7 +11,7 @@ import { audit } from './settings.js';
 import { planBlocks } from '../billing.js';
 import { encryptSecret } from '../registries.js';
 import {
-  aiFor, BETAS, callerFor, clientWithKey, hasEnvKey, contextLine, DEFAULT_SETTINGS, executeAction, FEATURES, gate, loadSettings, meter, monthSpend, MODEL,
+  aiFor, BETAS, callerFor, clientWithKey, hasEnvKey, contextLine, DEFAULT_SETTINGS, executeAction, FEATURES, gate, loadSettings, meter, monthSpend, MODEL, recordError,
   systemPrompt, TOOL_BY_NAME, TOOLS, ToolError, type ActionKind, type AiSettings, type Feature,
 } from '../ai.js';
 import { definitionSchema } from '../reports.js';
@@ -35,12 +35,16 @@ function apiError(e: unknown) {
 
 /** One structured-output call (no tools). Returns the parsed object or throws. */
 async function extract<T extends z4.ZodType>(s: Session, feature: Feature, schema: T, system: string, content: Anthropic.Beta.BetaContentBlockParam[], effort: 'low' | 'medium' | 'high' = 'medium') {
-  const r = await (await aiFor(s.tenantId))!.beta.messages.parse({
-    model: MODEL, max_tokens: 16000, betas: BETAS, fallbacks: 'default',
-    output_config: { effort, format: zodOutputFormat(schema) },
-    system, messages: [{ role: 'user', content }],
-  });
-  await meter(s, feature, r.model, r.usage);
+  const t0 = Date.now();
+  let r;
+  try {
+    r = await (await aiFor(s.tenantId))!.beta.messages.parse({
+      model: MODEL, max_tokens: 16000, betas: BETAS, fallbacks: 'default',
+      output_config: { effort, format: zodOutputFormat(schema) },
+      system, messages: [{ role: 'user', content }],
+    });
+  } catch (e) { await recordError(s, feature, e, { requested_model: MODEL, duration_ms: Date.now() - t0 }); throw e; }
+  await meter(s, feature, r.model, r.usage, { request_id: (r as { _request_id?: string | null })._request_id, duration_ms: Date.now() - t0 }, r.stop_reason === 'refusal');
   if (r.stop_reason === 'refusal') throw new ToolError('refused');
   if (!r.parsed_output) throw new ToolError('unparsed');
   return r.parsed_output as z4.infer<T>;
@@ -264,6 +268,7 @@ export default async function aiRoutes(app: FastifyInstance) {
       };
       try {
         for (let step = 0; step < MAX_STEPS; step++) {
+          const t0 = Date.now();
           const stream = (await aiFor(s.tenantId))!.beta.messages.stream({
             model: MODEL, max_tokens: 32000, betas: BETAS, fallbacks: 'default',
             output_config: { effort: 'medium' },
@@ -271,8 +276,12 @@ export default async function aiRoutes(app: FastifyInstance) {
             system, tools: TOOLS.map((t) => t.tool), messages,
           }, { signal: abort.signal });
           stream.on('text', (delta) => send({ type: 'text', delta }));
-          const msg = await stream.finalMessage();
-          await meter(s, 'copilot', msg.model, msg.usage);
+          let msg;
+          try { msg = await stream.finalMessage(); }
+          catch (e) { if (!abort.signal.aborted) await recordError(s, 'copilot', e, { requested_model: MODEL, duration_ms: Date.now() - t0, entity: 'conversation', entity_id: conv }); throw e; }
+          await meter(s, 'copilot', msg.model, msg.usage, {
+            request_id: (stream as unknown as { request_id?: string | null }).request_id ?? null, duration_ms: Date.now() - t0, entity: 'conversation', entity_id: conv,
+          }, msg.stop_reason === 'refusal');
           messages.push({ role: 'assistant', content: msg.content });
           await save('assistant', msg.content);
 
@@ -446,6 +455,7 @@ export default async function aiRoutes(app: FastifyInstance) {
           },
         });
       } catch { return reply.code(404).send({ error: 'not_found' }); }
+      const t0 = Date.now();
       try {
         const r2 = await (await aiFor(s.tenantId))!.beta.messages.create({
           model: MODEL, max_tokens: 8000, betas: BETAS, fallbacks: 'default', output_config: { effort: 'medium' },
@@ -455,16 +465,20 @@ export default async function aiRoutes(app: FastifyInstance) {
             `Use only the data given; skip a section that has nothing. ${contextLine(null)}`,
           messages: [{ role: 'user', content: JSON.stringify(data).slice(0, 150000) }],
         });
-        await meter(s, 'summary', r2.model, r2.usage);
+        await meter(s, 'summary', r2.model, r2.usage, { request_id: (r2 as { _request_id?: string | null })._request_id, duration_ms: Date.now() - t0, entity: 'customer', entity_id: id }, r2.stop_reason === 'refusal');
         if (r2.stop_reason === 'refusal') return reply.code(502).send({ error: 'refused' });
         return { text: textOf(r2.content), generated_at: new Date().toISOString() };
-      } catch (e) { req.log.error(e); return reply.code(502).send({ error: apiError(e) }); }
+      } catch (e) {
+        req.log.error(e);
+        await recordError(s, 'summary', e, { requested_model: MODEL, duration_ms: Date.now() - t0, entity: 'customer', entity_id: id });
+        return reply.code(502).send({ error: apiError(e) });
+      }
     });
 
     // ------------------------------------------------------------ customer activities (tab "Ενέργειες"): summary or a question
     r.post('/ai/customers/:id/actions-summary', async (req, reply) => {
       const s = req.session;
-      const blocked = await gate(s, 'summary');
+      const blocked = await gate(s, 'actions_summary');
       if (blocked) return refuse(reply, blocked);
       const { id } = idParam.parse(req.params);
       const b = z.object({
@@ -504,15 +518,20 @@ export default async function aiRoutes(app: FastifyInstance) {
           `**Ανοιχτά** (open / upcoming activities with dates and who handles them), ` +
           `**Προσοχή** (risks: overdue, unanswered, cancellations, disputes), **Επόμενο βήμα** (one concrete recommendation). ` +
           `Use only the data given; skip a section that has nothing. ${contextLine(null)}`;
+      const t0 = Date.now();
       try {
         const r2 = await (await aiFor(s.tenantId))!.beta.messages.create({
           model: MODEL, max_tokens: 8000, betas: BETAS, fallbacks: 'default', output_config: { effort: 'medium' }, system,
           messages: [{ role: 'user', content: `${b.question ? `Ερώτηση: ${b.question}\n\n` : ''}${JSON.stringify(data).slice(0, 180000)}` }],
         });
-        await meter(s, 'summary', r2.model, r2.usage);
+        await meter(s, 'actions_summary', r2.model, r2.usage, { request_id: (r2 as { _request_id?: string | null })._request_id, duration_ms: Date.now() - t0, entity: 'customer', entity_id: id }, r2.stop_reason === 'refusal');
         if (r2.stop_reason === 'refusal') return reply.code(502).send({ error: 'refused' });
         return { text: textOf(r2.content), count: data.activities.length, generated_at: new Date().toISOString() };
-      } catch (e) { req.log.error(e); return reply.code(502).send({ error: apiError(e) }); }
+      } catch (e) {
+        req.log.error(e);
+        await recordError(s, 'actions_summary', e, { requested_model: MODEL, duration_ms: Date.now() - t0, entity: 'customer', entity_id: id });
+        return reply.code(502).send({ error: apiError(e) });
+      }
     });
 
     // ------------------------------------------------------------ natural-language report → definition

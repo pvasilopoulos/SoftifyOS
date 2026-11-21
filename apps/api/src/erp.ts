@@ -25,19 +25,25 @@ export type ErpMeta = {
   series_map: Record<string, string>; default_series: string; default_type: string;
   users_map: Record<string, string>; priority_map: Record<string, number>;
   lists: { characterization: ErpListSource; status: ErpListSource };
+  /** Values met in Soft1 records, "code" → "name" (to map series, users, priorities by name) */
+  seen?: Partial<Record<'series' | 'users' | 'priority' | 'characterization' | 'status', Record<string, string>>>;
   // last run (written by the sync)
   last_pull_at?: string | null; last_push_at?: string | null; last_reconcile_at?: string | null;
   last_ok_at?: string | null; last_error?: string | null; connected?: { company: string; at: string } | null;
+  running?: { what: string; since: string } | null;
 };
 
+/** Field names of SOACTION in Soft1 (checked on a real installation). Lookups come as "code|name". */
+export const SOFT1_FIELDS = {
+  code: 'SOACTIONCODE', series: 'SERIES', date: 'TRNDATE', start: 'FROMDATE', end: 'FINALDATE', customer: 'TRDR', branch: 'TRDBRANCH',
+  requester: 'ORDEREDBY', owner: 'ACTOR', subject: 'COMMENTS', remarks: 'REMARKS', characterization: 'ACTSTATES', status: 'ACTSTATUS',
+  priority: 'PRIORITY', updated: 'UPDDATE',
+};
 /** Field names usual in Soft1 for CRM activities; confirm them in Settings → ERP (field discovery). */
 export const DEFAULT_META: ErpMeta = {
   provider: 'softone', enabled: false, direction: 'both', conflict: 'newest', interval_min: 2, window_days: 365,
   object: 'SOACTION', table: 'SOACTION', list: '', filter: 'SOACTION.UPDDATE={since}', reconcile_filter: 'SOACTION.TRNDATE={from}&SOACTION.TRNDATE_TO={to}',
-  fields: {
-    code: 'FINCODE', series: 'SERIES', date: 'TRNDATE', start: '', end: '', customer: 'TRDR', branch: 'TRDBRANCH',
-    requester: '', owner: '', subject: 'COMMENTS', remarks: 'REMARKS', characterization: '', status: '', priority: '', updated: 'UPDDATE',
-  },
+  fields: SOFT1_FIELDS,
   customer_match: 'external_id', series_map: {}, default_series: '', default_type: 'meeting',
   users_map: {}, priority_map: { 1: 1, 2: 2, 3: 3 },
   lists: { characterization: { object: '', code: 'CODE', name: 'NAME', active: 'ISACTIVE' }, status: { object: '', code: 'CODE', name: 'NAME', active: 'ISACTIVE' } },
@@ -120,19 +126,32 @@ export function remoteHash(meta: ErpMeta, rec: Row) {
   return createHash('sha1').update(JSON.stringify(vals)).digest('hex');
 }
 const str = (v: unknown) => (v === null || v === undefined || v === '' ? null : String(v));
+/** Soft1 lookups: "495|Πουλημένου Μαρία" → code 495, name … (plain values: code only). */
+export function part(v: unknown): { code: string | null; name: string | null } {
+  const x = str(v);
+  if (!x) return { code: null, name: null };
+  const i = x.indexOf('|');
+  return i < 0 ? { code: x, name: null } : { code: x.slice(0, i) || null, name: x.slice(i + 1) || null };
+}
+type Seen = NonNullable<ErpMeta['seen']>;
 
 export type Mapped = {
   erp_code: string | null; type: string; due_at: Date | null; ends_at: Date | null; customer_id: string | null; customer_label: string | null;
   branch_id: string | null; requested_by: string | null; owner_id: string | null; subject: string; body: string | null;
   characterization: string | null; erp_status: string | null; priority: number; remote_updated: Date | null; problems: string[];
+  seen: Seen;
 };
 
 /** Soft1 record → activity values (looks up customer, store, people, lists). */
-export async function fromErp(tx: Tx | typeof sql, T: string, l: Loaded, rec: Row): Promise<Mapped> {
-  const f = l.meta.fields, get = (k: keyof ErpFields) => (f[k] ? rec[f[k]] : undefined);
+export async function fromErp(tx: Tx | typeof sql, T: string, l: Loaded, rec: Row, opts: { learn?: boolean } = {}): Promise<Mapped> {
+  const f = l.meta.fields, raw = (k: keyof ErpFields) => (f[k] ? rec[f[k]] : undefined), get = (k: keyof ErpFields) => part(raw(k)).code;
   const problems: string[] = [];
+  const seen: Seen = {};
+  const note = (kind: keyof Seen, k: keyof ErpFields) => { const x = part(raw(k)); if (x.code) (seen[kind] ??= {})[x.code] = x.name ?? x.code; };
+  note('series', 'series'); note('users', 'owner'); note('users', 'requester'); note('priority', 'priority'); note('characterization', 'characterization'); note('status', 'status');
   let customer_id: string | null = null;
-  const custVal = str(get('customer'));
+  // By code: Soft1 sends the customer's code next to its id (TRDR_GENTRDR_CODE); by id: the internal TRDR
+  const custVal = l.meta.customer_match === 'code' && f.customer ? str(rec[`${f.customer}_GENTRDR_CODE`]) ?? get('customer') : get('customer');
   if (custVal) {
     const [c] = l.meta.customer_match === 'code'
       ? await tx`SELECT id FROM customers WHERE tenant_id = ${T} AND code = ${custVal}`
@@ -149,26 +168,32 @@ export async function fromErp(tx: Tx | typeof sql, T: string, l: Loaded, rec: Ro
   const user = (v: unknown) => { const k = str(v); return k ? l.meta.users_map[k] ?? null : null; };
   const series = str(get('series'));
   const type = (series && l.meta.series_map[series]) || l.meta.default_type;
-  const listCode = async (kind: 'characterization' | 'status', v: unknown) => {
-    const k = str(v);
+  const listCode = async (kind: 'characterization' | 'status', field: keyof ErpFields) => {
+    const { code: k, name } = part(raw(field));
     if (!k) return null;
     const [x] = await tx`SELECT code FROM crm_erp_values WHERE tenant_id = ${T} AND kind = ${kind} AND code = ${k}`;
-    if (!x) problems.push(`${kind}_unknown:${k}`);
-    return x ? k : null;
+    if (x) return k;
+    // A value the list does not have yet: learnt from Soft1 with its name (the status mapping stays to be set)
+    if (name) {
+      if (opts.learn) await tx`INSERT INTO crm_erp_values (tenant_id, kind, code, name, active, sort) VALUES (${T}, ${kind}, ${k}, ${name.slice(0, 100)}, true, ${Number(k) || 100}) ON CONFLICT DO NOTHING`;
+      return k;
+    }
+    problems.push(`${kind}_unknown:${k}`);
+    return null;
   };
-  const start = fromErpDate(get('start'), l.tz) ?? fromErpDate(get('date'), l.tz);
+  const start = fromErpDate(raw('start'), l.tz) ?? fromErpDate(raw('date'), l.tz);
   const prio = str(get('priority'));
   return {
-    erp_code: str(get('code')), type,
-    due_at: start, ends_at: fromErpDate(get('end'), l.tz),
+    erp_code: str(raw('code')), type,
+    due_at: start, ends_at: fromErpDate(raw('end'), l.tz),
     customer_id, customer_label: custVal, branch_id,
     requested_by: user(get('requester')), owner_id: user(get('owner')),
-    subject: (str(get('subject')) ?? str(get('code')) ?? '—').slice(0, 200),
-    body: str(get('remarks'))?.slice(0, 20000) ?? null,
-    characterization: await listCode('characterization', get('characterization')),
-    erp_status: await listCode('status', get('status')),
+    subject: (str(raw('subject')) ?? str(raw('code')) ?? '—').slice(0, 200),
+    body: str(raw('remarks'))?.slice(0, 20000) ?? null,
+    characterization: await listCode('characterization', 'characterization'),
+    erp_status: await listCode('status', 'status'),
     priority: prio && l.meta.priority_map[prio] ? Math.min(3, Math.max(1, l.meta.priority_map[prio])) : 2,
-    remote_updated: fromErpDate(get('updated'), l.tz), problems,
+    remote_updated: fromErpDate(raw('updated'), l.tz), problems, seen,
   };
 }
 
@@ -232,6 +257,17 @@ async function applyRemote(T: string, l: Loaded, key: string, rec: Row, m: Mappe
   });
 }
 
+export async function rememberSeen(T: string, add: Seen) {
+  if (!Object.keys(add).length) return;
+  const [t] = await sql`SELECT erp_meta->'seen' AS seen FROM tenants WHERE id = ${T}`;
+  const cur = (t?.seen ?? {}) as Seen;
+  for (const [k, v] of Object.entries(add) as [keyof Seen, Record<string, string>][]) {
+    cur[k] = Object.fromEntries(Object.entries({ ...(cur[k] ?? {}), ...v }).slice(-300));
+  }
+  await saveRun(T, { seen: cur });
+}
+const mergeSeen = (a: Seen, b: Seen) => { for (const [k, v] of Object.entries(b) as [keyof Seen, Record<string, string>][]) a[k] = { ...(a[k] ?? {}), ...v }; return a; };
+
 // ---------------------------------------------------------------- pull
 export type PullResult = { seen: number; created: number; updated: number; unchanged: number; skipped: number; conflicts: number; deleted: number; preview?: (Mapped & { key: string; action: string })[] };
 
@@ -245,14 +281,16 @@ export async function pull(T: string, opts: { dryRun?: boolean; limit?: number; 
   const filter = l.meta.filter.replaceAll('{since}', isoDay(since)).replaceAll('{from}', isoDay(since)).replaceAll('{to}', isoDay(new Date(Date.now() + 366 * 864e5)));
   const started = new Date();
   const rows = await s1.browse(l.meta.object, l.meta.list, filter, opts.limit ?? 2000);
-  for (const { key } of rows) {
+  const seenAll: Seen = {};
+  for (const { key } of opts.dryRun ? rows.slice(0, 25) : rows) {
     r.seen++;
     const rec = await s1.get(l.meta.object, l.meta.table, key);
     if (!rec) continue;
     const [local] = await sql`SELECT id, erp_hash, erp_state, updated_at FROM crm_activities WHERE tenant_id = ${T} AND external_id = ${key}`;
     const hash = remoteHash(l.meta, rec);
     if (local && local.erp_hash === hash) { r.unchanged++; continue; }
-    const m = await fromErp(sql, T, l, rec);
+    const m = await fromErp(sql, T, l, rec, { learn: !opts.dryRun });
+    mergeSeen(seenAll, m.seen);
     if (!m.customer_id) {
       r.skipped++;
       if (opts.dryRun) r.preview!.push({ ...m, key, action: 'skip' });
@@ -274,6 +312,7 @@ export async function pull(T: string, opts: { dryRun?: boolean; limit?: number; 
     if (local) r.updated++; else r.created++;
     if (m.problems.length) await erpLog(T, 'warning', 'pull', `${m.erp_code ?? key}: ${m.problems.join(', ')}`, { external_id: key });
   }
+  await rememberSeen(T, seenAll);
   if (opts.dryRun) return r;
 
   // Deleted in Soft1: compare the keys in the window (at most every 6 hours, with safety limits)
@@ -399,6 +438,8 @@ export async function pullLists(T: string) {
 
 /** Runs a sync job; errors are recorded on the organisation (shown in Settings → ERP) and logged. */
 export async function runErpJob(T: string, what: 'pull' | 'push' | 'lists' | 'full') {
+  // Visible in Settings → ERP while it runs (the job itself has already left the queue)
+  await saveRun(T, { running: { what, since: new Date().toISOString() } });
   try {
     if (what === 'lists') return await pullLists(T);
     if (what === 'push') return await push(T);
@@ -410,6 +451,8 @@ export async function runErpJob(T: string, what: 'pull' | 'push' | 'lists' | 'fu
     await erpLog(T, 'error', what, msg);
     if (!(e instanceof Soft1Error)) throw e;
     return null;
+  } finally {
+    await saveRun(T, { running: null });
   }
 }
 

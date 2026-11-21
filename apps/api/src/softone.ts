@@ -109,7 +109,8 @@ export class Soft1 {
 
   /** One record: the first line of the object's main table (field name → value). */
   async get(object: string, table: string, key: string): Promise<Json | null> {
-    const r = await this.call('getData', { OBJECT: object, FORM: '', KEY: key, LOCATEINFO: `${table}:*` });
+    // No LOCATEINFO: some installations answer "TABLE:*" with an empty row; without it every field of the main table comes back
+    const r = await this.call('getData', { OBJECT: object, FORM: '', KEY: key });
     const rows = ((r.data as Json | undefined)?.[table] ?? []) as Json[];
     return rows[0] ?? null;
   }

@@ -11,22 +11,23 @@ import type { Session } from './auth.js';
 import { FILTERS } from './filters.js';
 import { catalogue } from './reports.js';
 import { decryptSecret } from './registries.js';
+import { checkLimits, recordCall, withLimitDefaults, type CallMeta, type Limits } from './ai-cost.js';
+export { recordError } from './ai-cost.js';
 
 export const MODEL = 'claude-opus-5-5';
 /** Server-side fallback on a refusal: the API re-runs the request on a suitable model. */
 export const BETAS: Anthropic.Beta.AnthropicBeta[] = ['server-side-fallback-2026-07-01'];
-// $ per million tokens (Claude Opus 5.5): input, output, cache read, cache write (5 min)
-const PRICE = { in: 4, out: 20, cacheRead: 0.2, cacheWrite: 5 };
 
-export const FEATURES = ['copilot', 'voice', 'summary', 'reports', 'offer_draft', 'import'] as const;
+export const FEATURES = ['copilot', 'voice', 'summary', 'actions_summary', 'reports', 'offer_draft', 'import'] as const;
 export type Feature = (typeof FEATURES)[number];
 export type AiSettings = {
   enabled: boolean; consent_at: string | null; consent_by: string | null; monthly_budget_usd: number;
   features: Record<Feature, boolean>;
+  limits?: Partial<Limits>;
 };
 export const DEFAULT_SETTINGS: AiSettings = {
   enabled: false, consent_at: null, consent_by: null, monthly_budget_usd: 50,
-  features: { copilot: true, voice: true, summary: true, reports: true, offer_draft: true, import: true },
+  features: { copilot: true, voice: true, summary: true, actions_summary: true, reports: true, offer_draft: true, import: true },
 };
 
 // Clients: one per organisation key (Settings → AI), else the server key from .env (fallback for everyone).
@@ -74,18 +75,13 @@ export async function gate(s: Session, feature: Feature): Promise<string | null>
   const st = await loadSettings(s.tenantId);
   if (!st.enabled || !st.consent_at) return 'ai_disabled';
   if (!st.features[feature]) return 'feature_disabled';
-  const spent = await withTenant(s.tenantId, (tx) => monthSpend(tx, s.tenantId));
-  if (spent >= st.monthly_budget_usd) return 'budget_exceeded';
-  return null;
+  // Organisation budget, user / role limits (+ approved extra), daily limit, feature cap and rate: see ai-cost.ts
+  return checkLimits(s, feature, st.monthly_budget_usd, withLimitDefaults(st.limits));
 }
 
-export async function meter(s: Session, feature: Feature, model: string, u: Anthropic.Beta.BetaUsage | undefined) {
-  if (!u) return;
-  const cr = u.cache_read_input_tokens ?? 0, cw = u.cache_creation_input_tokens ?? 0;
-  const cost = (u.input_tokens * PRICE.in + u.output_tokens * PRICE.out + cr * PRICE.cacheRead + cw * PRICE.cacheWrite) / 1e6;
-  await withTenant(s.tenantId, (tx) => tx`
-    INSERT INTO ai_usage (tenant_id, user_id, feature, model, input_tokens, output_tokens, cache_read, cache_write, cost_usd)
-    VALUES (${s.tenantId}, ${s.userId}, ${feature}, ${model}, ${u.input_tokens}, ${u.output_tokens}, ${cr}, ${cw}, ${cost})`);
+/** Records a finished call in the ledger (cost from the price list of the model that actually answered). */
+export async function meter(s: Session, feature: Feature, model: string, u: Anthropic.Beta.BetaUsage | undefined, meta: CallMeta = {}, refused = false) {
+  await recordCall(s, feature, model, u, { requested_model: MODEL, ...meta }, refused ? 'refused' : 'ok');
 }
 
 // ============================================================ in-process API calls as the user
