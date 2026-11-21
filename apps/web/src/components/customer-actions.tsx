@@ -7,7 +7,7 @@ import { useInfiniteQuery, useQuery, useQueryClient } from '@tanstack/react-quer
 import { useLocale, useTranslations } from 'next-intl';
 import {
   ArrowDown, ArrowRight, ArrowUp, Building2, CheckCircle2, Group, Save, ChevronDown, ChevronLeft, ChevronRight, Columns3, Download, Flag, Loader2, MessageSquareText, Pencil, Plus, RefreshCw,
-  Rows3, Search, Send, SlidersHorizontal, Sparkles, Store, Wand2, X,
+  Layers, Rows3, Search, Send, SlidersHorizontal, Sparkles, Store, Tag, Wand2, X,
 } from 'lucide-react';
 import { api, ApiError } from '@/lib/api';
 import { iconOf, tone, useCrmMeta, useCrmRefresh, type Activity, type ActivityStatus } from '@/lib/crm';
@@ -272,8 +272,8 @@ export function CustomerActions({ customerId, customerName, canEdit }: { custome
     const el = document.createElement('a'); el.href = url; el.download = `${customerName.replace(/[^\p{L}\p{N}]+/gu, '-')}-energeies.csv`; el.click(); URL.revokeObjectURL(url);
   };
 
-  const select = 'h-8 rounded-lg border border-border bg-surface pl-2 pr-7 text-sm outline-none focus:border-primary';
-  const toolBtn = (active: boolean) => clsx('flex h-8 items-center gap-1.5 rounded-lg border px-2.5 text-sm font-medium transition', active ? 'border-primary bg-primary-soft text-primary' : 'border-border bg-surface hover:border-primary');
+  const select = 'h-9 @xl:h-8 rounded-lg border border-border bg-surface pl-2 pr-7 text-sm outline-none focus:border-primary';
+  const toolBtn = (active: boolean) => clsx('flex h-9 @xl:h-8 items-center gap-1.5 rounded-lg border px-2.5 text-sm font-medium transition', active ? 'border-primary bg-primary-soft text-primary' : 'border-border bg-surface hover:border-primary');
   return (
     <div className="@container space-y-3">
       {/* ---------------------------------------------------------------- toolbar */}
@@ -284,7 +284,7 @@ export function CustomerActions({ customerId, customerName, canEdit }: { custome
             <input value={q} onChange={(e) => setQ(e.target.value)} placeholder={t('search')} aria-label={t('search')} className="min-w-0 flex-1 bg-transparent text-sm outline-none" />
             {q && <button type="button" onClick={() => setQ('')} aria-label="clear" className="text-muted"><X size={15} /></button>}
           </label>
-          <div className="flex items-center gap-2">
+          <div className="flex w-full items-center gap-2 @lg:w-auto">
             {aiOn && (
               <button type="button" onClick={() => setShowAi(!showAi)} aria-pressed={showAi}
                 className={clsx('flex h-10 items-center gap-1.5 rounded-xl px-3 text-sm font-medium transition', showAi ? 'bg-primary-soft text-primary' : 'border border-border bg-surface hover:border-primary')}>
@@ -298,37 +298,43 @@ export function CustomerActions({ customerId, customerName, canEdit }: { custome
               </button>
             )}
             {canEdit && (
-              <button type="button" onClick={newActivity} className="flex h-10 items-center gap-1.5 rounded-xl bg-primary px-4 text-sm font-semibold text-white shadow-sm">
+              <button type="button" onClick={newActivity} className="flex h-10 flex-1 items-center justify-center gap-1.5 rounded-xl bg-primary px-4 text-sm font-semibold text-white shadow-sm @lg:flex-none">
                 <Plus size={16} /> {t('new')}
               </button>
             )}
           </div>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <div className="no-scrollbar flex gap-0.5 overflow-x-auto rounded-lg bg-surface-2 p-0.5 text-sm">
+          <div className="flex w-full gap-0.5 rounded-lg bg-surface-2 p-0.5 text-xs @xl:w-auto @xl:text-sm">
             {(['any', 'open', 'done', 'cancelled'] as const).map((k) => (
               <button key={k} type="button" onClick={() => setStatus(k)} aria-pressed={status === k}
-                className={clsx('shrink-0 rounded-md px-3 py-1 font-medium transition', status === k ? 'bg-surface text-primary shadow-sm' : 'text-muted hover:text-text')}>{t(`f_${k}`)}</button>
+                className={clsx('flex-auto whitespace-nowrap rounded-md px-1 py-1.5 font-medium transition @xl:flex-none @xl:px-3 @xl:py-1', status === k ? 'bg-surface text-primary shadow-sm' : 'text-muted hover:text-text')}><span className="@xl:hidden">{t(`fs_${k}`)}</span><span className="hidden @xl:inline">{t(`f_${k}`)}</span></button>
             ))}
           </div>
-          <select value={type} onChange={(e) => setType(e.target.value)} aria-label={t('series')} className={select}>
-            <option value="">{t('allSeries')}</option>
-            {meta.data?.types.map((x) => <option key={x.key} value={x.key}>{x.name}</option>)}
-          </select>
-          {chars.length > 0 && (
-            <select value={char} onChange={(e) => setChar(e.target.value)} aria-label={t('characterization')} className={select}>
-              <option value="">{t('allChars')}</option>
-              {chars.map((x) => <option key={x.code} value={x.code}>{x.name}</option>)}
+          <label className={clsx(toolBtn(!!type), 'pr-1 min-w-0 flex-1 basis-[calc(50%-0.25rem)] @xl:flex-none @xl:basis-auto')} title={t('series')}>
+            <Layers size={14} className="shrink-0" />
+            <select value={type} onChange={(e) => setType(e.target.value)} aria-label={t('series')} className="min-w-0 flex-1 bg-transparent text-[13px] outline-none @xl:pr-1 @xl:text-sm">
+              <option value="">{t('allSeries')}</option>
+              {meta.data?.types.map((x) => <option key={x.key} value={x.key}>{x.name}</option>)}
             </select>
+          </label>
+          {chars.length > 0 && (
+            <label className={clsx(toolBtn(!!char), 'pr-1 min-w-0 flex-1 basis-[calc(50%-0.25rem)] @xl:flex-none @xl:basis-auto')} title={t('characterization')}>
+              <Tag size={14} className="shrink-0" />
+              <select value={char} onChange={(e) => setChar(e.target.value)} aria-label={t('characterization')} className="min-w-0 flex-1 bg-transparent text-[13px] outline-none @xl:pr-1 @xl:text-sm">
+                <option value="">{t('allChars')}</option>
+                {chars.map((x) => <option key={x.code} value={x.code}>{x.name}</option>)}
+              </select>
+            </label>
           )}
-          <label className={clsx(toolBtn(!!groupBy), 'pr-1')}>
-            <Group size={14} /> <span className="hidden @xl:inline">{t('groupBy')}</span>
-            <select value={groupBy} onChange={(e) => pickGroup(e.target.value as GroupBy)} aria-label={t('groupBy')} className="bg-transparent pr-1 text-sm outline-none">
+          <label className={clsx(toolBtn(!!groupBy), 'pr-1 min-w-0 flex-1 basis-[calc(50%-0.25rem)] @xl:flex-none @xl:basis-auto')} title={t('groupBy')}>
+            <Group size={14} className="shrink-0" />
+            <select value={groupBy} onChange={(e) => pickGroup(e.target.value as GroupBy)} aria-label={t('groupBy')} className="min-w-0 flex-1 bg-transparent text-[13px] outline-none @xl:pr-1 @xl:text-sm">
               <option value="">{t('g_off')}</option>
               {(['branch', 'series', 'status', 'handler', 'characterization', 'month'] as const).map((g) => <option key={g} value={g}>{t(`g_${g}`)}</option>)}
             </select>
           </label>
-          <button type="button" onClick={() => setPanel(panel === 'filters' ? null : 'filters')} aria-expanded={panel === 'filters'} className={toolBtn(panel === 'filters' || extraCount > 0)}>
+          <button type="button" onClick={() => setPanel(panel === 'filters' ? null : 'filters')} aria-expanded={panel === 'filters'} className={clsx(toolBtn(panel === 'filters' || extraCount > 0), 'justify-center min-w-0 flex-1 basis-[calc(50%-0.25rem)] @xl:flex-none @xl:basis-auto')}>
             <SlidersHorizontal size={14} /> {t('moreFilters')}{extraCount > 0 && <span className="rounded-full bg-primary px-1.5 text-[11px] text-white">{extraCount}</span>}
           </button>
           <span className="flex-1" />
@@ -347,12 +353,12 @@ export function CustomerActions({ customerId, customerName, canEdit }: { custome
         </div>
 
         {panel === 'filters' && (
-          <div className="grid gap-2 rounded-xl bg-surface-2 p-3 @xl:grid-cols-3 @4xl:grid-cols-6">
-            <label className="min-w-0"><span className="mb-1 block text-xs text-muted">{t('h_handler')}</span>
+          <div className="grid grid-cols-2 gap-2 rounded-xl bg-surface-2 p-3 @xl:grid-cols-3 @4xl:grid-cols-6">
+            <label className="col-span-2 min-w-0 @xl:col-span-1"><span className="mb-1 block text-xs text-muted">{t('h_handler')}</span>
               <select value={extra.owner} onChange={(e) => setExtra((x) => ({ ...x, owner: e.target.value }))} className={clsx(select, 'w-full')}>
                 <option value="">{t('anyone')}</option>{users.map((u) => <option key={u.id} value={u.id}>{u.full_name}</option>)}
               </select></label>
-            <label className="min-w-0"><span className="mb-1 block text-xs text-muted">{t('h_priority')}</span>
+            <label className="min-w-0"><span className="mb-1 block text-xs text-muted">{t('f_priority')}</span>
               <select value={extra.priority} onChange={(e) => setExtra((x) => ({ ...x, priority: e.target.value }))} className={clsx(select, 'w-full')}>
                 <option value="">{t('any')}</option>{['1', '2', '3'].map((p) => <option key={p} value={p}>{tc(`prio_${p}`)}</option>)}
               </select></label>
@@ -366,7 +372,7 @@ export function CustomerActions({ customerId, customerName, canEdit }: { custome
               <input type="date" value={extra.from} disabled={extra.overdue} onChange={(e) => setExtra((x) => ({ ...x, from: e.target.value }))} className={clsx(select, 'w-full pr-2')} /></label>
             <label className="min-w-0"><span className="mb-1 block text-xs text-muted">{t('to')}</span>
               <input type="date" value={extra.to} disabled={extra.overdue} onChange={(e) => setExtra((x) => ({ ...x, to: e.target.value }))} className={clsx(select, 'w-full pr-2')} /></label>
-            <div className="flex flex-col justify-end gap-1.5 text-sm">
+            <div className="col-span-2 flex flex-wrap justify-end gap-x-4 gap-y-1.5 text-sm @xl:col-span-1 @xl:flex-col">
               <label className="flex items-center gap-2"><input type="checkbox" className="accent-[var(--primary)]" checked={extra.overdue} onChange={(e) => setExtra((x) => ({ ...x, overdue: e.target.checked }))} /> {t('onlyOverdue')}</label>
               <label className="flex items-center gap-2"><input type="checkbox" className="accent-[var(--primary)]" checked={extra.remarks} onChange={(e) => setExtra((x) => ({ ...x, remarks: e.target.checked }))} /> {t('withRemarks')}</label>
             </div>
