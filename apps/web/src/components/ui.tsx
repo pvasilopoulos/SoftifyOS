@@ -70,15 +70,20 @@ export function Segmented<T extends string>({ value, onChange, options }: {
 export function Tabs<T extends string>({ value, onChange, options }: {
   value: T; onChange: (v: T) => void; options: { value: T; label: string }[];
 }) {
+  // Phone: wrapping pills on as many rows as needed (no sideways scrolling); wider screens: underlined tabs
   return (
-    <div className="no-scrollbar flex gap-5 overflow-x-auto border-b border-border">
+    <div role="tablist" className="flex flex-wrap gap-1.5 sm:flex-nowrap sm:gap-5 sm:overflow-x-auto sm:border-b sm:border-border sm:no-scrollbar">
       {options.map((o) => (
         <button
           key={o.value}
           type="button"
+          role="tab"
+          aria-selected={value === o.value}
           onClick={() => onChange(o.value)}
-          className={clsx('-mb-px shrink-0 border-b-2 pb-2.5 text-sm font-medium transition',
-            value === o.value ? 'border-primary text-primary' : 'border-transparent text-muted')}
+          className={clsx('shrink-0 rounded-full px-3 py-1.5 text-sm font-medium transition sm:-mb-px sm:rounded-none sm:border-b-2 sm:px-0 sm:pb-2.5 sm:pt-0',
+            value === o.value
+              ? 'bg-primary text-white shadow-sm sm:border-primary sm:bg-transparent sm:text-primary sm:shadow-none'
+              : 'bg-surface-2 text-muted hover:text-text sm:border-transparent sm:bg-transparent')}
         >
           {o.label}
         </button>

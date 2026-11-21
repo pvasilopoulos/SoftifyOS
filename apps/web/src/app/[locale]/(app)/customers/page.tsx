@@ -210,7 +210,7 @@ function CustomersPageInner() {
           {items.map((it) => {
             const c = rows[it.index];
             return (
-              <div key={c.id} style={{ position: 'absolute', top: 0, left: 0, right: 0, transform: `translateY(${it.start - v.options.scrollMargin}px)` }} className="pb-3">
+              <div key={c.id} data-index={it.index} ref={v.measureElement} style={{ position: 'absolute', top: 0, left: 0, right: 0, transform: `translateY(${it.start - v.options.scrollMargin}px)` }} className="pb-3">
                 <Link href={`/customers/${c.id}`} className={clsx('card flex items-center gap-3.5 p-3.5 transition hover:border-primary/40', c.archived_at && 'opacity-60')}>
                   <CustomerRowParts c={c as unknown as Record<string, unknown>}>{(p) => (<>
                   <CustomerAvatar name={c.name} />

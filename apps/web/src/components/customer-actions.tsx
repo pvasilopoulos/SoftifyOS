@@ -3,10 +3,10 @@
 // subject, characterisation, status, start/end, priority), with remarks, editing, ERP sync state and an AI summary.
 import { Fragment, useEffect, useState, type ReactNode } from 'react';
 import clsx from 'clsx';
-import { useInfiniteQuery } from '@tanstack/react-query';
+import { useInfiniteQuery, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useLocale, useTranslations } from 'next-intl';
 import {
-  ArrowDown, ArrowRight, ArrowUp, CheckCircle2, ChevronDown, ChevronLeft, ChevronRight, Columns3, Download, Flag, Loader2, MessageSquareText, Pencil, Plus, RefreshCw,
+  ArrowDown, ArrowRight, ArrowUp, Building2, CheckCircle2, Group, Save, ChevronDown, ChevronLeft, ChevronRight, Columns3, Download, Flag, Loader2, MessageSquareText, Pencil, Plus, RefreshCw,
   Rows3, Search, Send, SlidersHorizontal, Sparkles, Store, Wand2, X,
 } from 'lucide-react';
 import { api, ApiError } from '@/lib/api';
@@ -21,6 +21,7 @@ type Page = { items: Activity[]; next_cursor: string | null };
 type ColKey = 'when' | 'series' | 'code' | 'subject' | 'store' | 'remarks' | 'handler' | 'requester' | 'status' | 'characterization' | 'priority' | 'start' | 'end' | 'created' | 'updated' | 'erp';
 type ColState = { key: ColKey; width: number; hidden: boolean };
 type SortKey = 'due_desc' | 'due' | 'updated' | 'created';
+type GroupBy = '' | 'branch' | 'series' | 'status' | 'handler' | 'characterization' | 'month';
 type Extra = { owner: string; priority: string; erpStatus: string; from: string; to: string; overdue: boolean; remarks: boolean };
 
 // Every column the grid can show: width in px (resizable), which are on by default, and the server sort it maps to
@@ -32,16 +33,16 @@ const COLUMNS: { key: ColKey; width: number; on: boolean; sort?: SortKey }[] = [
   { key: 'end', width: 140, on: false }, { key: 'created', width: 140, on: false, sort: 'created' }, { key: 'updated', width: 140, on: false, sort: 'updated' },
   { key: 'erp', width: 64, on: true },
 ];
-const STORE_KEY = 'softify.customer-actions.grid.v1';
+type Layout = { cols: ColState[]; dense: boolean; group: string };
+type LayoutResp = { organization: Layout | null; mine: Layout | null; effective: Layout | null; source: 'user' | 'organization' | 'default'; can_edit_organization: boolean };
+const GRID = 'customer_actions';
 const defaultCols = (): ColState[] => COLUMNS.map((c) => ({ key: c.key, width: c.width, hidden: !c.on }));
-function loadCols(): ColState[] {
-  try {
-    const saved = JSON.parse(localStorage.getItem(STORE_KEY) ?? 'null') as { cols?: ColState[] } | null;
-    if (!saved?.cols) return defaultCols();
-    const known = saved.cols.filter((c) => COLUMNS.some((x) => x.key === c.key));
-    for (const c of COLUMNS) if (!known.some((x) => x.key === c.key)) known.push({ key: c.key, width: c.width, hidden: !c.on });
-    return known;
-  } catch { return defaultCols(); }
+/** A saved layout, with columns added since then appended and unknown ones dropped. */
+function colsOf(saved?: ColState[] | null): ColState[] {
+  if (!saved?.length) return defaultCols();
+  const known = saved.filter((c) => COLUMNS.some((x) => x.key === c.key));
+  for (const c of COLUMNS) if (!known.some((x) => x.key === c.key)) known.push({ key: c.key, width: c.width, hidden: !c.on });
+  return known;
 }
 const NO_EXTRA: Extra = { owner: '', priority: '', erpStatus: '', from: '', to: '', overdue: false, remarks: false };
 
@@ -68,12 +69,42 @@ export function CustomerActions({ customerId, customerName, canEdit }: { custome
   const [panel, setPanel] = useState<'filters' | 'columns' | null>(null);
   const [cols, setCols] = useState<ColState[]>(defaultCols);
   const [dense, setDense] = useState(false);
+  const [groupBy, setGroupBy] = useState<GroupBy>('');
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   // Grid layout is a per-viewer convenience: kept in this browser
-  useEffect(() => { setCols(loadCols()); try { setDense(localStorage.getItem(`${STORE_KEY}.dense`) === '1'); } catch { /* private mode */ } }, []);
-  const saveCols = (next: ColState[]) => { setCols(next); try { localStorage.setItem(STORE_KEY, JSON.stringify({ cols: next })); } catch { /* private mode */ } };
+  // Layout: mine, else the organisation's, else built-in. Changes are saved as mine (follows me on every device).
+  const qc = useQueryClient();
+  const layoutQ = useQuery({ queryKey: ['grids', GRID], queryFn: () => api<LayoutResp>(`/me/grids/${GRID}`), staleTime: 300_000 });
+  const [touched, setTouched] = useState(0);
+  const applyLayout = (l: Layout | null) => { setCols(colsOf(l?.cols)); setDense(!!l?.dense); setGroupBy((l?.group ?? '') as GroupBy); };
+  useEffect(() => { if (layoutQ.data) applyLayout(layoutQ.data.effective); }, [layoutQ.data]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (!touched) return;
+    const h = setTimeout(() => {
+      api(`/me/grids/${GRID}`, { method: 'PUT', json: { layout: { cols, dense, group: groupBy } } })
+        .then(() => qc.setQueryData<LayoutResp>(['grids', GRID], (d) => d && { ...d, mine: { cols, dense, group: groupBy }, effective: { cols, dense, group: groupBy }, source: 'user' }))
+        .catch(() => {});
+    }, 700);
+    return () => clearTimeout(h);
+  }, [touched]); // eslint-disable-line react-hooks/exhaustive-deps
+  const changed = () => setTouched((n) => n + 1);
+  const pickGroup = (g: GroupBy) => { setGroupBy(g); setCollapsed(new Set()); changed(); };
+  const saveCols = (next: ColState[]) => { setCols(next); changed(); };
+  const setOrgLayout = async (reset: boolean) => {
+    try {
+      await api(`/settings/grids/${GRID}`, { method: 'PUT', json: { layout: reset ? null : { cols, dense, group: groupBy } } });
+      toast({ title: reset ? t('layoutOrgReset') : t('layoutOrgSaved') });
+      qc.invalidateQueries({ queryKey: ['grids', GRID] });
+    } catch { toast({ title: t('layoutError') }); }
+  };
+  const followOrg = async () => {
+    await api(`/me/grids/${GRID}`, { method: 'PUT', json: { layout: null } }).catch(() => {});
+    const d = await qc.fetchQuery({ queryKey: ['grids', GRID], queryFn: () => api<LayoutResp>(`/me/grids/${GRID}`), staleTime: 0 });
+    applyLayout(d.effective); toast({ title: t('layoutFollowOrg') });
+  };
   useEffect(() => { const h = setTimeout(() => setDq(q.trim()), 300); return () => clearTimeout(h); }, [q]);
 
-  const params = new URLSearchParams({ scope: 'all', status, customer_id: customerId, sort, limit: '50' });
+  const params = new URLSearchParams({ scope: 'all', status, customer_id: customerId, sort, limit: groupBy ? '200' : '50' });
   if (type) params.set('type', type);
   if (char) params.set('characterization', char);
   if (extra.erpStatus) params.set('erp_status', extra.erpStatus);
@@ -127,6 +158,34 @@ export function CustomerActions({ customerId, customerName, canEdit }: { custome
   };
   const statusOf = (a: Activity) => a.erp_status_name ?? tc(`st_${a.status}`);
   const statusTone = (s: ActivityStatus, overdue: boolean) => (s === 'done' ? 'bg-success-soft text-success' : s === 'cancelled' ? 'bg-surface-2 text-muted' : overdue ? 'bg-danger-soft text-danger' : 'bg-info-soft text-info');
+  /** Group label of an activity, and the groups in display order (empty group last; months newest first) */
+  const groupOf = (a: Activity): string => {
+    switch (groupBy) {
+      case 'branch': return a.branch_name ?? '';
+      case 'series': return a.type_name ?? a.type;
+      case 'status': return a.overdue ? tc('overdue') : statusOf(a);
+      case 'handler': return a.owner_name ?? '';
+      case 'characterization': return a.characterization_name ?? '';
+      case 'month': { const x = a.due_at ?? a.created_at; return x.slice(0, 7); }
+      default: return '';
+    }
+  };
+  const groups = (() => {
+    if (!groupBy) return [{ key: '', rows }];
+    const by = new Map<string, Activity[]>();
+    for (const a of rows) { const k = groupOf(a); by.set(k, [...(by.get(k) ?? []), a]); }
+    const keys = [...by.keys()].sort((x, y) => (!x ? 1 : !y ? -1 : groupBy === 'month' ? y.localeCompare(x) : x.localeCompare(y, locale)));
+    return keys.map((key) => ({ key, rows: by.get(key)! }));
+  })();
+  const groupLabel = (k: string) => (groupBy === 'month' && k
+    ? new Date(`${k}-15T12:00:00`).toLocaleDateString(locale, { month: 'long', year: 'numeric' })
+    : k || t(`g_none_${groupBy}`));
+  const toggleGroup = (k: string) => setCollapsed((c) => { const n = new Set(c); if (n.has(k)) n.delete(k); else n.add(k); return n; });
+  const groupStats = (rs: Activity[]) => ({
+    open: rs.filter((a) => a.status === 'planned' || a.status === 'in_progress').length,
+    overdue: rs.filter((a) => a.overdue).length,
+    last: rs.reduce<string | null>((m, a) => { const x = a.due_at ?? a.created_at; return !m || x > m ? x : m; }, null),
+  });
   const prioTone = (p: number) => (p === 1 ? 'bg-danger-soft text-danger' : p === 3 ? 'bg-surface-2 text-muted' : 'text-muted');
 
   const sync = async () => {
@@ -153,18 +212,18 @@ export function CustomerActions({ customerId, customerName, canEdit }: { custome
         <>
           <div className="flex items-start gap-1.5">
             {a.priority === 1 && <Flag size={13} className="mt-1 shrink-0 fill-danger text-danger" aria-label={tc('prio_1')} />}
-            <span className={clsx('font-semibold [overflow-wrap:anywhere]', dense ? 'line-clamp-1' : 'line-clamp-2')}>{a.subject}</span>
+            <span className={clsx('font-semibold [overflow-wrap:anywhere]', dense && 'line-clamp-1')}>{a.subject}</span>
           </div>
           {!dense && (a.branch_name || a.body) && !visible.includes('remarks') && (
-            <div className="mt-0.5 flex min-w-0 items-center gap-1.5 text-xs text-muted">
+            <div className="mt-0.5 flex min-w-0 flex-wrap items-center gap-x-1.5 text-xs text-muted">
               {a.branch_name && !visible.includes('store') && <span className="flex shrink-0 items-center gap-1"><Store size={11} /> {a.branch_name}</span>}
               {a.branch_name && !visible.includes('store') && a.body && <span>·</span>}
-              {a.body && <span className="truncate">{a.body}</span>}
+              {a.body && <span className="whitespace-pre-wrap [overflow-wrap:anywhere]">{a.body}</span>}
             </div>
           )}
         </>);
       case 'store': return <span className="block truncate">{a.branch_name ?? '—'}</span>;
-      case 'remarks': return <span className={clsx('text-xs text-muted [overflow-wrap:anywhere]', dense ? 'line-clamp-1' : 'line-clamp-3')}>{a.body || '—'}</span>;
+      case 'remarks': return <span className={clsx('text-xs text-muted [overflow-wrap:anywhere]', dense ? 'line-clamp-1' : 'whitespace-pre-wrap')}>{a.body || '—'}</span>;
       case 'handler': return <><div className="truncate font-medium">{a.owner_name ?? '—'}</div>{!dense && !visible.includes('requester') && a.requested_by_name && a.requested_by !== a.owner_id && <div className="truncate text-xs text-muted">{t('by', { name: a.requested_by_name })}</div>}</>;
       case 'requester': return <span className="block truncate">{a.requested_by_name ?? '—'}</span>;
       case 'status': return (
@@ -262,13 +321,25 @@ export function CustomerActions({ customerId, customerName, canEdit }: { custome
               {chars.map((x) => <option key={x.code} value={x.code}>{x.name}</option>)}
             </select>
           )}
+          <label className={clsx(toolBtn(!!groupBy), 'pr-1')}>
+            <Group size={14} /> <span className="hidden @xl:inline">{t('groupBy')}</span>
+            <select value={groupBy} onChange={(e) => pickGroup(e.target.value as GroupBy)} aria-label={t('groupBy')} className="bg-transparent pr-1 text-sm outline-none">
+              <option value="">{t('g_off')}</option>
+              {(['branch', 'series', 'status', 'handler', 'characterization', 'month'] as const).map((g) => <option key={g} value={g}>{t(`g_${g}`)}</option>)}
+            </select>
+          </label>
           <button type="button" onClick={() => setPanel(panel === 'filters' ? null : 'filters')} aria-expanded={panel === 'filters'} className={toolBtn(panel === 'filters' || extraCount > 0)}>
             <SlidersHorizontal size={14} /> {t('moreFilters')}{extraCount > 0 && <span className="rounded-full bg-primary px-1.5 text-[11px] text-white">{extraCount}</span>}
           </button>
           <span className="flex-1" />
-          <span className="text-xs text-muted tabular">{rows.length > 0 && t('shown', { n: rows.length, more: list.hasNextPage ? '+' : '' })}</span>
+          {groupBy && groups.length > 1 && (
+            <button type="button" onClick={() => setCollapsed(collapsed.size ? new Set() : new Set(groups.map((g) => g.key)))} className="text-xs font-medium text-primary">
+              {collapsed.size ? t('g_expandAll') : t('g_collapseAll')}
+            </button>
+          )}
+          <span className="text-xs text-muted tabular">{rows.length > 0 && (groupBy ? t('g_count', { g: groups.length, n: rows.length, more: list.hasNextPage ? '+' : '' }) : t('shown', { n: rows.length, more: list.hasNextPage ? '+' : '' }))}</span>
           <div className="hidden items-center gap-1 @3xl:flex">
-            <button type="button" onClick={() => { setDense(!dense); try { localStorage.setItem(`${STORE_KEY}.dense`, dense ? '0' : '1'); } catch { /* private mode */ } }}
+            <button type="button" onClick={() => { setDense(!dense); changed(); }}
               aria-pressed={dense} title={t('dense')} aria-label={t('dense')} className={toolBtn(dense)}><Rows3 size={14} /></button>
             <button type="button" onClick={() => setPanel(panel === 'columns' ? null : 'columns')} aria-expanded={panel === 'columns'} className={toolBtn(panel === 'columns')}><Columns3 size={14} /> {t('columns')}</button>
             <button type="button" onClick={exportCsv} disabled={!rows.length} title={t('exportCsv')} aria-label={t('exportCsv')} className={toolBtn(false)}><Download size={14} /></button>
@@ -317,6 +388,17 @@ export function CustomerActions({ customerId, customerName, canEdit }: { custome
                 </li>
               ))}
             </ul>
+            <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-2 border-t border-border pt-3 text-xs">
+              <span className="flex items-center gap-1.5 text-muted"><Save size={13} /> {t(`layoutSource_${layoutQ.data?.source ?? 'default'}`)}</span>
+              <span className="flex-1" />
+              {layoutQ.data?.mine && <button type="button" onClick={followOrg} className="font-medium text-primary">{layoutQ.data.organization ? t('layoutUseOrg') : t('layoutUseDefault')}</button>}
+              {layoutQ.data?.can_edit_organization && (
+                <>
+                  <button type="button" onClick={() => setOrgLayout(false)} className="flex items-center gap-1 rounded-lg bg-primary px-2.5 py-1 font-semibold text-white"><Building2 size={13} /> {t('layoutSetOrg')}</button>
+                  {layoutQ.data.organization && <button type="button" onClick={() => setOrgLayout(true)} className="font-medium text-muted hover:text-text">{t('layoutResetOrg')}</button>}
+                </>
+              )}
+            </div>
           </div>
         )}
 
@@ -369,7 +451,30 @@ export function CustomerActions({ customerId, customerName, canEdit }: { custome
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border">
-                  {rows.map((a) => {
+                  {groups.map((g) => (
+                    <Fragment key={`g-${g.key}`}>
+                      {groupBy && (() => {
+                        const st = groupStats(g.rows);
+                        const shut = collapsed.has(g.key);
+                        return (
+                          <tr className="bg-surface-2/80">
+                            <td colSpan={shownCols.length} className="p-0">
+                              <button type="button" onClick={() => toggleGroup(g.key)} aria-expanded={!shut}
+                                className="sticky left-0 flex w-full max-w-[100cqw] items-center gap-2 px-3 py-2 text-left text-sm">
+                                <ChevronDown size={15} className={clsx('shrink-0 text-muted transition', shut && '-rotate-90')} />
+                                {groupBy === 'branch' && <Store size={14} className="shrink-0 text-muted" />}
+                                <span className={clsx('truncate font-semibold', !g.key && 'text-muted')}>{groupLabel(g.key)}</span>
+                                <span className="shrink-0 rounded-full bg-surface px-2 py-0.5 text-xs font-semibold tabular">{g.rows.length}</span>
+                                {st.open > 0 && <span className="shrink-0 text-xs text-info">{t('g_open', { n: st.open })}</span>}
+                                {st.overdue > 0 && <span className="shrink-0 text-xs font-semibold text-danger">{t('g_overdue', { n: st.overdue })}</span>}
+                                <span className="flex-1" />
+                                {st.last && <span className="hidden shrink-0 text-xs text-muted @xl:inline">{t('g_last', { when: d(st.last) })}</span>}
+                              </button>
+                            </td>
+                          </tr>
+                        );
+                      })()}
+                  {!collapsed.has(g.key) && g.rows.map((a) => {
                     const isOpen = open === a.id;
                     return (
                       <Fragment key={a.id}>
@@ -387,13 +492,26 @@ export function CustomerActions({ customerId, customerName, canEdit }: { custome
                       </Fragment>
                     );
                   })}
+                    </Fragment>
+                  ))}
                 </tbody>
               </table>
             </div>
 
             {/* Narrow: cards */}
-            <ul className="space-y-2 @3xl:hidden">
-              {rows.map((a) => {
+            <div className="space-y-3 @3xl:hidden">
+            {groups.map((g) => (
+            <section key={`gc-${g.key}`} className="space-y-2">
+              {groupBy && (
+                <button type="button" onClick={() => toggleGroup(g.key)} aria-expanded={!collapsed.has(g.key)} className="flex w-full items-center gap-2 px-1 text-left text-sm">
+                  <ChevronDown size={15} className={clsx('text-muted transition', collapsed.has(g.key) && '-rotate-90')} />
+                  <span className={clsx('truncate font-semibold', !g.key && 'text-muted')}>{groupLabel(g.key)}</span>
+                  <span className="rounded-full bg-surface-2 px-2 py-0.5 text-xs font-semibold tabular">{g.rows.length}</span>
+                  {groupStats(g.rows).overdue > 0 && <span className="text-xs font-semibold text-danger">{t('g_overdue', { n: groupStats(g.rows).overdue })}</span>}
+                </button>
+              )}
+            <ul className="space-y-2">
+              {!collapsed.has(g.key) && g.rows.map((a) => {
                 const Icon = iconOf(a.type_icon);
                 const isOpen = open === a.id;
                 return (
@@ -409,10 +527,11 @@ export function CustomerActions({ customerId, customerName, canEdit }: { custome
                         <span className="mt-0.5 flex items-start gap-1.5 font-semibold [overflow-wrap:anywhere]">
                           {a.priority === 1 && <Flag size={13} className="mt-1 shrink-0 fill-danger text-danger" />}{a.subject}
                         </span>
-                        {a.body && !isOpen && <span className="mt-0.5 line-clamp-1 text-xs text-muted">{a.body}</span>}
+                        {a.body && !isOpen && <span className="mt-1 block whitespace-pre-wrap text-xs leading-relaxed text-muted [overflow-wrap:anywhere]">{a.body}</span>}
                         <span className="mt-1.5 flex flex-wrap items-center gap-1.5 text-xs">
                           <span className={clsx('rounded-md px-2 py-0.5 font-semibold', statusTone(a.status, a.overdue))}>{a.overdue ? tc('overdue') : statusOf(a)}</span>
                           {a.characterization_name && <span className="rounded-md bg-surface-2 px-2 py-0.5 font-medium">{a.characterization_name}</span>}
+                          {a.branch_name && <span className="flex items-center gap-1 text-muted"><Store size={11} /> {a.branch_name}</span>}
                           {a.owner_name && <span className="text-muted">{a.owner_name}</span>}
                           {erp && a.erp_state && <ErpBadge state={a.erp_state} error={a.erp_error} compact />}
                         </span>
@@ -424,6 +543,9 @@ export function CustomerActions({ customerId, customerName, canEdit }: { custome
                 );
               })}
             </ul>
+            </section>
+            ))}
+            </div>
             {list.hasNextPage && (
               <button type="button" onClick={() => list.fetchNextPage()} disabled={list.isFetchingNextPage} className="card w-full py-2.5 text-sm font-medium text-primary hover:border-primary/40">
                 {list.isFetchingNextPage ? <Loader2 size={15} className="mx-auto animate-spin" /> : t('more')}
@@ -472,7 +594,7 @@ function Details({ a, canEdit, mobile, onEdit, onComplete, onResend }: { a: Acti
 }
 
 function Info({ k, v }: { k: string; v: string | null | undefined }) {
-  return <div className="min-w-0"><dt className="text-xs text-muted">{k}</dt><dd className="truncate">{v || '—'}</dd></div>;
+  return <div className="min-w-0"><dt className="text-xs text-muted">{k}</dt><dd className="[overflow-wrap:anywhere]">{v || '—'}</dd></div>;
 }
 
 /** AI: summary of the customer's activities (remarks included) or an answer to a question about them. */

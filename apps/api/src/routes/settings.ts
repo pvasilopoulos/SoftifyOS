@@ -19,6 +19,8 @@ const sha256 = (s: string) => createHash('sha256').update(s).digest('hex');
 
 // Customer page tabs (contacts live inside "overview"). Unknown keys dropped, new ones appended visible,
 // the overview can be moved but never hidden.
+// Grids whose layout can be saved per organisation / user
+const GRIDS = ['customer_actions'] as const;
 export const CUSTOMER_TABS = ['overview', 'subsidiaries', 'branches', 'offers', 'actions', 'activity', 'tasks', 'documents'] as const;
 type TabCfg = { key: string; hidden: boolean }[];
 const tabsSchema = z.array(z.object({ key: z.enum(CUSTOMER_TABS), hidden: z.boolean() })).max(20);
@@ -601,6 +603,47 @@ export default async function settingsRoutes(app: FastifyInstance) {
     });
 
     // Any user: null = follow the organisation default
+    // ---------- Grid layouts (e.g. customer "Ενέργειες"): organisation default + my own ----------
+    const gridKey = z.object({ grid: z.enum(GRIDS) });
+    const layoutSchema = z.object({
+      cols: z.array(z.object({ key: z.string().max(40), width: z.coerce.number().int().min(40).max(1200), hidden: z.boolean() })).max(60),
+      dense: z.boolean().default(false),
+      group: z.string().max(40).default(''),
+    });
+    r.get('/me/grids/:grid', async (req) => {
+      const { grid } = gridKey.parse(req.params);
+      const { tenantId, userId } = req.session;
+      return withTenant(tenantId, async (tx) => {
+        const [t] = await tx`SELECT grid_layouts->${grid} AS layout FROM tenants WHERE id = ${tenantId}`;
+        const [m] = await tx`SELECT prefs->'grid_layouts'->${grid} AS layout FROM memberships WHERE tenant_id = ${tenantId} AND user_id = ${userId}`;
+        const organization = (t?.layout ?? null) as unknown, mine = (m?.layout ?? null) as unknown;
+        return { organization, mine, effective: mine ?? organization, source: mine ? 'user' : organization ? 'organization' : 'default',
+          can_edit_organization: can(req.session, 'settings.manage') };
+      });
+    });
+    // Mine: null = follow the organisation
+    r.put('/me/grids/:grid', async (req) => {
+      const { grid } = gridKey.parse(req.params);
+      const layout = layoutSchema.nullable().parse((req.body as { layout?: unknown })?.layout ?? null);
+      const { tenantId, userId } = req.session;
+      await withTenant(tenantId, (tx) => tx`
+        UPDATE memberships SET prefs = jsonb_set(prefs, '{grid_layouts}', coalesce(prefs->'grid_layouts', '{}'::jsonb) ${layout ? tx`|| ${tx.json({ [grid]: layout } as never)}` : tx`- ${grid}::text`})
+        WHERE tenant_id = ${tenantId} AND user_id = ${userId}`);
+      return { ok: true };
+    });
+    // Organisation default (administrators): null = back to the built-in layout
+    r.put('/settings/grids/:grid', async (req, reply) => {
+      if (!can(req.session, 'settings.manage')) return forbid(reply);
+      const { grid } = gridKey.parse(req.params);
+      const layout = layoutSchema.nullable().parse((req.body as { layout?: unknown })?.layout ?? null);
+      const s = req.session;
+      await withTenant(s.tenantId, async (tx) => {
+        await tx`UPDATE tenants SET grid_layouts = ${layout ? tx`grid_layouts || ${tx.json({ [grid]: layout } as never)}` : tx`grid_layouts - ${grid}::text`}, updated_at = now() WHERE id = ${s.tenantId}`;
+        await audit(tx, s, 'grid.organization_layout', null, { grid, reset: !layout });
+      });
+      return { ok: true };
+    });
+
     r.put('/me/preferences', async (req) => {
       const b = z.object({
         show_customer_avatar: z.boolean().nullable().optional(),

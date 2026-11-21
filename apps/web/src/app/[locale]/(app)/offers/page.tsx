@@ -61,7 +61,7 @@ export default function OffersPage() {
           {items.map((it) => {
             const o = rows[it.index];
             return (
-              <div key={o.id} style={{ position: 'absolute', top: 0, left: 0, right: 0, transform: `translateY(${it.start - v.options.scrollMargin}px)` }} className="pb-3">
+              <div key={o.id} data-index={it.index} ref={v.measureElement} style={{ position: 'absolute', top: 0, left: 0, right: 0, transform: `translateY(${it.start - v.options.scrollMargin}px)` }} className="pb-3">
                 <Link href={`/offers/${o.id}`} className="card flex items-center gap-3.5 p-3.5 transition hover:border-primary/40">
                   <CustomerAvatar name={o.customer_name} />
                   <div className="min-w-0 flex-1">
