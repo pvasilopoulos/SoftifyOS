@@ -5,7 +5,7 @@ import Anthropic from '@anthropic-ai/sdk';
 import { zodOutputFormat } from '@anthropic-ai/sdk/helpers/zod';
 import * as z4 from 'zod/v4';
 import { z } from 'zod';
-import { sql, withTenant } from '../db.js';
+import { sql, withTenant, type Tx } from '../db.js';
 import { can, requireAuth, type Session } from '../auth.js';
 import { audit } from './settings.js';
 import { planBlocks } from '../billing.js';
@@ -34,7 +34,7 @@ function apiError(e: unknown) {
 }
 
 /** One structured-output call (no tools). Returns the parsed object or throws. */
-async function extract<T extends z4.ZodType>(s: Session, feature: Feature, schema: T, system: string, content: Anthropic.Beta.BetaContentBlockParam[], effort: 'low' | 'medium' | 'high' = 'medium') {
+async function extract<T extends z4.ZodType>(s: Session, feature: Feature, schema: T, system: string, content: Anthropic.Beta.BetaContentBlockParam[], effort: 'low' | 'medium' | 'high' = 'medium', entity?: { entity: 'customer'; entity_id: string }) {
   const t0 = Date.now();
   let r;
   try {
@@ -43,8 +43,8 @@ async function extract<T extends z4.ZodType>(s: Session, feature: Feature, schem
       output_config: { effort, format: zodOutputFormat(schema) },
       system, messages: [{ role: 'user', content }],
     });
-  } catch (e) { await recordError(s, feature, e, { requested_model: MODEL, duration_ms: Date.now() - t0 }); throw e; }
-  await meter(s, feature, r.model, r.usage, { request_id: (r as { _request_id?: string | null })._request_id, duration_ms: Date.now() - t0 }, r.stop_reason === 'refusal');
+  } catch (e) { await recordError(s, feature, e, { requested_model: MODEL, duration_ms: Date.now() - t0, ...entity }); throw e; }
+  await meter(s, feature, r.model, r.usage, { request_id: (r as { _request_id?: string | null })._request_id, duration_ms: Date.now() - t0, ...entity }, r.stop_reason === 'refusal');
   if (r.stop_reason === 'refusal') throw new ToolError('refused');
   if (!r.parsed_output) throw new ToolError('unparsed');
   return r.parsed_output as z4.infer<T>;
@@ -530,6 +530,92 @@ export default async function aiRoutes(app: FastifyInstance) {
       } catch (e) {
         req.log.error(e);
         await recordError(s, 'actions_summary', e, { requested_model: MODEL, duration_ms: Date.now() - t0, entity: 'customer', entity_id: id });
+        return reply.code(502).send({ error: apiError(e) });
+      }
+    });
+
+    // ------------------------------------------------------------ next best action for a customer (cached per customer)
+    // GET: the saved suggestion and whether it is out of date (activities / offers changed since, or older than 7 days).
+    // POST: asks the AI again. Nothing is created: the user turns a suggestion into an activity from the card.
+    const insightBasis = (tx: Tx, id: string) => tx<{ basis: string }[]>`
+      SELECT concat_ws('|',
+        (SELECT count(*) || ':' || coalesce(max(updated_at)::text, '') FROM crm_activities WHERE customer_id = ${id}),
+        (SELECT count(*) || ':' || coalesce(max(updated_at)::text, '') FROM offers WHERE customer_id = ${id})) AS basis`.then((r) => r[0].basis);
+    const nextActionSchema = z4.object({
+      situation: z4.string().describe('One or two sentences: where the relationship with this customer stands today'),
+      actions: z4.array(z4.object({
+        type: z4.string().describe('Exactly one of the activity type keys listed in the data'),
+        subject: z4.string().describe('Short activity title, as the salesperson would write it'),
+        why: z4.string().describe('One sentence with the reason, citing the data (dates, offer numbers, remarks)'),
+        due_in_days: z4.number().int().describe('When to do it: 0 = today, 1 = tomorrow ... at most 60'),
+        priority: z4.number().int().describe('1 = high, 2 = normal, 3 = low'),
+      })).describe('One to three actions, the best first'),
+      watch_out: z4.string().nullable().describe('One risk to keep in mind, or null when there is none'),
+    });
+    type NextAction = z4.infer<typeof nextActionSchema>;
+
+    r.get('/ai/customers/:id/next-action', async (req) => {
+      const s = req.session;
+      const { id } = idParam.parse(req.params);
+      return withTenant(s.tenantId, async (tx) => {
+        const [row] = await tx`SELECT i.data, i.basis, i.generated_at, u.full_name AS by_name FROM ai_insights i LEFT JOIN users u ON u.id = i.created_by
+                                WHERE i.customer_id = ${id} AND i.kind = 'next_action'`;
+        if (!row) return { insight: null, stale: true };
+        const stale = row.basis !== (await insightBasis(tx, id)) || (row.generated_at as Date).getTime() < Date.now() - 7 * 864e5;
+        return { insight: row.data as NextAction, generated_at: row.generated_at, by_name: row.by_name, stale };
+      });
+    });
+
+    r.post('/ai/customers/:id/next-action', async (req, reply) => {
+      const s = req.session;
+      const blocked = await gate(s, 'next_action');
+      if (blocked) return refuse(reply, blocked);
+      const { id } = idParam.parse(req.params);
+      const b = z.object({ locale: z.enum(['el', 'en']).default('el') }).parse(req.body ?? {});
+      const data = await withTenant(s.tenantId, async (tx) => {
+        const [c] = await tx`SELECT c.name, c.code, c.status, c.category, c.address_city AS city, c.annual_value, c.created_at::date AS customer_since, u.full_name AS account_manager
+                             FROM customers c LEFT JOIN users u ON u.id = c.account_manager_id WHERE c.id = ${id}`;
+        if (!c) return null;
+        const mine = can(s, 'activities.all') ? tx`` : tx`AND (a.owner_id = ${s.userId} OR a.created_by = ${s.userId} OR a.requested_by = ${s.userId})`;
+        const activities = await tx`
+          SELECT coalesce(a.due_at, a.created_at)::date AS date, a.type, a.erp_code AS code, a.status, ch.name AS characterization, a.subject,
+                 left(coalesce(a.body, ''), 600) AS remarks, oc.name AS outcome, a.outcome_note, ow.full_name AS handler, b.name AS store
+          FROM crm_activities a
+          LEFT JOIN crm_erp_values ch ON ch.tenant_id = a.tenant_id AND ch.kind = 'characterization' AND ch.code = a.characterization
+          LEFT JOIN crm_outcomes oc ON oc.tenant_id = a.tenant_id AND oc.key = a.outcome
+          LEFT JOIN users ow ON ow.id = a.owner_id LEFT JOIN branches b ON b.id = a.branch_id
+          WHERE a.customer_id = ${id} AND coalesce(a.due_at, a.created_at) > now() - interval '365 days' ${mine}
+          ORDER BY coalesce(a.due_at, a.created_at) DESC LIMIT 60`;
+        const offers = await tx`SELECT number, status, total_amount, valid_until, created_at::date AS created FROM offers WHERE customer_id = ${id} ORDER BY created_at DESC LIMIT 10`;
+        const [risk] = await tx`SELECT score, level, reasons FROM customer_risk WHERE customer_id = ${id}`;
+        const types = await tx`SELECT key, name FROM crm_activity_types WHERE active ORDER BY name`;
+        return { customer: c, today: new Date().toISOString().slice(0, 10), activity_types: types, risk: risk ?? null, offers, activities, basis: await insightBasis(tx, id) };
+      });
+      if (!data) return reply.code(404).send({ error: 'not_found' });
+      const { basis, ...input } = data;
+      const lang = b.locale === 'el' ? 'Greek' : 'English';
+      const system = `You are a sales coach. From one customer's CRM history (activities with remarks, offers, risk signals) propose the next best actions for the salesperson. ` +
+        `Write all text in ${lang}. Be concrete and grounded in the data: name the offer, the date, what the remarks say. Prefer actions that move an open offer or repair a cooling relationship. ` +
+        `If nothing needs doing soon, say so in "situation" and propose one light follow-up. ${contextLine(null)}`;
+      try {
+        const out = await extract(s, 'next_action', nextActionSchema, system, [{ type: 'text', text: JSON.stringify(input).slice(0, 120000) }], 'medium', { entity: 'customer', entity_id: id });
+        const keys = new Set(data.activity_types.map((t) => t.key as string));
+        const clean: NextAction = {
+          situation: out.situation.slice(0, 600), watch_out: out.watch_out?.slice(0, 400) || null,
+          actions: out.actions.slice(0, 3).map((a) => ({
+            type: keys.has(a.type) ? a.type : keys.has('task') ? 'task' : [...keys][0] ?? 'call',
+            subject: a.subject.slice(0, 200), why: a.why.slice(0, 400),
+            due_in_days: Math.max(0, Math.min(60, Math.round(a.due_in_days))), priority: [1, 2, 3].includes(a.priority) ? a.priority : 2,
+          })),
+        };
+        await withTenant(s.tenantId, (tx) => tx`
+          INSERT INTO ai_insights (tenant_id, customer_id, kind, data, basis, created_by, generated_at)
+          VALUES (${s.tenantId}, ${id}, 'next_action', ${tx.json(clean as never)}, ${basis}, ${s.userId}, now())
+          ON CONFLICT (tenant_id, customer_id, kind) DO UPDATE SET data = EXCLUDED.data, basis = EXCLUDED.basis, created_by = EXCLUDED.created_by, generated_at = now()`);
+        return { insight: clean, generated_at: new Date().toISOString(), stale: false };
+      } catch (e) {
+        req.log.error(e);
+        if (e instanceof ToolError) return reply.code(502).send({ error: e.message });
         return reply.code(502).send({ error: apiError(e) });
       }
     });

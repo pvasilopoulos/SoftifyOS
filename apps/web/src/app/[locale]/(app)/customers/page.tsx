@@ -6,7 +6,7 @@ import clsx from 'clsx';
 import { useInfiniteQuery, useQuery } from '@tanstack/react-query';
 import { useWindowVirtualizer } from '@tanstack/react-virtual';
 import { useTranslations } from 'next-intl';
-import { ListTree, Loader2, Plus, Search, Store, Users, X } from 'lucide-react';
+import { ListTree, Loader2, Plus, Search, Store, Users, X, ShieldAlert } from 'lucide-react';
 import { api, type Customer, type Page } from '@/lib/api';
 import { Link } from '@/i18n/navigation';
 import { EntityTile, PageHeader, Skeleton } from '@/components/ui';
@@ -153,11 +153,14 @@ function CustomersPageInner() {
 
   return (
     <div>
-      <PageHeader title={t('title')} actions={
+      <PageHeader title={t('title')} actions={<>
+        <Link href="/customers/at-risk" title={t('atRisk')} className="flex items-center gap-1.5 rounded-full border border-border bg-surface px-3 py-2 text-sm font-medium hover:border-primary">
+          <ShieldAlert size={17} className="text-danger" /> <span className="hidden sm:inline">{t('atRisk')}</span>
+        </Link>
         <Link href="/customers/new" className="hidden items-center gap-1.5 rounded-full bg-primary px-4 py-2 text-sm font-semibold text-white lg:flex">
           <Plus size={18} /> {t('new')}
         </Link>
-      } />
+      </>} />
 
       {/* View switcher */}
       <div className="mb-3 grid grid-cols-3 gap-1 rounded-2xl border border-border bg-surface-2 p-1">

@@ -32,7 +32,7 @@ type Usage = {
     days: { day: string; estimated_usd: number; billed_usd: number | null; list_usd: number | null; requests: number | null; by_model: Record<string, number> }[] };
 };
 type Roles = { key: string; name: string }[];
-const FEATURES = ['copilot', 'voice', 'summary', 'actions_summary', 'reports', 'offer_draft', 'import'];
+const FEATURES = ['copilot', 'voice', 'summary', 'actions_summary', 'next_action', 'reports', 'offer_draft', 'import'];
 
 const input = 'w-full min-w-0 rounded-xl border border-border bg-surface-2 px-3 py-2 text-sm outline-none focus:border-primary';
 const btn = 'flex items-center justify-center gap-1.5 rounded-xl border border-border bg-surface px-3 py-2 text-sm font-medium hover:border-primary disabled:opacity-60';

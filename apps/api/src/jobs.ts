@@ -24,7 +24,7 @@ export type BackupRunJob = { by?: string };
 export type ErpJob = { tenantId: string };
 export type JobMap = {
   notify: NotifyJob; email: EmailJob; webhook: WebhookJob; calendar_push: CalendarPushJob; backup_run: BackupRunJob;
-  erp_pull: ErpJob; erp_push: ErpJob; erp_lists: ErpJob; erp_full: ErpJob;
+  erp_pull: ErpJob; erp_push: ErpJob; erp_lists: ErpJob; erp_full: ErpJob; risk_refresh: ErpJob;
 };
 
 export async function enqueue<K extends keyof JobMap>(kind: K, payload: JobMap[K], db: Tx | typeof sql = sql, runAt?: Date) {

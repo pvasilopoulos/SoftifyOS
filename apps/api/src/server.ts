@@ -29,6 +29,7 @@ import billingRoutes from './routes/billing.js';
 import systemRoutes from './routes/system.js';
 import erpRoutes from './routes/erp.js';
 import aiUsageRoutes from './routes/ai-usage.js';
+import insightRoutes from './routes/insights.js';
 
 const app = Fastify({
   logger: { level: env.isProd ? 'info' : 'warn' },
@@ -97,6 +98,7 @@ await app.register(async (api) => {
   await api.register(systemRoutes);
   await api.register(erpRoutes);
   await api.register(aiUsageRoutes);
+  await api.register(insightRoutes);
 }, { prefix: '/api' });
 
 await startRealtime();

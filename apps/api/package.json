@@ -10,6 +10,8 @@
     "start": "node --env-file-if-exists=../../.env dist/src/server.js",
     "start:worker": "node --env-file-if-exists=../../.env dist/src/worker.js",
     "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "tsx --import ./test/unit-env.ts --test \"test/unit/**/*.test.ts\"",
+    "test:e2e": "tsx --env-file-if-exists=../../.env --test --test-concurrency=1 --test-timeout=600000 \"test/e2e/**/*.test.ts\"",
     "db:dev": "tsx scripts/dev-db.ts",
     "db:migrate": "tsx --env-file-if-exists=../../.env scripts/migrate.ts",
     "db:seed": "tsx --env-file-if-exists=../../.env scripts/seed.ts",

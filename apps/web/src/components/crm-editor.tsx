@@ -19,7 +19,7 @@ type Links = { branches: { id: string; name: string; city: string | null }[]; co
   offers: { id: string; number: string; status: string }[] };
 export type EditorPreset = {
   type?: string; status?: ActivityStatus; customer_id?: string | null; customer_name?: string | null; branch_id?: string | null;
-  contact_id?: string | null; offer_id?: string | null; due_at?: string | null; subject?: string;
+  contact_id?: string | null; offer_id?: string | null; due_at?: string | null; subject?: string; body?: string; priority?: number;
 };
 type V = {
   type: string; subject: string; body: string; status: ActivityStatus; priority: string; due_at: string; duration_min: string; all_day: boolean;
@@ -53,8 +53,8 @@ function EditorBody({ a, preset, onClose, onSaved }: { a?: ActivityDetail; prese
   const creating = !a;
   const logMode = creating && preset?.status === 'done';
   const [v, setV] = useState<V>(() => ({
-    type: a?.type ?? preset?.type ?? 'call', subject: a?.subject ?? preset?.subject ?? '', body: a?.body ?? '',
-    status: a?.status ?? preset?.status ?? 'planned', priority: String(a?.priority ?? 2),
+    type: a?.type ?? preset?.type ?? 'call', subject: a?.subject ?? preset?.subject ?? '', body: a?.body ?? preset?.body ?? '',
+    status: a?.status ?? preset?.status ?? 'planned', priority: String(a?.priority ?? preset?.priority ?? 2),
     due_at: toLocalInput(a ? a.due_at : preset?.due_at ?? (logMode ? new Date() : daysFromNow(1, 10))),
     duration_min: a ? String(a.duration_min || '') : '', all_day: a?.all_day ?? false, location: a?.location ?? '',
     owner_id: a?.owner_id ?? '', remind_before_min: a?.remind_before_min == null ? '' : String(a.remind_before_min),

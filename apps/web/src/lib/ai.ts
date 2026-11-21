@@ -2,7 +2,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { api } from './api';
 
-export type AiFeature = 'copilot' | 'voice' | 'summary' | 'actions_summary' | 'reports' | 'offer_draft' | 'import';
+export type AiFeature = 'copilot' | 'voice' | 'summary' | 'actions_summary' | 'next_action' | 'reports' | 'offer_draft' | 'import';
 export type AiStatus = { configured: boolean; enabled: boolean; allowed: boolean; features: Record<AiFeature, boolean>; budget_left: boolean };
 export type AiAction = {
   id: string; kind: 'task' | 'activity' | 'offer_draft' | 'save_report'; status: 'pending' | 'done' | 'cancelled' | 'failed';

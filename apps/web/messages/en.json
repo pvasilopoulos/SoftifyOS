@@ -120,7 +120,8 @@
     "sortBy": "Sort by",
     "clearFilters": "Clear",
     "done": "Apply",
-    "statusLabel": "Status"
+    "statusLabel": "Status",
+    "atRisk": "At risk"
   },
   "customer": {
     "back": "Customer",
@@ -2427,7 +2428,9 @@
     "err_user_budget_exceeded": "You have reached your monthly AI limit.",
     "err_user_daily_exceeded": "You have reached the daily AI limit. It resets tomorrow.",
     "err_feature_budget_exceeded": "This feature reached its monthly limit for the organisation.",
-    "err_rate_limited": "Too many calls in a short time. Try again in a minute."
+    "err_rate_limited": "Too many calls in a short time. Try again in a minute.",
+    "f_next_action": "Next best action",
+    "fh_next_action": "A suggested next step for each customer, from its activities and offers"
   },
   "email": {
     "reminderTitle": "Remind the customer",
@@ -3229,5 +3232,45 @@
     "reason": "Reason",
     "reasonPh": "e.g. preparing this week’s visits",
     "send": "Send"
+  },
+  "insights": {
+    "riskTitle": "Churn risk",
+    "nextTitle": "Next best action (AI)",
+    "suggest": "Suggest",
+    "again": "New suggestion",
+    "stale": "New data since",
+    "nextHint": "The AI reads activities, remarks and offers and suggests what to do next. The suggestion is saved for the whole team.",
+    "thinking": "Reading the history…",
+    "create": "Schedule",
+    "urgent": "Urgent",
+    "today": "Today",
+    "tomorrow": "Tomorrow",
+    "inDays": "In {n} days",
+    "generated": "Suggested {when}",
+    "level_high": "High",
+    "level_medium": "Medium",
+    "level_low": "Low",
+    "all": "All",
+    "r_no_contact": "No contact for {days} days",
+    "r_never_contacted": "No activity since created ({days} days)",
+    "r_overdue": "{n, plural, one {# overdue activity} other {# overdue activities}}",
+    "r_offers_expired": "{n, plural, one {# offer expired unanswered} other {# offers expired unanswered}}",
+    "r_offers_expiring": "{n, plural, one {# offer expires within 7 days} other {# offers expire within 7 days}} ({amount})",
+    "r_offers_rejected": "{n, plural, one {# rejected offer} other {# rejected offers}} (6 months)",
+    "r_cancellations": "{n} cancelled activities (3 months)",
+    "r_activity_drop": "Activity dropped: {to} vs {from} the previous quarter",
+    "pageTitle": "Customers at risk",
+    "pageHint": "Customers that need attention, based on activities and offers.",
+    "computed": "· Updated {when}",
+    "refresh": "Recompute now",
+    "refreshQueued": "Recomputing; the list refreshes shortly.",
+    "mine": "Only my customers",
+    "lastContact": "Last contact",
+    "never": "never",
+    "daysAgo": "{n} days ago",
+    "more": "More",
+    "emptyTitle": "No customers at risk",
+    "emptyHint": "All looks fine with these filters.",
+    "notComputed": "The first computation runs within a few minutes."
   }
 }

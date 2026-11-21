@@ -18,7 +18,7 @@ export const MODEL = 'claude-opus-5-5';
 /** Server-side fallback on a refusal: the API re-runs the request on a suitable model. */
 export const BETAS: Anthropic.Beta.AnthropicBeta[] = ['server-side-fallback-2026-07-01'];
 
-export const FEATURES = ['copilot', 'voice', 'summary', 'actions_summary', 'reports', 'offer_draft', 'import'] as const;
+export const FEATURES = ['copilot', 'voice', 'summary', 'actions_summary', 'next_action', 'reports', 'offer_draft', 'import'] as const;
 export type Feature = (typeof FEATURES)[number];
 export type AiSettings = {
   enabled: boolean; consent_at: string | null; consent_by: string | null; monthly_budget_usd: number;
@@ -27,7 +27,7 @@ export type AiSettings = {
 };
 export const DEFAULT_SETTINGS: AiSettings = {
   enabled: false, consent_at: null, consent_by: null, monthly_budget_usd: 50,
-  features: { copilot: true, voice: true, summary: true, actions_summary: true, reports: true, offer_draft: true, import: true },
+  features: { copilot: true, voice: true, summary: true, actions_summary: true, next_action: true, reports: true, offer_draft: true, import: true },
 };
 
 // Clients: one per organisation key (Settings → AI), else the server key from .env (fallback for everyone).

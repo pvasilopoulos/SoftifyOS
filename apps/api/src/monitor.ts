@@ -73,11 +73,17 @@ export async function health() {
   const [er] = await sql`SELECT count(*)::int AS n FROM error_events WHERE last_seen > now() - interval '1 hour' AND resolved_at IS NULL`;
   checks.errors = { ok: true, last_hour: er.n };
   if (env.backupDir) {
-    try {
-      const last = JSON.parse(await readFile(`${env.backupDir}/last.json`, 'utf8')) as { finished_at: string; ok: boolean };
-      const age = (Date.now() - new Date(last.finished_at).getTime()) / 3600e3;
-      checks.backup = { ok: last.ok && age < 26, last: last.finished_at, age_h: Math.round(age) };
-    } catch { checks.backup = { ok: false, error: 'no backup status' }; }
+    const b = await backupStatus();
+    checks.backup = b.error ? { ok: false, error: b.error } : { ok: b.ok, last: b.last, age_h: b.age_h };
   }
   return { ok: Object.values(checks).every((c) => c.ok), checks };
+}
+
+/** Last backup (deploy/backup.sh writes last.json): fine when it succeeded within the last 26 hours. */
+export async function backupStatus(): Promise<{ ok: boolean; last?: string; last_ok?: boolean; age_h?: number; error?: string }> {
+  try {
+    const last = JSON.parse(await readFile(`${env.backupDir}/last.json`, 'utf8')) as { finished_at: string; ok: boolean };
+    const age = (Date.now() - new Date(last.finished_at).getTime()) / 3600e3;
+    return { ok: last.ok && age < 26, last: last.finished_at, last_ok: last.ok, age_h: Math.round(age) };
+  } catch { return { ok: false, error: 'no backup status' }; }
 }

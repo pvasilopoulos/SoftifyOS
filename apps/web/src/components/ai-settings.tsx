@@ -13,7 +13,7 @@ import { Card } from './settings-sections';
 import { useToast } from './providers';
 import { AiUsageDashboard } from './ai-usage';
 
-const FEATURES: AiFeature[] = ['copilot', 'voice', 'summary', 'actions_summary', 'reports', 'offer_draft', 'import'];
+const FEATURES: AiFeature[] = ['copilot', 'voice', 'summary', 'actions_summary', 'next_action', 'reports', 'offer_draft', 'import'];
 type Data = {
   settings: { enabled: boolean; consent_at: string | null; consent_by: string | null; monthly_budget_usd: number; features: Record<AiFeature, boolean> };
   configured: boolean; model: string; consent_by_name: string | null; env_key: boolean;

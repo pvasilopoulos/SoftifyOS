@@ -33,6 +33,8 @@ async function runBackup() {
 import { deliver } from './webhooks.js';
 import { enqueueDuePulls, runErpJob } from './erp.js';
 import { reconcileDue } from './ai-cost.js';
+import { computeRisk, computeRiskDue } from './risk.js';
+import { checkBackup, checkErp } from './alerts.js';
 import { runNoContactRules } from './crm.js';
 import { removeFile } from './storage.js';
 import { definitionSchema, nextRun, runReport } from './reports.js';
@@ -116,6 +118,7 @@ async function processBatch(): Promise<number> {
       else if (j.kind === 'webhook') await handleWebhook(j.payload as WebhookJob);
       else if (j.kind === 'calendar_push') { const c = j.payload as CalendarPushJob; await pushActivity(c.tenantId, c.activityId); }
       else if (j.kind === 'backup_run') await runBackup();
+      else if (j.kind === 'risk_refresh') await computeRisk((j.payload as ErpJob).tenantId);
       else if (j.kind.startsWith('erp_')) {
         // An ERP sync can take minutes (first import, slow Soft1): it runs beside the queue instead of holding up
         // notifications and emails. One at a time per organisation; another request meanwhile waits for the next round.
@@ -259,7 +262,7 @@ async function maintenance() {
 }
 
 let running = true;
-let lastReminder = 0, lastMaintenance = 0, lastDigest = 0, lastRules = 0, lastCalendar = 0, lastBeat = 0;
+let lastReminder = 0, lastMaintenance = 0, lastDigest = 0, lastRules = 0, lastCalendar = 0, lastBeat = 0, lastInsights = 0;
 process.on('unhandledRejection', (e) => { console.error('unhandledRejection', e); captureError('worker', e, { kind: 'unhandledRejection' }); });
 console.log(`SoftifyOS worker started (push ${pushEnabled ? 'on' : 'off'})`);
 while (running) {
@@ -269,6 +272,13 @@ while (running) {
     if (now - lastMaintenance > 3_600_000) { await maintenance(); await documentExpiry(); await reconcileDue().catch((e) => console.error('ai reconcile', e)); lastMaintenance = now; }
     if (now - lastDigest > 300_000) { await morningDigest(); await scheduledReports(); lastDigest = now; }
     if (now - lastRules > 1_800_000) { await runNoContactRules(sql); lastRules = now; }
+    // Customers at risk (each organisation every 6 hours) and alerts for a stopped backup / ERP sync
+    if (now - lastInsights > 600_000) {
+      lastInsights = now;
+      await computeRiskDue().catch((e) => captureError('worker', e, { job: 'risk' }));
+      await checkBackup().catch((e) => captureError('worker', e, { job: 'alert_backup' }));
+      await checkErp().catch((e) => captureError('worker', e, { job: 'alert_erp' }));
+    }
     if (now - lastCalendar > 60_000) { await pullDue(); await enqueueDuePulls(); lastCalendar = now; }
     if (now - lastBeat > 30_000) { await heartbeat('worker', { pid: process.pid }); lastBeat = now; }
     const n = await processBatch();

@@ -27,6 +27,7 @@ import { DisplayCustomizeButton, DisplayRows } from '@/components/display';
 import { DocumentsPanel } from '@/components/documents-ui';
 import { TasksPanel } from '@/components/task-ui';
 import { CustomerActions } from '@/components/customer-actions';
+import { CustomerInsightsCard } from '@/components/customer-insights';
 
 type Tab = 'overview' | 'subsidiaries' | 'branches' | 'offers' | 'actions' | 'activity' | 'tasks' | 'documents';
 type TabsPrefs = { tabs: { effective: { key: Tab; hidden: boolean }[] } };
@@ -177,6 +178,7 @@ export default function CustomerPage({ params }: { params: Promise<{ id: string 
 
       <Tabs value={shown} onChange={setTab} options={tabs} />
 
+      {shown === 'overview' && <CustomerInsightsCard customerId={c.id} customerName={c.name} />}
       {shown === 'overview' && <CustomerSummaryCard customerId={c.id} />}
       {shown === 'overview' && (
         <CustomerCard c={c as unknown as Record<string, unknown>}
