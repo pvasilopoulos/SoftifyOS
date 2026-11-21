@@ -40,6 +40,11 @@ const activitySchema = z.object({
   recurrence: recurrenceSchema,
   parent_id: uuidN,
   custom: z.record(z.string().max(40), z.any()).optional(),
+  // As in the ERP (Soft1): end, requester, characterisation and ERP status
+  ends_at: z.coerce.date().nullish().transform((v) => v ?? null),
+  requested_by: uuidN,
+  characterization: optText(40),
+  erp_status: optText(40),
 });
 type ActivityInput = z.infer<typeof activitySchema>;
 
@@ -67,6 +72,10 @@ async function checkLinks(tx: Tx, T: string, a: ActivityInput) {
   if (!(await tx`SELECT 1 FROM crm_activity_types WHERE tenant_id = ${T} AND key = ${a.type}`)[0]) return 'invalid_type';
   if (a.outcome && !(await tx`SELECT 1 FROM crm_outcomes WHERE tenant_id = ${T} AND key = ${a.outcome}`)[0]) return 'invalid_outcome';
   if (a.owner_id && !(await tx`SELECT 1 FROM memberships WHERE tenant_id = ${T} AND user_id = ${a.owner_id}`)[0]) return 'owner_not_member';
+  if (a.requested_by && !(await tx`SELECT 1 FROM memberships WHERE tenant_id = ${T} AND user_id = ${a.requested_by}`)[0]) return 'requester_not_member';
+  if (a.characterization && !(await tx`SELECT 1 FROM crm_erp_values WHERE tenant_id = ${T} AND kind = 'characterization' AND code = ${a.characterization}`)[0]) return 'invalid_characterization';
+  if (a.erp_status && !(await tx`SELECT 1 FROM crm_erp_values WHERE tenant_id = ${T} AND kind = 'status' AND code = ${a.erp_status}`)[0]) return 'invalid_erp_status';
+  if (a.ends_at && a.due_at && a.ends_at < a.due_at) return 'ends_before_start';
   return null;
 }
 
@@ -82,6 +91,8 @@ const listQuery = z.object({
   from: z.coerce.date().optional(), to: z.coerce.date().optional(),
   type: z.string().max(400).optional(),
   outcome: z.string().max(400).optional(),
+  characterization: z.string().max(400).optional(),
+  erp_status: z.string().max(400).optional(),
   priority: z.coerce.number().int().min(1).max(3).optional(),
   customer_id: z.string().uuid().optional(),
   offer_id: z.string().uuid().optional(),
@@ -121,6 +132,8 @@ function whereSql(tx: Tx, s: Session, q: ListQ, tz: string) {
   const list = (v?: string) => (v ? v.split(',').map((x) => x.trim()).filter(Boolean).slice(0, 30) : []);
   if (list(q.type).length) parts.push(tx`a.type = ANY(${list(q.type)})`);
   if (list(q.outcome).length) parts.push(tx`a.outcome = ANY(${list(q.outcome)})`);
+  if (list(q.characterization).length) parts.push(tx`a.characterization = ANY(${list(q.characterization)})`);
+  if (list(q.erp_status).length) parts.push(tx`a.erp_status = ANY(${list(q.erp_status)})`);
   if (q.priority) parts.push(tx`a.priority = ${q.priority}`);
   if (q.customer_id) parts.push(tx`a.customer_id = ${q.customer_id}`);
   if (q.offer_id) parts.push(tx`a.offer_id = ${q.offer_id}`);
@@ -183,6 +196,8 @@ export default async function crmRoutes(app: FastifyInstance) {
         outcomes: await tx`SELECT key, name, color, positive, sort, active FROM crm_outcomes WHERE tenant_id = ${s.tenantId} ORDER BY sort, name`,
         templates: await tx`SELECT id, name, type, subject, body, priority, duration_min, due_in_days, remind_before_min FROM crm_templates WHERE tenant_id = ${s.tenantId} ORDER BY sort, name`,
         users: await tx`SELECT u.id, u.full_name FROM memberships m JOIN users u ON u.id = m.user_id WHERE m.tenant_id = ${s.tenantId} ORDER BY u.full_name`,
+        erp_values: await tx`SELECT kind, code, name, active, maps_to, types, sort FROM crm_erp_values WHERE tenant_id = ${s.tenantId} ORDER BY kind, sort, code`,
+        erp: await tx`SELECT coalesce((erp_meta->>'enabled')::boolean, false) AS enabled, erp_meta->>'provider' AS provider FROM tenants WHERE id = ${s.tenantId}`.then((r) => r[0]),
         timezone: await tenantTz(tx, s.tenantId),
         can: { all: all(s), edit: can(s, 'customers.edit'), manage: can(s, 'settings.manage') },
         me: s.userId,
@@ -300,6 +315,7 @@ export default async function crmRoutes(app: FastifyInstance) {
           completed_at: a.status === 'done' ? old.completed_at ?? new Date() : null,
           completed_by: a.status === 'done' ? old.completed_by ?? s.userId : null,
           custom: tx.json(((a.custom ?? old.custom) ?? {}) as never),
+          ends_at: a.ends_at, requested_by: a.requested_by, characterization: a.characterization, erp_status: a.erp_status,
         };
         await tx`UPDATE crm_activities SET ${tx(cols as never)}, updated_at = now() WHERE id = ${id}`;
         const ids = [id];

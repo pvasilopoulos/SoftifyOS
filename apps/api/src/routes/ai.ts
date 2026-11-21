@@ -461,6 +461,60 @@ export default async function aiRoutes(app: FastifyInstance) {
       } catch (e) { req.log.error(e); return reply.code(502).send({ error: apiError(e) }); }
     });
 
+    // ------------------------------------------------------------ customer activities (tab "Ενέργειες"): summary or a question
+    r.post('/ai/customers/:id/actions-summary', async (req, reply) => {
+      const s = req.session;
+      const blocked = await gate(s, 'summary');
+      if (blocked) return refuse(reply, blocked);
+      const { id } = idParam.parse(req.params);
+      const b = z.object({
+        locale: z.enum(['el', 'en']).default('el'),
+        period: z.enum(['90d', '365d', 'all']).default('365d'),
+        question: z.string().trim().max(500).optional(),
+      }).parse(req.body ?? {});
+      const since = b.period === 'all' ? null : new Date(Date.now() - (b.period === '90d' ? 90 : 365) * 864e5);
+      const data = await withTenant(s.tenantId, async (tx) => {
+        const [c] = await tx`SELECT name, code, address_city AS city FROM customers WHERE id = ${id}`;
+        if (!c) return null;
+        // Same visibility as the CRM screens: without "all activities", only own / assigned
+        const mine = can(s, 'activities.all') ? tx`` : tx`AND (a.owner_id = ${s.userId} OR a.created_by = ${s.userId} OR a.requested_by = ${s.userId})`;
+        const acts = await tx`
+          SELECT coalesce(a.due_at, a.created_at) AS date, a.ends_at, a.erp_code AS code, t.name AS series, a.status, es.name AS erp_status, ch.name AS characterization,
+                 a.subject, left(coalesce(a.body, ''), 1500) AS remarks, oc.name AS outcome, a.outcome_note, ow.full_name AS handler, rq.full_name AS requested_by,
+                 b.name AS store, a.priority
+          FROM crm_activities a
+          LEFT JOIN crm_activity_types t ON t.tenant_id = a.tenant_id AND t.key = a.type
+          LEFT JOIN crm_erp_values ch ON ch.tenant_id = a.tenant_id AND ch.kind = 'characterization' AND ch.code = a.characterization
+          LEFT JOIN crm_erp_values es ON es.tenant_id = a.tenant_id AND es.kind = 'status' AND es.code = a.erp_status
+          LEFT JOIN crm_outcomes oc ON oc.tenant_id = a.tenant_id AND oc.key = a.outcome
+          LEFT JOIN users ow ON ow.id = a.owner_id LEFT JOIN users rq ON rq.id = a.requested_by LEFT JOIN branches b ON b.id = a.branch_id
+          WHERE a.customer_id = ${id} ${since ? tx`AND coalesce(a.due_at, a.created_at) >= ${since}` : tx``} ${mine}
+          ORDER BY coalesce(a.due_at, a.created_at) DESC LIMIT 300`;
+        return { customer: c, today: new Date().toISOString().slice(0, 10), activities: acts };
+      });
+      if (!data) return reply.code(404).send({ error: 'not_found' });
+      if (!data.activities.length) return { text: b.locale === 'el' ? 'Δεν υπάρχουν ενέργειες για αυτό το διάστημα.' : 'No activities in this period.', count: 0, generated_at: new Date().toISOString() };
+      const lang = b.locale === 'el' ? 'Greek' : 'English';
+      const system = b.question
+        ? `You answer a salesperson's question about one customer's CRM activities (calls, visits, offers, notes, with remarks). Write in ${lang}, markdown, concise. ` +
+          `Use only the data given; cite dates and activity codes when useful; say plainly when the data does not contain the answer. ${contextLine(null)}`
+        : `You summarise one customer's CRM activities for a salesperson. Write in ${lang}, markdown, at most ~220 words, with these sections: ` +
+          `**Ιστορικό σχέσης** (what happened over time: offers sent with amounts, visits, agreements, payments — with dates and codes), ` +
+          `**Τι λένε οι παρατηρήσεις** (recurring themes, objections, promises, facts about the premises), ` +
+          `**Ανοιχτά** (open / upcoming activities with dates and who handles them), ` +
+          `**Προσοχή** (risks: overdue, unanswered, cancellations, disputes), **Επόμενο βήμα** (one concrete recommendation). ` +
+          `Use only the data given; skip a section that has nothing. ${contextLine(null)}`;
+      try {
+        const r2 = await (await aiFor(s.tenantId))!.beta.messages.create({
+          model: MODEL, max_tokens: 8000, betas: BETAS, fallbacks: 'default', output_config: { effort: 'medium' }, system,
+          messages: [{ role: 'user', content: `${b.question ? `Ερώτηση: ${b.question}\n\n` : ''}${JSON.stringify(data).slice(0, 180000)}` }],
+        });
+        await meter(s, 'summary', r2.model, r2.usage);
+        if (r2.stop_reason === 'refusal') return reply.code(502).send({ error: 'refused' });
+        return { text: textOf(r2.content), count: data.activities.length, generated_at: new Date().toISOString() };
+      } catch (e) { req.log.error(e); return reply.code(502).send({ error: apiError(e) }); }
+    });
+
     // ------------------------------------------------------------ natural-language report → definition
     r.post('/ai/report', async (req, reply) => {
       const s = req.session;

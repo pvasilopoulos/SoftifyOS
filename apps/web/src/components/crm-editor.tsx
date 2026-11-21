@@ -25,6 +25,7 @@ type V = {
   type: string; subject: string; body: string; status: ActivityStatus; priority: string; due_at: string; duration_min: string; all_day: boolean;
   location: string; owner_id: string; remind_before_min: string; customer_id: string | null; customer_name: string | null;
   branch_id: string | null; contact_id: string | null; offer_id: string | null; outcome: string; outcome_note: string;
+  ends_at: string; requested_by: string; characterization: string; erp_status: string;
 };
 
 const REMINDERS = [null, 0, 5, 15, 30, 60, 120, 1440, 2880] as const;
@@ -60,6 +61,7 @@ function EditorBody({ a, preset, onClose, onSaved }: { a?: ActivityDetail; prese
     customer_id: a?.customer_id ?? preset?.customer_id ?? null, customer_name: a?.customer_name ?? preset?.customer_name ?? null,
     branch_id: a?.branch_id ?? preset?.branch_id ?? null, contact_id: a?.contact_id ?? preset?.contact_id ?? null, offer_id: a?.offer_id ?? preset?.offer_id ?? null,
     outcome: a?.outcome ?? '', outcome_note: a?.outcome_note ?? '',
+    ends_at: toLocalInput(a?.ends_at ?? null), requested_by: a?.requested_by ?? '', characterization: a?.characterization ?? '', erp_status: a?.erp_status ?? '',
   }));
   const [custom, setCustom] = useState<Record<string, unknown>>(a?.custom ?? {});
   const [recurrence, setRecurrence] = useState<Recurrence | null>(null);
@@ -78,10 +80,23 @@ function EditorBody({ a, preset, onClose, onSaved }: { a?: ActivityDetail; prese
     }
   }, { userId: meta.data?.me });
 
+  // ERP lists (Soft1 characterisation / status): only the active ones, plus the current value
+  const erpValues = meta.data?.erp_values ?? [];
+  const charList = erpValues.filter((x) => x.kind === 'characterization' && ((x.active && (!x.types?.length || x.types.includes(v.type))) || x.code === v.characterization));
+  const statusList = erpValues.filter((x) => x.kind === 'status' && (x.active || x.code === v.erp_status));
+  /** The ERP status (or, without one, the characterisation) decides the core status: show it at once. */
+  const pickErp = (k: 'characterization' | 'erp_status', code: string) => setV((x) => {
+    const next = { ...x, [k]: code };
+    const st = erpValues.find((e) => e.kind === 'status' && e.code === next.erp_status)?.maps_to
+      ?? (!next.erp_status ? erpValues.find((e) => e.kind === 'characterization' && e.code === next.characterization)?.maps_to : null);
+    return st ? { ...next, status: st } : next;
+  });
+
   // The "Outcome" section only makes sense once the activity is done
   const eff: Effective | undefined = useMemo(() => cfg.data && ({
     ...cfg.data, sections: cfg.data.sections.map((s) => (s.key === 'result' && v.status !== 'done' ? { ...s, hidden: true } : s)),
-  }), [cfg.data, v.status]);
+    fields: cfg.data.fields.map((f) => ((f.key === 'characterization' && !charList.length) || (f.key === 'erp_status' && !statusList.length) ? { ...f, hidden: true } : f)),
+  }), [cfg.data, v.status, charList.length, statusList.length]);
 
   const types = (meta.data?.types ?? []).filter((x) => x.active || x.key === v.type);
   const typeOf = types.find((x) => x.key === v.type);
@@ -108,6 +123,7 @@ function EditorBody({ a, preset, onClose, onSaved }: { a?: ActivityDetail; prese
         customer_id: v.customer_id, branch_id: v.branch_id, contact_id: v.contact_id, offer_id: v.offer_id,
         outcome: v.status === 'done' ? v.outcome || null : null, outcome_note: v.status === 'done' ? v.outcome_note || null : null,
         recurrence: creating && v.status !== 'done' ? recurrence : null, custom,
+        ends_at: fromLocalInput(v.ends_at), requested_by: v.requested_by || null, characterization: v.characterization || null, erp_status: v.erp_status || null,
       };
       if (a) { await api(`/crm/activities/${a.id}?apply=${apply}`, { method: 'PUT', json: body }); return a.id; }
       return (await api<{ id: string; created: number }>('/crm/activities', { method: 'POST', json: body })).id;
@@ -145,12 +161,12 @@ function EditorBody({ a, preset, onClose, onSaved }: { a?: ActivityDetail; prese
     type: { bare: true, render: (c) => (
       <div>
         <div className="mb-1 flex items-center gap-1 text-xs font-medium text-muted">{c.label}{c.required && <span className="text-danger">*</span>}</div>
-        <div role="radiogroup" aria-label={c.label} className="grid grid-cols-4 gap-1 rounded-2xl bg-surface-2 p-1 sm:grid-cols-8">
+        <div role="radiogroup" aria-label={c.label} className="flex flex-wrap justify-center gap-1 rounded-2xl bg-surface-2 p-1">
           {types.filter((x) => !c.allowed || c.allowed.includes(x.key) || x.key === v.type).map((x) => {
             const Icon = iconOf(x.icon);
             return (
               <button key={x.key} type="button" role="radio" aria-checked={v.type === x.key} disabled={c.readonly} onClick={() => pickType(x.key)}
-                className={clsx('flex min-w-0 flex-col items-center gap-1 rounded-xl px-1 py-2 text-[11px] font-semibold leading-tight transition',
+                className={clsx('flex w-[calc((100%-0.75rem)/4)] min-w-0 flex-col items-center gap-1 rounded-xl px-1 py-2 text-[11px] font-semibold leading-tight transition sm:w-[calc((100%-1.75rem)/8)]',
                   v.type === x.key ? 'bg-surface text-primary shadow-sm' : 'text-muted hover:text-text')}>
                 <Icon size={18} className="shrink-0" /><span className="w-full truncate text-center">{x.name}</span>
               </button>
@@ -183,6 +199,25 @@ function EditorBody({ a, preset, onClose, onSaved }: { a?: ActivityDetail; prese
           <label className="ml-auto flex items-center gap-1 text-xs text-muted"><input type="checkbox" className="accent-[var(--primary)]" checked={v.all_day} onChange={(e) => set('all_day', e.target.checked)} /> {t('allDay')}</label>
         </div>
       </div>
+    ),
+    ends_at: (c) => <input id={c.id} type="datetime-local" className={c.className} aria-invalid={c.invalid} min={v.due_at || undefined} value={v.ends_at} onChange={(e) => set('ends_at', e.target.value)} />,
+    requested_by: (c) => (
+      <select id={c.id} className={c.className} value={v.requested_by} onChange={(e) => set('requested_by', e.target.value)}>
+        <option value="">{t('none')}</option>
+        {users.map((u) => <option key={u.id} value={u.id}>{u.full_name}</option>)}
+      </select>
+    ),
+    characterization: (c) => (
+      <select id={c.id} className={c.className} value={v.characterization} onChange={(e) => pickErp('characterization', e.target.value)}>
+        <option value="">{t('none')}</option>
+        {charList.map((x) => <option key={x.code} value={x.code}>{x.name}</option>)}
+      </select>
+    ),
+    erp_status: (c) => (
+      <select id={c.id} className={c.className} value={v.erp_status} onChange={(e) => pickErp('erp_status', e.target.value)}>
+        <option value="">{t('none')}</option>
+        {statusList.map((x) => <option key={x.code} value={x.code}>{x.name}</option>)}
+      </select>
     ),
     duration_min: (c) => <input id={c.id} type="number" min={0} step={5} className={clsx(c.className, 'tabular')} aria-invalid={c.invalid} placeholder="0" value={v.duration_min} onChange={(e) => set('duration_min', e.target.value)} />,
     owner_id: (c) => (
@@ -236,6 +271,8 @@ function EditorBody({ a, preset, onClose, onSaved }: { a?: ActivityDetail; prese
             {a.series_id && <span className="flex items-center gap-1 rounded-md bg-primary-soft px-2 py-0.5 font-semibold text-primary"><Repeat size={11} /> {t('seriesN', { n: a.series.length })}</span>}
             {a.rule_id && <span className="rounded-md bg-info-soft px-2 py-0.5 font-semibold text-info">{t('auto')}</span>}
             {a.created_by_name && <span className="text-muted">{t('createdBy', { name: a.created_by_name })}</span>}
+            {a.erp_code && <span className="rounded-md bg-surface-2 px-2 py-0.5 font-mono font-semibold">{a.erp_code}</span>}
+            {a.erp_state && <ErpBadge state={a.erp_state} error={a.erp_error} />}
           </div>
         )}
         {creating && !!meta.data?.templates.length && (
@@ -434,4 +471,16 @@ export function CustomerPicker({ value, onChange, disabled }: { value: { id: str
 export function TypeIcon({ icon, color, size = 36 }: { icon?: string | null; color?: string | null; size?: number }) {
   const Icon = iconOf(icon);
   return <span className={clsx('grid shrink-0 place-items-center rounded-xl', tone(color))} style={{ width: size, height: size }}><Icon size={size * 0.5} /></span>;
+}
+
+/** Sync state with the ERP: synced / waiting / error (tooltip with the reason). */
+export function ErpBadge({ state, error, compact }: { state: import('@/lib/crm').ErpState; error?: string | null; compact?: boolean }) {
+  const t = useTranslations('crm');
+  const cls = state === 'synced' ? 'bg-success-soft text-success' : state === 'pending' ? 'bg-info-soft text-info' : state === 'skipped' ? 'bg-surface-2 text-muted' : 'bg-danger-soft text-danger';
+  const Icon = state === 'synced' ? Check : state === 'pending' ? Loader2 : X;
+  return (
+    <span title={error ?? t(`erp_${state}`)} className={clsx('inline-flex shrink-0 items-center gap-1 rounded-md font-semibold', compact ? 'px-1 py-0.5 text-[10px]' : 'px-2 py-0.5', cls)}>
+      <Icon size={compact ? 10 : 11} className={clsx(state === 'pending' && 'animate-spin [animation-duration:2s]')} /> {compact ? 'ERP' : t(`erp_${state}`)}
+    </span>
+  );
 }

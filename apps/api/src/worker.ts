@@ -6,7 +6,7 @@ import { env } from './env.js';
 import { transportFor, withName } from './email.js';
 import { sql } from './db.js';
 import { publish } from './realtime.js';
-import type { CalendarPushJob, EmailJob, JobMap, NotifyJob, WebhookJob } from './jobs.js';
+import type { CalendarPushJob, EmailJob, ErpJob, JobMap, NotifyJob, WebhookJob } from './jobs.js';
 import { pullDue, pushActivity } from './calendar.js';
 import { captureError, heartbeat } from './monitor.js';
 import { spawn } from 'node:child_process';
@@ -31,6 +31,7 @@ async function runBackup() {
   if (code !== 0) await captureError('worker', new Error(`backup failed (exit ${code}): ${tail.split('\n').pop()}`), { job: 'backup_run' });
 }
 import { deliver } from './webhooks.js';
+import { enqueueDuePulls, runErpJob } from './erp.js';
 import { runNoContactRules } from './crm.js';
 import { removeFile } from './storage.js';
 import { definitionSchema, nextRun, runReport } from './reports.js';
@@ -112,6 +113,7 @@ async function processBatch(): Promise<number> {
       else if (j.kind === 'webhook') await handleWebhook(j.payload as WebhookJob);
       else if (j.kind === 'calendar_push') { const c = j.payload as CalendarPushJob; await pushActivity(c.tenantId, c.activityId); }
       else if (j.kind === 'backup_run') await runBackup();
+      else if (j.kind.startsWith('erp_')) await runErpJob((j.payload as ErpJob).tenantId, j.kind.slice(4) as 'pull' | 'push' | 'lists' | 'full');
       await sql`DELETE FROM jobs WHERE id = ${j.id}`;
     } catch (e) {
       const msg = (e as Error).message;
@@ -253,7 +255,7 @@ while (running) {
     if (now - lastMaintenance > 3_600_000) { await maintenance(); await documentExpiry(); lastMaintenance = now; }
     if (now - lastDigest > 300_000) { await morningDigest(); await scheduledReports(); lastDigest = now; }
     if (now - lastRules > 1_800_000) { await runNoContactRules(sql); lastRules = now; }
-    if (now - lastCalendar > 60_000) { await pullDue(); lastCalendar = now; }
+    if (now - lastCalendar > 60_000) { await pullDue(); await enqueueDuePulls(); lastCalendar = now; }
     if (now - lastBeat > 30_000) { await heartbeat('worker', { pid: process.pid }); lastBeat = now; }
     const n = await processBatch();
     if (n < BATCH) await new Promise((r) => setTimeout(r, 500));

@@ -21,7 +21,11 @@ export type CalendarPushJob = { tenantId: string; activityId: string };
 
 export type BackupRunJob = { by?: string };
 
-export type JobMap = { notify: NotifyJob; email: EmailJob; webhook: WebhookJob; calendar_push: CalendarPushJob; backup_run: BackupRunJob };
+export type ErpJob = { tenantId: string };
+export type JobMap = {
+  notify: NotifyJob; email: EmailJob; webhook: WebhookJob; calendar_push: CalendarPushJob; backup_run: BackupRunJob;
+  erp_pull: ErpJob; erp_push: ErpJob; erp_lists: ErpJob; erp_full: ErpJob;
+};
 
 export async function enqueue<K extends keyof JobMap>(kind: K, payload: JobMap[K], db: Tx | typeof sql = sql, runAt?: Date) {
   await db`INSERT INTO jobs (kind, payload, run_at) VALUES (${kind}, ${db.json(payload as never)}, ${runAt ?? new Date()})`;

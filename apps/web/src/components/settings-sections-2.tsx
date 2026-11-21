@@ -4,7 +4,7 @@ import { useState, type ReactNode } from 'react';
 import clsx from 'clsx';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useTranslations } from 'next-intl';
-import { Bookmark, Check, ChevronDown, CircleUser, Contact, DatabaseZap, Landmark, LayoutList, ListFilter, ListTree, Loader2, PenLine, Search, ShieldCheck, Store, Users, X } from 'lucide-react';
+import { ArrowDown, ArrowUp, Bookmark, Check, ChevronDown, Eye, EyeOff, CircleUser, Contact, DatabaseZap, Landmark, LayoutList, ListFilter, ListTree, Loader2, PenLine, Search, ShieldCheck, Store, Users, X } from 'lucide-react';
 import { api } from '@/lib/api';
 import { useRoles } from './roles-settings';
 import { Dialog } from './customer-dialogs';
@@ -95,7 +95,11 @@ export function SettingsItems({ groups, placeholder }: { groups: SettingsGroup[]
 }
 
 // ======================================== Customers display ========================================
-type CustomersPrefs = { organization: { show_avatar: boolean }; mine: { show_avatar: boolean | null }; effective: { show_avatar: boolean }; can_edit_organization: boolean };
+type TabRow = { key: string; hidden: boolean };
+type CustomersPrefs = {
+  organization: { show_avatar: boolean }; mine: { show_avatar: boolean | null }; effective: { show_avatar: boolean }; can_edit_organization: boolean;
+  tabs: { available: string[]; organization: TabRow[] | null; mine: TabRow[] | null; effective: TabRow[]; source: 'user' | 'organization' | 'default' };
+};
 
 export function CustomersSettingsSection() {
   const t = useTranslations('settings.customersPrefs');
@@ -138,6 +142,10 @@ export function CustomersSettingsSection() {
           <Choice active={data.mine.show_avatar === false} disabled={mine.isPending} onClick={() => mine.mutate(false)} title={t('hide')} />
         </div>
       </>),
+    }, {
+      key: 'tabs', icon: LayoutList, title: t('tabsTitle'), keywords: 'καρτέλες tabs σειρά απόκρυψη εμφάνιση πελάτη ενέργειες ιστορικό',
+      summary: `${data.tabs.effective.filter((x) => !x.hidden).length}/${data.tabs.effective.length} · ${t(`tabsSource_${data.tabs.source}`)}`,
+      content: <CustomerTabsEditor data={data} onSaved={refresh} />,
     }] }, { key: 'registries', icon: Landmark, title: t('groupRegistries'), hint: t('groupRegistriesHint'), items: [{
       key: 'aade-vies', icon: DatabaseZap, title: t('registriesTitle'), keywords: 'ΑΑΔΕ AADE VIES ΑΦΜ μητρώο gsis taxisnet άντληση ενημέρωση',
       summary: registrySummary, content: <RegistrySettingsPanel />,
@@ -380,3 +388,61 @@ function FilterPicker({ index, available, title, value, onClose, onSave, onReset
 
 // Integrations moved to ./integrations.tsx (overview, keys, webhooks, request log, docs)
 export { IntegrationsSection } from './integrations';
+
+/** Order and visibility of the customer page tabs: organisation default + my own (or follow the organisation). */
+function CustomerTabsEditor({ data, onSaved }: { data: CustomersPrefs; onSaved: () => void }) {
+  const t = useTranslations('settings.customersPrefs');
+  const ts = useTranslations('settings');
+  const tcu = useTranslations('customer');
+  const [busy, setBusy] = useState<'org' | 'mine' | null>(null);
+  const nameOf = (k: string) => (k === 'actions' ? tcu('actionsTab') : k === 'activity' ? tcu('history') : k === 'tasks' ? t('tabTasks') : k === 'documents' ? t('tabDocuments') : tcu(k as never));
+  const defaults: TabRow[] = data.tabs.available.map((key) => ({ key, hidden: false }));
+  const save = async (who: 'org' | 'mine', rows: TabRow[] | null) => {
+    setBusy(who);
+    try { await api(who === 'org' ? '/settings/customers/organization' : '/me/preferences', { method: 'PUT', json: who === 'org' ? { tabs: rows } : { customer_tabs: rows } }); onSaved(); }
+    finally { setBusy(null); }
+  };
+  return (
+    <div className="space-y-5">
+      <p className="text-sm text-muted">{t('tabsHint')}</p>
+      <div>
+        <div className="flex items-center gap-2">
+          <div className={clsx(label, 'flex-1')}>{t('organization')}</div>
+          {data.can_edit_organization && data.tabs.organization && <button type="button" onClick={() => save('org', null)} className="mb-2 text-xs font-medium text-primary">{t('tabsReset')}</button>}
+        </div>
+        <TabList rows={data.tabs.organization ?? defaults} nameOf={nameOf} disabled={!data.can_edit_organization || busy !== null} onChange={(r) => save('org', r)} />
+        {!data.can_edit_organization && <p className="mt-2 flex items-center gap-1.5 text-xs text-muted"><ShieldCheck size={13} /> {ts('adminOnly')}</p>}
+      </div>
+      <div>
+        <div className={label}>{t('mine')}</div>
+        <div className="mb-3 grid gap-2 sm:grid-cols-2">
+          <Choice active={!data.tabs.mine} disabled={busy !== null} onClick={() => save('mine', null)} title={t('followOrg')} />
+          <Choice active={!!data.tabs.mine} disabled={busy !== null} onClick={() => { if (!data.tabs.mine) save('mine', data.tabs.organization ?? defaults); }} title={t('tabsOwn')} />
+        </div>
+        {data.tabs.mine && <TabList rows={data.tabs.mine} nameOf={nameOf} disabled={busy !== null} onChange={(r) => save('mine', r)} />}
+      </div>
+    </div>
+  );
+}
+
+function TabList({ rows, nameOf, disabled, onChange }: { rows: TabRow[]; nameOf: (k: string) => string; disabled: boolean; onChange: (r: TabRow[]) => void }) {
+  const t = useTranslations('settings.customersPrefs');
+  const move = (i: number, d: -1 | 1) => { const r = [...rows]; [r[i], r[i + d]] = [r[i + d], r[i]]; onChange(r); };
+  return (
+    <ul className="divide-y divide-border rounded-xl border border-border">
+      {rows.map((x, i) => (
+        <li key={x.key} className={clsx('flex items-center gap-2 px-3 py-2', x.hidden && 'bg-surface-2/60')}>
+          <span className="w-5 text-center text-xs text-muted tabular">{i + 1}</span>
+          <span className={clsx('flex-1 text-sm font-medium', x.hidden && 'text-muted line-through')}>{nameOf(x.key)}</span>
+          <button type="button" disabled={disabled || x.key === 'overview'} onClick={() => onChange(rows.map((y) => (y.key === x.key ? { ...y, hidden: !y.hidden } : y)))}
+            title={x.key === 'overview' ? t('tabsAlways') : x.hidden ? t('show') : t('hide')} aria-label={x.hidden ? t('show') : t('hide')}
+            className="grid h-8 w-8 place-items-center rounded-lg text-muted hover:bg-surface-2 hover:text-text disabled:opacity-40">
+            {x.hidden ? <EyeOff size={15} /> : <Eye size={15} />}
+          </button>
+          <button type="button" disabled={disabled || i === 0} onClick={() => move(i, -1)} aria-label={t('up')} className="grid h-8 w-8 place-items-center rounded-lg text-muted hover:bg-surface-2 hover:text-text disabled:opacity-30"><ArrowUp size={15} /></button>
+          <button type="button" disabled={disabled || i === rows.length - 1} onClick={() => move(i, 1)} aria-label={t('down')} className="grid h-8 w-8 place-items-center rounded-lg text-muted hover:bg-surface-2 hover:text-text disabled:opacity-30"><ArrowDown size={15} /></button>
+        </li>
+      ))}
+    </ul>
+  );
+}

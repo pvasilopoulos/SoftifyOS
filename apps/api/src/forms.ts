@@ -138,6 +138,8 @@ export const CATALOG: Record<FormKey, CatalogForm> = {
       f('type', 'select', 'main', L('Είδος', 'Type'), { width: 'full', list: 'crm_type' }),
       f('subject', 'text', 'main', L('Θέμα', 'Subject'), { core: true, width: 'full' }),
       f('body', 'textarea', 'main', L('Περιγραφή', 'Description'), { width: 'full' }),
+      f('characterization', 'select', 'when', L('Χαρακτηρισμός', 'Characterisation'), { list: 'crm_characterization' }),
+      f('erp_status', 'select', 'when', L('Κατάσταση ERP', 'ERP status'), { list: 'crm_erp_status' }),
       f('status', 'select', 'when', L('Κατάσταση', 'Status'), {
         choices: [['planned', 'Προγραμματισμένη', 'Planned'], ['in_progress', 'Σε εξέλιξη', 'In progress'], ['done', 'Ολοκληρώθηκε', 'Done'], ['cancelled', 'Ακυρώθηκε', 'Cancelled']]
           .map(([value, el, en]) => ({ value, label: L(el, en) })),
@@ -146,8 +148,10 @@ export const CATALOG: Record<FormKey, CatalogForm> = {
         choices: [['1', 'Υψηλή', 'High'], ['2', 'Κανονική', 'Normal'], ['3', 'Χαμηλή', 'Low']].map(([value, el, en]) => ({ value, label: L(el, en) })),
       }),
       f('due_at', 'date', 'when', L('Ημερομηνία & ώρα', 'Date & time')),
+      f('ends_at', 'date', 'when', L('Λήξη', 'Ends')),
       f('duration_min', 'number', 'when', L('Διάρκεια (λεπτά)', 'Duration (minutes)')),
       f('owner_id', 'user', 'when', L('Υπεύθυνος', 'Assigned to')),
+      f('requested_by', 'user', 'when', L('Εντολέας', 'Requested by')),
       f('remind_before_min', 'number', 'when', L('Υπενθύμιση πριν (λεπτά)', 'Reminder before (minutes)')),
       f('location', 'text', 'when', L('Τοποθεσία', 'Location'), { width: 'full' }),
       f('customer_id', 'ref', 'links', L('Πελάτης', 'Customer'), { width: 'full' }),

@@ -17,6 +17,19 @@ const idParam = z.object({ id: z.string().uuid() });
 const CUSTOMER_VIEWS = ['list', 'tree', 'stores'] as const;
 const sha256 = (s: string) => createHash('sha256').update(s).digest('hex');
 
+// Customer page tabs (contacts live inside "overview"). Unknown keys dropped, new ones appended visible,
+// the overview can be moved but never hidden.
+export const CUSTOMER_TABS = ['overview', 'subsidiaries', 'branches', 'offers', 'actions', 'activity', 'tasks', 'documents'] as const;
+type TabCfg = { key: string; hidden: boolean }[];
+const tabsSchema = z.array(z.object({ key: z.enum(CUSTOMER_TABS), hidden: z.boolean() })).max(20);
+function normalizeTabs(list: TabCfg) {
+  const seen = new Set<string>();
+  const out = list.filter((x) => (CUSTOMER_TABS as readonly string[]).includes(x.key) && !seen.has(x.key) && seen.add(x.key))
+    .map((x) => ({ key: x.key, hidden: x.key === 'overview' ? false : !!x.hidden }));
+  for (const k of CUSTOMER_TABS) if (!seen.has(k)) out.push({ key: k, hidden: false });
+  return out;
+}
+
 export async function audit(tx: Tx, s: Session, action: string, entity: string | null, details?: unknown) {
   // While signed in as someone else, every entry says which admin really did it
   const d = s.impersonator ? { ...(details && typeof details === 'object' ? details : details === undefined ? {} : { value: details }), impersonated_by: s.impersonator } : details;
@@ -556,13 +569,20 @@ export default async function settingsRoutes(app: FastifyInstance) {
     r.get('/settings/customers', async (req) => {
       const { tenantId, userId } = req.session;
       return withTenant(tenantId, async (tx) => {
-        const [t] = await tx`SELECT show_customer_avatar FROM tenants WHERE id = ${tenantId}`;
+        const [t] = await tx`SELECT show_customer_avatar, customer_tabs FROM tenants WHERE id = ${tenantId}`;
         const [m] = await tx`SELECT prefs FROM memberships WHERE tenant_id = ${tenantId} AND user_id = ${userId}`;
         const mine = (m?.prefs?.show_customer_avatar ?? null) as boolean | null;
         return {
           organization: { show_avatar: t.show_customer_avatar as boolean },
           mine: { show_avatar: mine },
           effective: { show_avatar: mine ?? (t.show_customer_avatar as boolean) },
+          tabs: {
+            available: CUSTOMER_TABS,
+            organization: t.customer_tabs ? normalizeTabs(t.customer_tabs as TabCfg) : null,
+            mine: m?.prefs?.customer_tabs ? normalizeTabs(m.prefs.customer_tabs as TabCfg) : null,
+            effective: normalizeTabs((m?.prefs?.customer_tabs ?? t.customer_tabs ?? []) as TabCfg),
+            source: m?.prefs?.customer_tabs ? 'user' : t.customer_tabs ? 'organization' : 'default',
+          },
           can_edit_organization: can(req.session, 'settings.manage'),
         };
       });
@@ -570,10 +590,11 @@ export default async function settingsRoutes(app: FastifyInstance) {
 
     r.put('/settings/customers/organization', async (req, reply) => {
       if (!can(req.session, 'settings.manage')) return forbid(reply);
-      const b = z.object({ show_avatar: z.boolean() }).parse(req.body);
+      const b = z.object({ show_avatar: z.boolean().optional(), tabs: tabsSchema.nullable().optional() }).parse(req.body);
       const s = req.session;
       await withTenant(s.tenantId, async (tx) => {
-        await tx`UPDATE tenants SET show_customer_avatar = ${b.show_avatar}, updated_at = now() WHERE id = ${s.tenantId}`;
+        if (b.show_avatar !== undefined) await tx`UPDATE tenants SET show_customer_avatar = ${b.show_avatar}, updated_at = now() WHERE id = ${s.tenantId}`;
+        if (b.tabs !== undefined) await tx`UPDATE tenants SET customer_tabs = ${b.tabs ? tx.json(normalizeTabs(b.tabs) as never) : null}, updated_at = now() WHERE id = ${s.tenantId}`;
         await audit(tx, s, 'customers_display.update', null, b);
       });
       return { ok: true };
@@ -587,11 +608,13 @@ export default async function settingsRoutes(app: FastifyInstance) {
         customers_filters: z.array(z.enum(FILTER_KEYS as [string, ...string[]])).max(40).nullable().optional(),
         tree_filters: z.array(z.enum(FILTER_KEYS as [string, ...string[]])).max(40).nullable().optional(),
         stores_filters: z.array(z.enum(FILTER_KEYS as [string, ...string[]])).max(40).nullable().optional(),
+        customer_tabs: tabsSchema.nullable().optional(),
       }).parse(req.body);
+      if (b.customer_tabs) b.customer_tabs = normalizeTabs(b.customer_tabs) as typeof b.customer_tabs;
       const { tenantId, userId } = req.session;
       const set: Record<string, unknown> = {};
       const unset: string[] = [];
-      for (const k of ['show_customer_avatar', 'customers_view', 'customers_filters', 'tree_filters', 'stores_filters'] as const) {
+      for (const k of ['show_customer_avatar', 'customers_view', 'customers_filters', 'tree_filters', 'stores_filters', 'customer_tabs'] as const) {
         if (b[k] === null) unset.push(k);
         else if (b[k] !== undefined) set[k] = b[k];
       }

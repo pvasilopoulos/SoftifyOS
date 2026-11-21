@@ -17,7 +17,13 @@ export type Activity = {
   outcome: string | null; outcome_name: string | null; outcome_color: string | null; outcome_note: string | null; completed_at: string | null;
   remind_before_min: number | null; series_id: string | null; recurrence: Recurrence | null; parent_id: string | null; rule_id: string | null;
   custom: Record<string, unknown>; overdue: boolean; created_at: string; updated_at: string;
+  // As in the ERP (Soft1) + sync state
+  ends_at: string | null; requested_by: string | null; requested_by_name: string | null; erp_code: string | null;
+  characterization: string | null; characterization_name: string | null; erp_status: string | null; erp_status_name: string | null;
+  erp_state: ErpState | null; erp_error: string | null; erp_synced_at: string | null;
 };
+export type ErpState = 'pending' | 'synced' | 'error' | 'conflict' | 'skipped';
+export type ErpValue = { kind: 'characterization' | 'status'; code: string; name: string; active: boolean; maps_to: ActivityStatus | null; types: string[] | null; sort: number };
 export type ActivityDetail = Activity & { follow_ups: { id: string; subject: string; status: ActivityStatus; due_at: string | null }[];
   series: { id: string; due_at: string; status: ActivityStatus }[]; can_edit: boolean };
 export type Recurrence = { freq: 'daily' | 'weekly' | 'monthly'; interval: number; count?: number; until?: string };
@@ -27,6 +33,7 @@ export type CrmTemplate = { id: string; name: string; type: string; subject: str
 export type CrmMeta = {
   types: CrmType[]; outcomes: CrmOutcome[]; templates: CrmTemplate[]; users: { id: string; full_name: string }[];
   timezone: string; can: { all: boolean; edit: boolean; manage: boolean }; me: string;
+  erp_values: ErpValue[]; erp: { enabled: boolean; provider: string | null } | null;
 };
 export type Counts = { open: number; overdue: number; today: number; week: number; nodate: number; done_today: number; done_week: number };
 

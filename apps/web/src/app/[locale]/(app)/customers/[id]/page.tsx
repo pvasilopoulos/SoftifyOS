@@ -26,8 +26,10 @@ import { BranchDetailsDisplay, SpaceLine, StoreRowParts, useCustomerCardValues }
 import { DisplayCustomizeButton, DisplayRows } from '@/components/display';
 import { DocumentsPanel } from '@/components/documents-ui';
 import { TasksPanel } from '@/components/task-ui';
+import { CustomerActions } from '@/components/customer-actions';
 
-type Tab = 'overview' | 'subsidiaries' | 'branches' | 'contacts' | 'offers' | 'activity' | 'tasks' | 'documents';
+type Tab = 'overview' | 'subsidiaries' | 'branches' | 'offers' | 'actions' | 'activity' | 'tasks' | 'documents';
+type TabsPrefs = { tabs: { effective: { key: Tab; hidden: boolean }[] } };
 type DialogState =
   | { kind: 'branch'; branch?: Branch }
   | { kind: 'space'; branchId: string; space?: Space }
@@ -53,9 +55,11 @@ export default function CustomerPage({ params }: { params: Promise<{ id: string 
   const toast = useToast();
   const sp = useSearchParams();
   const focusBranch = sp.get('branch');
-  const [tab, setTab] = useState<Tab>(() => (['overview','subsidiaries','branches','contacts','offers','activity'].includes(sp.get('tab') ?? '') ? sp.get('tab') as Tab : 'overview'));
+  const [tab, setTab] = useState<Tab>(() => (['overview','subsidiaries','branches','offers','actions','activity','tasks','documents'].includes(sp.get('tab') ?? '') ? sp.get('tab') as Tab : 'overview'));
   const [dialog, setDialog] = useState<DialogState>(null);
   const { data, isLoading } = useQuery({ queryKey: ['customer', id], queryFn: () => api<CustomerDetail>(`/customers/${id}`) });
+  // Order and visibility of the tabs: my choice, else the organisation's (Settings → Customers)
+  const tabPrefs = useQuery({ queryKey: ['settings', 'customers'], queryFn: () => api<TabsPrefs>('/settings/customers'), staleTime: 60_000 });
   const archive = useMutation({
     mutationFn: (archived: boolean) => api(`/customers/${id}/archive`, { method: 'POST', json: { archived } }),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['customer', id] }); qc.invalidateQueries({ queryKey: ['customers'] }); },
@@ -74,16 +78,16 @@ export default function CustomerPage({ params }: { params: Promise<{ id: string 
   const termsLabel = (x: string | null) => (x ? (tf.has(`terms.${x}`) ? tf(`terms.${x}` as never) : x) : null);
   const sourceLabel = (x: string | null) => (x ? (tf.has(`sources.${x}`) ? tf(`sources.${x}` as never) : x) : null);
 
-  const tabs: { value: Tab; label: string }[] = [
-    { value: 'overview', label: t('overview') },
-    ...(c.kind === 'group' ? [{ value: 'subsidiaries' as const, label: `${t('subsidiaries')} (${data.subsidiaries.length})` }] : []),
-    { value: 'branches', label: `${t('branches')} (${data.branches.length})` },
-    { value: 'contacts', label: `${t('contacts')} (${data.contacts.length})` },
-    { value: 'offers', label: t('offers') },
-    { value: 'activity', label: t('activity') },
-    { value: 'tasks', label: tt('title') },
-    { value: 'documents', label: td('title') },
-  ];
+  const labels: Record<Tab, string | null> = {
+    overview: t('overview'),
+    subsidiaries: c.kind === 'group' ? `${t('subsidiaries')} (${data.subsidiaries.length})` : null,   // groups only
+    branches: `${t('branches')} (${data.branches.length})`,
+    offers: t('offers'), actions: t('actionsTab'), activity: t('history'), tasks: tt('title'), documents: td('title'),
+  };
+  const order = tabPrefs.data?.tabs.effective ?? (Object.keys(labels) as Tab[]).map((key) => ({ key, hidden: false }));
+  const tabs = order.filter((x) => !x.hidden && labels[x.key]).map((x) => ({ value: x.key, label: labels[x.key]! }));
+  // A tab hidden in the settings (or from an old link) falls back to the first visible one
+  const shown: Tab = tabs.some((x) => x.value === tab) ? tab : tabs[0]?.value ?? 'overview';
 
   return (
     <div className="space-y-4">
@@ -171,16 +175,44 @@ export default function CustomerPage({ params }: { params: Promise<{ id: string 
           sub={s.last_activity_at ? `${t('lastActivity')}: ${rel(s.last_activity_at)}` : undefined} />
       </div>
 
-      <Tabs value={tab} onChange={setTab} options={tabs} />
+      <Tabs value={shown} onChange={setTab} options={tabs} />
 
-      {tab === 'overview' && <CustomerSummaryCard customerId={c.id} />}
-      {tab === 'overview' && (
+      {shown === 'overview' && <CustomerSummaryCard customerId={c.id} />}
+      {shown === 'overview' && (
         <CustomerCard c={c as unknown as Record<string, unknown>}
           primary={primary ? `${primary.full_name}${primary.role_title ? ` · ${primary.role_title}` : ''}` : null}
           termsLabel={termsLabel} sourceLabel={sourceLabel} />
       )}
 
-      {tab === 'subsidiaries' && (
+      {shown === 'overview' && (
+        <section className="card p-4">
+          <div className="mb-3 flex items-center gap-2">
+            <h3 className="flex-1 font-semibold">{t('contacts')} <span className="text-sm font-normal text-muted">({data.contacts.length})</span></h3>
+            {data.can.edit && (
+              <button type="button" onClick={() => setDialog({ kind: 'contact' })} className="flex items-center gap-1.5 rounded-xl bg-primary-soft px-3 py-1.5 text-sm font-semibold text-primary">
+                <Plus size={16} /> {t('addContact')}
+              </button>
+            )}
+          </div>
+          {data.contacts.length === 0 ? <p className="py-4 text-center text-sm text-muted">{t('noContacts')}</p> : (
+            <div className="grid gap-2 sm:grid-cols-2">
+              {data.contacts.map((p) => (
+                <div key={p.id} className="flex items-center gap-3 rounded-xl border border-border p-3">
+                  <Avatar name={p.full_name} size={40} />
+                  <button onClick={() => data.can.edit && setDialog({ kind: 'contact', contact: p })} className="min-w-0 flex-1 text-left">
+                    <div className="flex items-center gap-1.5 font-semibold">{p.full_name}{p.is_primary && <Star size={14} className="fill-warning text-warning" />}</div>
+                    <div className="truncate text-sm text-muted">{[p.role_title, p.email].filter(Boolean).join(' · ')}</div>
+                  </button>
+                  {p.email && <a href={`mailto:${p.email}`} aria-label="email" className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-primary-soft text-primary"><Mail size={16} /></a>}
+                  {(p.mobile || p.phone) && <a href={`tel:${(p.mobile || p.phone)!.replace(/s/g, '')}`} aria-label="call" className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-success-soft text-success"><Phone size={16} /></a>}
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
+      )}
+
+      {shown === 'subsidiaries' && (
         <div className="space-y-2">
           {data.can.edit && (
             <Link href={`/customers/new?parent=${c.id}&parentName=${encodeURIComponent(c.name)}`} className="flex items-center justify-center gap-2 rounded-2xl border-2 border-dashed border-border py-3 text-sm font-semibold text-primary">
@@ -201,7 +233,7 @@ export default function CustomerPage({ params }: { params: Promise<{ id: string 
         </div>
       )}
 
-      {tab === 'branches' && (
+      {shown === 'branches' && (
         <div className="space-y-3">
           {data.can.edit && (
             <button onClick={() => setDialog({ kind: 'branch' })} className="flex w-full items-center justify-center gap-2 rounded-2xl border-2 border-dashed border-border py-3 text-sm font-semibold text-primary">
@@ -218,32 +250,12 @@ export default function CustomerPage({ params }: { params: Promise<{ id: string 
         </div>
       )}
 
-      {tab === 'contacts' && (
-        <div className="space-y-2">
-          {data.can.edit && (
-            <button onClick={() => setDialog({ kind: 'contact' })} className="flex w-full items-center justify-center gap-2 rounded-2xl border-2 border-dashed border-border py-3 text-sm font-semibold text-primary">
-              <Plus size={18} /> {t('addContact')}
-            </button>
-          )}
-          {data.contacts.length === 0 ? <p className="py-8 text-center text-muted">{t('noContacts')}</p> : data.contacts.map((p) => (
-            <div key={p.id} className="card flex items-center gap-3 p-3.5">
-              <Avatar name={p.full_name} size={42} />
-              <button onClick={() => data.can.edit && setDialog({ kind: 'contact', contact: p })} className="min-w-0 flex-1 text-left">
-                <div className="flex items-center gap-1.5 font-semibold">{p.full_name}{p.is_primary && <Star size={14} className="fill-warning text-warning" />}</div>
-                <div className="truncate text-sm text-muted">{[p.role_title, p.email].filter(Boolean).join(' · ')}</div>
-              </button>
-              {p.email && <a href={`mailto:${p.email}`} aria-label="email" className="grid h-9 w-9 place-items-center rounded-full bg-primary-soft text-primary"><Mail size={16} /></a>}
-              {(p.mobile || p.phone) && <a href={`tel:${(p.mobile || p.phone)!.replace(/\s/g, '')}`} aria-label="call" className="grid h-9 w-9 place-items-center rounded-full bg-success-soft text-success"><Phone size={16} /></a>}
-            </div>
-          ))}
-        </div>
-      )}
+      {shown === 'offers' && <CustomerOffers customerId={id} />}
+      {shown === 'actions' && <CustomerActions customerId={id} customerName={c.name} canEdit={data.can.edit} />}
+      {shown === 'documents' && <DocumentsPanel links={{ customer_id: id }} />}
+      {shown === 'tasks' && <TasksPanel customerId={id} customerName={c.name} />}
 
-      {tab === 'offers' && <CustomerOffers customerId={id} />}
-      {tab === 'documents' && <DocumentsPanel links={{ customer_id: id }} />}
-      {tab === 'tasks' && <TasksPanel customerId={id} customerName={c.name} />}
-
-      {tab === 'activity' && (
+      {shown === 'activity' && (
         <div className="space-y-3">
           {data.can.edit && (
             <button onClick={() => setDialog({ kind: 'activity', preset: { type: 'call', status: 'done', customer_id: c.id, customer_name: c.name } })} className="flex w-full items-center justify-center gap-2 rounded-2xl bg-primary-soft py-3 text-sm font-semibold text-primary">

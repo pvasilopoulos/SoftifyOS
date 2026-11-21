@@ -23,12 +23,18 @@ export const activityOut = (tx: Db, T: string): Frag => tx`
          a.offer_id, o.number AS offer_number,
          a.outcome, oc.name AS outcome_name, oc.color AS outcome_color, a.outcome_note, a.completed_at, a.completed_by,
          a.remind_before_min, a.remind_at, a.series_id, a.recurrence, a.parent_id, a.rule_id, a.custom,
+         a.ends_at, a.requested_by, rq.full_name AS requested_by_name, a.erp_code,
+         a.characterization, ch.name AS characterization_name, a.erp_status, es.name AS erp_status_name,
+         a.erp_state, a.erp_error, a.erp_synced_at,
          (a.status IN ('planned', 'in_progress') AND a.due_at IS NOT NULL AND a.due_at < now()) AS overdue,
          a.created_at, a.updated_at
   FROM crm_activities a
   LEFT JOIN crm_activity_types t ON t.tenant_id = a.tenant_id AND t.key = a.type
   LEFT JOIN crm_outcomes oc ON oc.tenant_id = a.tenant_id AND oc.key = a.outcome
   LEFT JOIN users ow ON ow.id = a.owner_id
+  LEFT JOIN users rq ON rq.id = a.requested_by
+  LEFT JOIN crm_erp_values ch ON ch.tenant_id = a.tenant_id AND ch.kind = 'characterization' AND ch.code = a.characterization
+  LEFT JOIN crm_erp_values es ON es.tenant_id = a.tenant_id AND es.kind = 'status' AND es.code = a.erp_status
   LEFT JOIN users cb ON cb.id = a.created_by
   LEFT JOIN customers c ON c.id = a.customer_id
   LEFT JOIN branches b ON b.id = a.branch_id
@@ -72,6 +78,7 @@ export type NewActivity = {
   owner_id?: string | null; customer_id?: string | null; branch_id?: string | null; contact_id?: string | null; offer_id?: string | null;
   outcome?: string | null; outcome_note?: string | null; remind_before_min?: number | null;
   recurrence?: Recurrence | null; parent_id?: string | null; rule_id?: string | null; custom?: Row; external_id?: string | null;
+  ends_at?: Date | null; requested_by?: string | null; erp_code?: string | null; characterization?: string | null; erp_status?: string | null;
 };
 const remindAt = (due: Date | null | undefined, before: number | null | undefined, status: string) =>
   due && before !== null && before !== undefined && (status === 'planned' || status === 'in_progress') ? new Date(due.getTime() - before * 60_000) : null;
@@ -90,6 +97,8 @@ export async function insertActivity(tx: Db, T: string, by: string | null, a: Ne
     completed_at: done ? new Date() : null, completed_by: done ? by : null,
     remind_before_min: a.remind_before_min ?? null, parent_id: a.parent_id ?? null, rule_id: a.rule_id ?? null,
     custom: tx.json((a.custom ?? {}) as never),
+    ends_at: a.ends_at ?? null, requested_by: a.requested_by ?? null, erp_code: a.erp_code ?? null,
+    characterization: a.characterization ?? null, erp_status: a.erp_status ?? null,
   };
   const dates = a.recurrence && due && !done ? occurrences(due, a.recurrence) : [due];
   const [first] = await tx`INSERT INTO crm_activities ${tx({ ...base, due_at: dates[0], remind_at: remindAt(dates[0], a.remind_before_min, status),
